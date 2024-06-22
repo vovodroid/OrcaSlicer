@@ -1397,6 +1397,9 @@ void PreferencesDialog::create_items()
     auto item_auto_arrange     = create_item_checkbox(_L("Auto arrange plate after cloning"), "", "auto_arrange");
     g_sizer->Add(item_auto_arrange);
 
+    auto item_hide_options     = create_item_checkbox(_L("Hide unrelevant options"), _L("Hide in GUI options that can't be used in due other option combination.\nRestart slicer if you change it."), "hide_options");
+    g_sizer->Add(item_hide_options);
+
     //// CONTROL > Slicing
     g_sizer->Add(create_item_title(_L("Slicing")), 1, wxEXPAND);
 
