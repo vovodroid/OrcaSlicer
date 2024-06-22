@@ -2188,6 +2188,9 @@ void PreferencesDialog::create_items()
     g_sizer = f_sizers.back();
     g_sizer->AddGrowableCol(0, 1);
 
+    auto item_hide_options     = create_item_checkbox(_L("Hide unrelevant options"), _L("Hide in GUI options that can't be used in due other option combination.\nRestart slicer if you change it."), "hide_options");
+    g_sizer->Add(item_hide_options);
+
     //// CONTROL > Camera
     g_sizer->Add(create_item_title(_L("Camera")), 1, wxEXPAND);
 
