@@ -2121,6 +2121,9 @@ void PreferencesDialog::create_items()
     /////////////////////////////////////
     g_sizer = add_tab(PreferencesTab::Control, _L("Control"));
 
+    auto item_hide_options     = create_item_checkbox(_L("Hide unrelevant options"), _L("Hide in GUI options that can't be used in due other option combination.\nRestart slicer if you change it."), "hide_options");
+    g_sizer->Add(item_hide_options);
+
     //// CONTROL > Camera
     add_preference_rows(g_sizer, "control");
 
