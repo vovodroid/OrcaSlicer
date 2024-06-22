@@ -253,6 +253,10 @@ void AppConfig::set_defaults()
         set_bool("show_splash_screen", true);
     }
 
+    if(get("hide_options").empty()) {
+        set_bool("hide_options", true);
+    }
+
     if (get("show_model_mesh").empty()) {
         set_bool("show_model_mesh", false);
     }
