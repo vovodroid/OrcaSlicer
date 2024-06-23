@@ -377,8 +377,9 @@ static t_config_enum_values s_keys_map_PrinterStructure {
 CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(PrinterStructure)
 
 static t_config_enum_values s_keys_map_PerimeterGeneratorType{
-    { "classic", int(PerimeterGeneratorType::Classic) },
-    { "arachne", int(PerimeterGeneratorType::Arachne) }
+    { "classic",      int(PerimeterGeneratorType::Classic) },
+    { "arachne",      int(PerimeterGeneratorType::Arachne) },
+    { "classicfirst", int(PerimeterGeneratorType::ClassicFirstLayer) }
 };
 CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(PerimeterGeneratorType)
 
@@ -5052,8 +5053,10 @@ void PrintConfigDef::init_fff_params()
     def->enum_keys_map = &ConfigOptionEnum<PerimeterGeneratorType>::get_enum_values();
     def->enum_values.push_back("classic");
     def->enum_values.push_back("arachne");
+    def->enum_values.push_back("classicfirst");
     def->enum_labels.push_back(L("Classic"));
     def->enum_labels.push_back(L("Arachne"));
+    def->enum_labels.push_back(L("Classic on first layer"));
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionEnum<PerimeterGeneratorType>(PerimeterGeneratorType::Arachne));
 

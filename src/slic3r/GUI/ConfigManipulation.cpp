@@ -711,7 +711,7 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, co
     for (auto el : { "fuzzy_skin_thickness", "fuzzy_skin_point_distance", "fuzzy_skin_first_layer"})
         toggle_line(el, has_fuzzy_skin);
     
-    bool have_arachne = config->opt_enum<PerimeterGeneratorType>("wall_generator") == PerimeterGeneratorType::Arachne;
+    bool have_arachne = config->opt_enum<PerimeterGeneratorType>("wall_generator") != PerimeterGeneratorType::Classic;
     for (auto el : { "wall_transition_length", "wall_transition_filter_deviation", "wall_transition_angle",
         "min_feature_size", "min_length_factor", "min_bead_width", "wall_distribution_count", "initial_layer_min_bead_width"})
         toggle_line(el, have_arachne);

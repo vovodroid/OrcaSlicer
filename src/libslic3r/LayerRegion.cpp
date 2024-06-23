@@ -111,7 +111,8 @@ void LayerRegion::make_perimeters(const SurfaceCollection &slices, SurfaceCollec
     g.overhang_flow         = this->bridging_flow(frPerimeter, object_config.thick_bridges);
     g.solid_infill_flow     = this->flow(frSolidInfill);
 
-    if (this->layer()->object()->config().wall_generator.value == PerimeterGeneratorType::Arachne && !spiral_mode)
+    PerimeterGeneratorType wall_gen = this->layer()->object()->config().wall_generator.value;
+    if ((wall_gen == PerimeterGeneratorType::Arachne || wall_gen == PerimeterGeneratorType::ClassicFirstLayer && g.layer_id != 0) && !spiral_mode)
         g.process_arachne();
     else
         g.process_classic();

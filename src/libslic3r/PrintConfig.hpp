@@ -234,7 +234,9 @@ enum class PerimeterGeneratorType
     Classic,
     // Perimeter generator with variable extrusion width based on the paper
     // "A framework for adaptive width control of dense contour-parallel toolpaths in fused deposition modeling" ported from Cura.
-    Arachne
+    Arachne,
+    //Classic for first layer, Arachne for other
+    ClassicFirstLayer
 };
 
 // BBS
