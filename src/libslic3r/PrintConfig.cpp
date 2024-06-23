@@ -1007,7 +1007,7 @@ void PrintConfigDef::init_fff_params()
     def->full_label = L("Overhang reversal threshold");
     def->category = L("Quality");
     // xgettext:no-c-format, no-boost-format
-    def->tooltip = L("Number of mm the overhang need to be for the reversal to be considered useful. Can be a % of the perimeter width."
+    def->tooltip = L("Number of mm the overhang need to be for the reversal and prining internal wall first to be considered useful. Can be a % of the perimeter width."
                      "\nValue 0 enables reversal on every even layers regardless.");
     def->sidetext = L("mm or %");
     def->ratio_over = "line_width";
@@ -1513,6 +1513,13 @@ void PrintConfigDef::init_fff_params()
     def->enum_labels.push_back(L("Inner/Outer/Inner"));
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionEnum<WallSequence>(WallSequence::InnerOuter));
+
+    def = this->add("overhang_first", coBool);
+    def->label = L("Print overhang after internal wall");
+    def->category = L("Quality");
+    def->tooltip = L("Wall with overhang will be printed after internal one despite 'Walls printing order' option. 'Detect overhang wall' should be on, and 'Reverse threshold' defines which overhang print second.");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionBool{false});
 
     def = this->add("is_infill_first",coBool);
     def->label    = L("Print infill first");
