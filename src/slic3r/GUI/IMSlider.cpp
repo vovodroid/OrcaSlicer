@@ -1591,7 +1591,12 @@ std::string IMSlider::get_label(int tick, LabelType label_type)
             char   buffer[64];
             size_t layer_number;
             layer_number = m_draw_mode == dmSequentialFffPrint ? (m_values.empty() ? value : value + 1) : m_is_wipe_tower ? get_layer_number(value, label_type) + 1 : (m_values.empty() ? value : value + 1);
-            ::sprintf(buffer, "%5s\n%5s", std::to_string(layer_number).c_str(), layer_height);
+            double height_of_layer = m_values.empty() ? 0 : m_values[layer_number - 1] - (layer_number > 1 ? m_values[layer_number - 2] : 0);
+            ::sprintf(buffer, "%5s\n%5s\n%.2f\n%s", std::to_string(layer_number).c_str(), layer_height,
+                height_of_layer,
+                value < m_layers_times.size() ?
+                        short_and_splitted_time(get_time_dhms(m_layers_times[value] - (value > 0 ? m_layers_times[value - 1] : 0))).c_str()
+                        : "");
             return std::string(buffer);
         }
     }
