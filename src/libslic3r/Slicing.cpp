@@ -315,6 +315,13 @@ std::vector<double> layer_height_profile_adaptive(const SlicingParameters& slici
             height = layer_height_profile.back() - LAYER_HEIGHT_CHANGE_STEP;
 
         height = std::round(height * 1000) / 1000.f;
+        
+        for (auto const& [range,options] : object.layer_config_ranges) {
+            if ( print_z >= range.first && print_z <= range.second) {
+                    height = options.opt_float("layer_height");
+                    break;
+            };
+        };
 
         layer_height_profile.push_back(print_z);
         layer_height_profile.push_back(height);
@@ -441,6 +448,7 @@ std::vector<double> smooth_height_profile(const std::vector<double>& profile, co
 }
 
 void adjust_layer_height_profile(
+    const ModelObject           &model_object,
     const SlicingParameters     &slicing_params,
     std::vector<coordf_t> 		&layer_height_profile,
     coordf_t 					 z,
@@ -474,6 +482,11 @@ void adjust_layer_height_profile(
 			break;
         }
     }
+
+    for (auto const& [range,options] : model_object.layer_config_ranges) {
+        if (z >= range.first - current_layer_height && z <= range.second + current_layer_height)
+            return;
+    };
 
     // 2) Is it possible to apply the delta?
     switch (action) {
