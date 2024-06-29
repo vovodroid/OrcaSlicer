@@ -37,7 +37,7 @@ setlocal DISABLEDELAYEDEXPANSION
 cd deps
 mkdir %build_dir%
 cd %build_dir%
-set DEPS=%CD%/OrcaSlicer_dep
+set DEPS=%WP%/../OrcaSlicer_dep1607
 
 if "%1"=="slicer" (
     GOTO :slicer
