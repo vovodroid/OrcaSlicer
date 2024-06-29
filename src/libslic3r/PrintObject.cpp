@@ -3428,7 +3428,11 @@ void PrintObject::combine_infill()
                 // Check whether the combination of this layer with the lower layers' buffer
                 // would exceed max layer height or max combined layer count.
                 // BBS: automatically calculate how many layers should be combined
-                if (current_height + layer->height >= nozzle_diameter + EPSILON) {
+                float w = region.config().sparse_infill_line_width.get_abs_value(nozzle_diameter);
+                if (w == 0)
+                    w = this->config().line_width.get_abs_value(nozzle_diameter);
+
+                if (current_height + layer->height >= w / 1.5 + EPSILON) {
                     // Append combination to lower layer.
                     combine[layer_idx - 1] = num_layers;
                     current_height = 0.;
