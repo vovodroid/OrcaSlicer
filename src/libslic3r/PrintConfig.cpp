@@ -1154,7 +1154,8 @@ void PrintConfigDef::init_fff_params()
         "automatically. Otherwise the provided angle will be used for external bridges. "
         "Use 180° for zero angle.");
     def->sidetext = u8"°";	// degrees, don't need translation
-    def->min = 0;
+    def->min = -180;
+    def->max =  180;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(0.));
     
@@ -2706,8 +2707,8 @@ void PrintConfigDef::init_fff_params()
     def->category = L("Strength");
     def->tooltip = L("Angle for sparse infill pattern, which controls the start or main direction of line.");
     def->sidetext = u8"°";	// degrees, don't need translation
-    def->min = 0;
-    def->max = 360;
+    def->min = -180;
+    def->max =  180;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(45));
 
@@ -2716,8 +2717,8 @@ void PrintConfigDef::init_fff_params()
     def->category = L("Strength");
     def->tooltip = L("Angle for solid infill pattern, which controls the start or main direction of line.");
     def->sidetext = u8"°";	// degrees, don't need translation
-    def->min = 0;
-    def->max = 360;
+    def->min = -180;
+    def->max =  180;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(45));
 
