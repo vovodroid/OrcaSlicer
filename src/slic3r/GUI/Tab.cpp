@@ -2106,6 +2106,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("overhang_reverse_threshold");
         optgroup->append_single_option_line("extra_perimeters_on_overhangs");
         optgroup->append_single_option_line("overhang_reverse");
+        optgroup->append_single_option_line("overhang_after");
         optgroup->append_single_option_line("make_overhang_printable");
         optgroup->append_single_option_line("make_overhang_printable_angle");
         optgroup->append_single_option_line("make_overhang_printable_hole_size");

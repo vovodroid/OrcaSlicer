@@ -739,10 +739,11 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, co
 
     bool has_detect_overhang_wall = config->opt_bool("detect_overhang_wall") && have_perimeters;
     bool has_overhang_reverse     = config->opt_bool("overhang_reverse");
-    bool allow_overhang_reverse   = has_detect_overhang_wall && !has_spiral_vase;
+    bool allow_overhang_handling   = has_detect_overhang_wall && !has_spiral_vase;
     toggle_field("extra_perimeters_on_overhangs", has_detect_overhang_wall && !has_spiral_vase);
-    toggle_field("overhang_reverse", allow_overhang_reverse);
-    toggle_line("overhang_reverse_threshold", allow_overhang_reverse && has_overhang_reverse);
+    toggle_field("overhang_reverse", allow_overhang_handling);
+    toggle_line("overhang_reverse_threshold", allow_overhang_handling && has_overhang_reverse);
+    toggle_line("overhang_after", config->opt_int("wall_loops") > 1 && allow_overhang_handling);
     toggle_line("timelapse_type", is_BBL_Printer);
 
     bool have_small_area_infill_flow_compensation = config->opt_bool("small_area_infill_flow_compensation");
