@@ -2066,6 +2066,7 @@ void TabPrint::build()
 
         optgroup = page->new_optgroup(L("Walls and surfaces"), L"param_wall_surface");
         optgroup->append_single_option_line("wall_sequence");
+        optgroup->append_single_option_line("overhang_first");
         optgroup->append_single_option_line("is_infill_first");
         optgroup->append_single_option_line("wall_direction");
         optgroup->append_single_option_line("reverse_internal");
