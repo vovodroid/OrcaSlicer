@@ -509,7 +509,7 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, co
     
     bool have_perimeters = config->opt_int("wall_loops") > 0;
     for (auto el : {"ensure_vertical_shell_thickness", "detect_thin_wall", "detect_overhang_wall",
-        "seam_position", "staggered_inner_seams", "wall_sequence", "outer_wall_line_width",
+        "seam_position", "staggered_inner_seams", "wall_sequence", "overhang_first", "outer_wall_line_width",
         "inner_wall_speed", "outer_wall_speed", "small_perimeter_speed", "small_perimeter_threshold" })
         toggle_field(el, have_perimeters);
     
@@ -743,7 +743,7 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, co
     
     toggle_field("extra_perimeters_on_overhangs", has_detect_overhang_wall && !has_spiral_vase);
     toggle_field("overhang_reverse", allow_overhang_reverse);
-    toggle_line("overhang_reverse_threshold", allow_overhang_reverse && has_overhang_reverse);
+    toggle_line("overhang_reverse_threshold", allow_overhang_reverse && has_overhang_reverse || config->opt_bool("overhang_first"));
     toggle_line("timelapse_type", is_BBL_Printer);
 
     bool have_small_area_infill_flow_compensation = config->opt_bool("small_area_infill_flow_compensation");

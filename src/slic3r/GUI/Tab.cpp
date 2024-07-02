@@ -2104,6 +2104,7 @@ void TabPrint::build()
         optgroup = page->new_optgroup(L("Overhangs"), L"param_overhang");
         optgroup->append_single_option_line("detect_overhang_wall");
         optgroup->append_single_option_line("extra_perimeters_on_overhangs");
+        optgroup->append_single_option_line("overhang_first");
         optgroup->append_single_option_line("overhang_reverse");
         optgroup->append_single_option_line("overhang_reverse_threshold");
         optgroup->append_single_option_line("make_overhang_printable");
