@@ -5722,8 +5722,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                         continue;
                     path_length += line_length;
                     auto dE = e_per_mm * line_length;
-                    if (!this->on_first_layer() && m_small_area_infill_flow_compensator
-                            && m_config.small_area_infill_flow_compensation.value) {
+                    if (m_small_area_infill_flow_compensator && m_config.small_area_infill_flow_compensation.value) {
                         auto oldE = dE;
                         dE = m_small_area_infill_flow_compensator->modify_flow(line_length, dE, path.role());
 
@@ -5764,8 +5763,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                             if (line_length < EPSILON)
                                 continue;
                             auto dE = e_per_mm * line_length;
-                            if (!this->on_first_layer() && m_small_area_infill_flow_compensator
-                                    && m_config.small_area_infill_flow_compensation.value) {
+                            if (m_small_area_infill_flow_compensator  && m_config.small_area_infill_flow_compensation.value) {
                                 auto oldE = dE;
                                 dE = m_small_area_infill_flow_compensator->modify_flow(line_length, dE, path.role());
 
@@ -5788,8 +5786,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                             continue;
                         const Vec2d center_offset = this->point_to_gcode(arc.center) - this->point_to_gcode(arc.start_point);
                         auto dE = e_per_mm * arc_length;
-                        if (!this->on_first_layer() && m_small_area_infill_flow_compensator
-                                && m_config.small_area_infill_flow_compensation.value) {
+                        if (m_small_area_infill_flow_compensator && m_config.small_area_infill_flow_compensation.value) {
                             auto oldE = dE;
                             dE = m_small_area_infill_flow_compensator->modify_flow(arc_length, dE, path.role());
 
@@ -5943,8 +5940,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                 last_set_speed = F;
             }
             auto dE = e_per_mm * line_length;
-            if (!this->on_first_layer() && m_small_area_infill_flow_compensator
-                     && m_config.small_area_infill_flow_compensation.value) {
+            if (m_small_area_infill_flow_compensator  && m_config.small_area_infill_flow_compensation.value) {
                 auto oldE = dE;
                 dE = m_small_area_infill_flow_compensator->modify_flow(line_length, dE, path.role());
 
