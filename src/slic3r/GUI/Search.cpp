@@ -3,6 +3,7 @@
 #include <vector>
 #include <cstddef>
 #include <string>
+#include <cwctype>
 #include <boost/algorithm/string.hpp>
 #include <boost/optional.hpp>
 #include <boost/nowide/convert.hpp>
@@ -149,19 +150,23 @@ static std::wstring mark_string(const std::wstring &str, const std::vector<uint1
 
 bool OptionsSearcher::search() { return search(search_line, true); }
 
+static std::wstring to_lower(const std::wstring& str)
+{
+    std::wstring result(str);
+    std::transform(result.begin(), result.end(), result.begin(), [](wchar_t c) { return std::towlower(c); });
+    return result;
+}
 static bool fuzzy_match(const std::wstring &search_pattern, const std::wstring &label, int &out_score, std::vector<uint16_t> &out_matches)
 {
-    uint16_t matches[fts::max_matches + 1]; // +1 for the stopper
-    int      score;
-    if (fts::fuzzy_match(search_pattern.c_str(), label.c_str(), score, matches)) {
-        size_t cnt = 0;
-        for (; matches[cnt] != fts::stopper; ++cnt)
-            ;
-        out_matches.assign(matches, matches + cnt);
-        out_score = score;
-        return true;
-    } else
+    int i = to_lower(label).find(to_lower(search_pattern));
+    if (i<0)
         return false;
+
+    out_matches.resize(search_pattern.length());
+    for (size_t ind = 0;ind < search_pattern.length(); ind++)
+        out_matches[ind] =  ind + i;
+    out_score = 100;
+    return true;
 }
 
 bool OptionsSearcher::search(const std::string &search, bool force /* = false*/, Preset::Type type/* = Preset::TYPE_INVALID*/)
@@ -260,8 +265,6 @@ bool OptionsSearcher::search(const std::string &search, bool force /* = false*/,
             
         }
     }
-
-    if (!full_list) sort_found();
 
     if (search_line != search) search_line = search;
     if (search_type != type) search_type = type;
