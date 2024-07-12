@@ -1802,7 +1802,7 @@ std::vector<GCode::LayerToPrint> GCode::collect_layers_to_print(const PrintObjec
 // Prepare for non-sequential printing of multiple objects: Support resp. object layers with nearly identical print_z
 // will be printed for  all objects at once.
 // Return a list of <print_z, per object LayerToPrint> items.
-std::vector<std::pair<coordf_t, std::vector<GCode::LayerToPrint>>> GCode::collect_layers_to_print(const Print& print)
+std::vector<std::pair<coordf_t, std::vector<GCode::LayerToPrint>>> GCode::collect_layers_to_print(const Print& print, bool first_only)
 {
     struct OrderingItem {
         coordf_t    print_z;
@@ -1830,6 +1830,8 @@ std::vector<std::pair<coordf_t, std::vector<GCode::LayerToPrint>>> GCode::collec
             ordering_item.print_z = ltp.print_z();
             ordering_item.layer_idx = &ltp - &front;
             ordering.emplace_back(ordering_item);
+            if (first_only)
+                break;
         }
     }
 
@@ -3189,6 +3191,10 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
             size_t finished_objects = 0;
             print_object_instance_sequential_active = first_has_extrude_print_object;
             const PrintObject *prev_object = (*print_object_instance_sequential_active)->print_object;
+
+            if (print.config().first_layer_at_once)
+                this->process_layers(print, tool_ordering, print_object_instances_ordering, collect_layers_to_print(print, true), file);
+
             for (; print_object_instance_sequential_active != print_object_instances_ordering.end(); ++ print_object_instance_sequential_active) {
                 const PrintObject &object = *(*print_object_instance_sequential_active)->print_object;
                 if (&object != prev_object || tool_ordering.first_extruder() != final_extruder_id) {
@@ -3249,7 +3255,11 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                 // and export G-code into file.
                 tool_ordering.cal_most_used_extruder(print.config());
                 m_printed_objects.emplace_back(&object);
-                this->process_layers(print, tool_ordering, collect_layers_to_print(object), *print_object_instance_sequential_active - object.instances().data(), file,
+
+                std::vector<GCode::LayerToPrint> layers = collect_layers_to_print(object);
+                if (print.config().first_layer_at_once)
+                    layers.erase(layers.begin());
+                this->process_layers(print, tool_ordering, layers, *print_object_instance_sequential_active - object.instances().data(), file,
                                      prime_extruder);
                 {
                     // save the flush statitics stored in tool ordering by object
@@ -5067,7 +5077,7 @@ LayerResult GCode::process_layer(
 
         // BBS
         if (print.config().skirt_type == stPerObject &&
-            print.config().print_sequence == PrintSequence::ByObject &&
+            print.config().print_sequence == PrintSequence::ByObject && !(print.config().first_layer_at_once && first_layer) &&
             !layer.object()->object_skirt().empty() &&
             ((layer.id() < print.config().skirt_height || print.config().draft_shield == DraftShield::dsEnabled))
            )
@@ -5104,7 +5114,7 @@ LayerResult GCode::process_layer(
             for (InstanceToPrint &instance_to_print : instances_to_print) {
                 if (print.config().skirt_type == stPerObject && 
                     !instance_to_print.print_object.object_skirt().empty() &&
-                    print.config().print_sequence == PrintSequence::ByLayer
+                    (print.config().print_sequence == PrintSequence::ByLayer || (print.config().first_layer_at_once && first_layer))
                     &&
                     (layer.id() < print.config().skirt_height || print.config().draft_shield == DraftShield::dsEnabled))
                 {
