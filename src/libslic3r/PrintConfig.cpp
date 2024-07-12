@@ -1684,6 +1684,12 @@ void PrintConfigDef::init_fff_params()
     def->mode = comSimple;
     def->set_default_value(new ConfigOptionEnum<PrintSequence>(PrintSequence::ByLayer));
 
+    def = this->add("first_layer_at_once", coBool);
+    def->label = L("First layer at once");
+    def->tooltip = L("When printing by object print first layers of all objects at the very beginning to allow adhesion check on pronting start");
+    def->mode = comSimple;
+    def->set_default_value(new ConfigOptionBool(false));
+
     def = this->add("print_order", coEnum);
     def->label = L("Intra-layer order");
     def->tooltip = L("Print order within a single layer.");
