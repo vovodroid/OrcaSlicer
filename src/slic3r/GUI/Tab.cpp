@@ -3390,6 +3390,7 @@ void TabFilament::build()
         optgroup->append_single_option_line("enable_overhang_bridge_fan", "auto-cooling");
         optgroup->append_single_option_line("overhang_fan_threshold", "auto-cooling");
         optgroup->append_single_option_line("overhang_fan_speed", "auto-cooling");
+        optgroup->append_single_option_line("bridge_fan_speed", "auto-cooling");
         optgroup->append_single_option_line("support_material_interface_fan_speed");
 
         optgroup = page->new_optgroup(L("Auxiliary part cooling fan"), L"param_cooling_aux_fan");
@@ -3555,6 +3556,8 @@ void TabFilament::toggle_options()
       bool has_enable_overhang_bridge_fan = m_config->opt_bool("enable_overhang_bridge_fan", 0);
       for (auto el : {"overhang_fan_speed", "overhang_fan_threshold"})
             toggle_option(el, has_enable_overhang_bridge_fan);
+
+      toggle_option("bridge_fan_speed", has_enable_overhang_bridge_fan && m_preset_bundle->full_config().opt_bool("overhang_speed_classic"));
 
       toggle_option("additional_cooling_fan_speed", cfg.opt_bool("auxiliary_fan"));
         

@@ -870,6 +870,17 @@ void PrintConfigDef::init_fff_params()
     def->enum_labels.emplace_back("75%");
     def->enum_labels.emplace_back("95%");
     def->set_default_value(new ConfigOptionEnumsGeneric{ (int)Overhang_threshold_bridge });
+    
+    def = this->add("bridge_fan_speed", coInts);
+    def->label = L("Fan speed for bridges");
+    def->tooltip = L("Force part cooling fan to be this speed when printing bridge or overhang wall which has large overhang degree. "
+                     "Forcing cooling for overhang and bridge can get better quality for these part");
+    def->sidetext = L("%");
+    def->min = 0;
+    def->max = 100;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionInts { 100 });
+
 
     def = this->add("bridge_angle", coFloat);
     def->label = L("Bridge infill direction");
@@ -6028,8 +6039,6 @@ void PrintConfigDef::handle_legacy(t_config_option_key &opt_key, std::string &va
         opt_key = "prime_tower_brim_width";
     } else if (opt_key == "tool_change_gcode") {
         opt_key = "change_filament_gcode";
-    } else if (opt_key == "bridge_fan_speed") {
-        opt_key = "overhang_fan_speed";
     } else if (opt_key == "infill_extruder") {
         opt_key = "sparse_infill_filament";
     }else if (opt_key == "solid_infill_extruder") {
