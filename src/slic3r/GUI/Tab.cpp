@@ -61,7 +61,7 @@ namespace GUI {
 
 #define DISABLE_UNDO_SYS
 
-static const std::vector<std::string> plate_keys = { "curr_bed_type", "skirt_start_angle", "first_layer_print_sequence", "first_layer_sequence_choice", "other_layers_print_sequence", "other_layers_sequence_choice", "print_sequence", "spiral_mode"};
+static const std::vector<std::string> plate_keys = { "curr_bed_type", "skirt_start_angle", "first_layer_print_sequence", "first_layer_sequence_choice", "other_layers_print_sequence", "other_layers_sequence_choice", "print_sequence", "first_layer_at_once", "spiral_mode"};
 
 void Tab::Highlighter::set_timer_owner(wxEvtHandler* owner, int timerid/* = wxID_ANY*/)
 {
@@ -2331,6 +2331,7 @@ page = add_options_page(L("Others"), "custom-gcode_other"); // ORCA: icon only v
         optgroup = page->new_optgroup(L("Special mode"), L"param_special");
         optgroup->append_single_option_line("slicing_mode");
         optgroup->append_single_option_line("print_sequence", "sequent-print");
+        optgroup->append_single_option_line("first_layer_at_once", "sequent-print");
         optgroup->append_single_option_line("print_order");
         optgroup->append_single_option_line("spiral_mode", "spiral-vase");
         optgroup->append_single_option_line("spiral_mode_smooth", "spiral-vase#smooth");
@@ -2793,6 +2794,7 @@ void TabPrintPlate::build()
     optgroup->append_single_option_line("curr_bed_type");
     optgroup->append_single_option_line("skirt_start_angle");        
     optgroup->append_single_option_line("print_sequence");
+    optgroup->append_single_option_line("first_layer_at_once");
     optgroup->append_single_option_line("spiral_mode");
     optgroup->append_single_option_line("first_layer_sequence_choice");
     optgroup->append_single_option_line("other_layers_sequence_choice");
@@ -2844,6 +2846,8 @@ void TabPrintPlate::on_value_change(const std::string& opt_key, const boost::any
                 plate->config()->erase("skirt_start_angle");
             if (k == "print_sequence")
                 plate->set_print_seq(PrintSequence::ByDefault);
+            if (k == "first_layer_at_once")
+                plate->config()->erase("first_layer_at_once");
             if (k == "first_layer_sequence_choice")
                 plate->set_first_layer_print_sequence({});
             if (k == "other_layers_sequence_choice")
@@ -2872,6 +2876,10 @@ void TabPrintPlate::on_value_change(const std::string& opt_key, const boost::any
             if (k == "print_sequence") {
                 print_seq = m_config->opt_enum<PrintSequence>("print_sequence");
                 plate->set_print_seq(print_seq);
+            }
+            if (k == "first_layer_at_once") {
+                bool once = m_config->opt_bool("first_layer_at_once");
+                plate->config()->set_key_value("first_layer_at_once", new ConfigOptionBool(once));
             }
             if (k == "first_layer_sequence_choice") {
                 first_layer_seq_choice = m_config->opt_enum<LayerSeq>("first_layer_sequence_choice");

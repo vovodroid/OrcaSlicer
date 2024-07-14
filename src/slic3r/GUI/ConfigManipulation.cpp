@@ -660,6 +660,7 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, co
     bool have_sequential_printing = (config->opt_enum<PrintSequence>("print_sequence") == PrintSequence::ByObject);
     // for (auto el : { "extruder_clearance_radius", "extruder_clearance_height_to_rod", "extruder_clearance_height_to_lid" })
     //     toggle_field(el, have_sequential_printing);
+    toggle_field("first_layer_at_once", have_sequential_printing);
     toggle_field("print_order", !have_sequential_printing);
 
     toggle_field("single_extruder_multi_material", !is_BBL_Printer);
