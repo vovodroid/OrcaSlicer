@@ -1966,6 +1966,8 @@ void PerimeterGenerator::process_classic()
         int sparse_infill_density = this->config->sparse_infill_density.value;
         if (this->config->alternate_extra_wall && this->layer_id % 2 == 1 && !m_spiral_vase && sparse_infill_density > 0) // add alternating extra wall
             loop_number++;
+        if (this->layer_id == 0 && this->config->bottom_shell_layers > 0)
+            loop_number = 1;
         if (this->layer_id == object_config->raft_layers && this->config->only_one_wall_first_layer)
             loop_number = 0;
         // Set the topmost layer to be one wall
@@ -2889,6 +2891,8 @@ void PerimeterGenerator::process_arachne()
 
         // Set the bottommost layer to be one wall
         const bool is_bottom_layer = (this->layer_id == object_config->raft_layers) ? true : false;
+        if (is_bottom_layer && this->config->bottom_shell_layers > 0)
+            loop_number = 1;
         if (is_bottom_layer && this->config->only_one_wall_first_layer)
             loop_number = 0;
 
@@ -3021,8 +3025,7 @@ void PerimeterGenerator::process_arachne()
         bool is_outer_wall_first = this->config->wall_sequence != WallSequence::InnerOuter;
         
         if (layer_id == 0){ // disable inner outer inner algorithm after the first layer
-        	is_outer_wall_first =
-            	this->config->wall_sequence == WallSequence::OuterInner;
+        	is_outer_wall_first = true;
         }
         if (is_outer_wall_first) {
             start_perimeter = 0;
