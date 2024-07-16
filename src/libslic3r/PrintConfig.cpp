@@ -1014,9 +1014,9 @@ void PrintConfigDef::init_fff_params()
     def->set_default_value(new ConfigOptionFloatOrPercent(300, true));
 
     def = this->add("only_one_wall_first_layer", coBool);
-    def->label = L("Only one wall on first layer");
+    def->label = L("One wall on first layer");
     def->category = L("Quality");
-    def->tooltip = L("Use only one wall on first layer, to give more space to the bottom infill pattern");
+    def->tooltip = L("Use only one wall on first layer, to give more space to the bottom infill pattern. Otherwise use two walls.");
     def->set_default_value(new ConfigOptionBool(false));
 
     def = this->add("extra_perimeters_on_overhangs", coBool);
