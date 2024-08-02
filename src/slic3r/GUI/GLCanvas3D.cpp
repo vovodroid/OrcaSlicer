@@ -3261,20 +3261,20 @@ void GLCanvas3D::on_char(wxKeyEvent& evt)
             break;
         }
 
-        //case '+': {
-        //    if (dynamic_cast<Preview*>(m_canvas->GetParent()) != nullptr)
-        //        post_event(wxKeyEvent(EVT_GLCANVAS_EDIT_COLOR_CHANGE, evt));
-        //    else
-        //        post_event(Event<int>(EVT_GLCANVAS_INCREASE_INSTANCES, +1));
-        //    break;
-        //}
-        //case '-': {
-        //    if (dynamic_cast<Preview*>(m_canvas->GetParent()) != nullptr)
-        //        post_event(wxKeyEvent(EVT_GLCANVAS_EDIT_COLOR_CHANGE, evt));
-        //    else
-        //        post_event(Event<int>(EVT_GLCANVAS_INCREASE_INSTANCES, -1));
-        //    break;
-        //}
+        case '+': {
+            if (dynamic_cast<Preview*>(m_canvas->GetParent()) != nullptr)
+                post_event(wxKeyEvent(EVT_GLCANVAS_EDIT_COLOR_CHANGE, evt));
+            else
+                post_event(Event<int>(EVT_GLCANVAS_INCREASE_INSTANCES, +1));
+            break;
+        }
+        case '-': {
+            if (dynamic_cast<Preview*>(m_canvas->GetParent()) != nullptr)
+                post_event(wxKeyEvent(EVT_GLCANVAS_EDIT_COLOR_CHANGE, evt));
+            else
+                post_event(Event<int>(EVT_GLCANVAS_INCREASE_INSTANCES, -1));
+            break;
+        }
         case '?': { post_event(SimpleEvent(EVT_GLCANVAS_QUESTION_MARK)); break; }
         case 'A':
         case 'a':
@@ -6328,6 +6328,36 @@ bool GLCanvas3D::_init_main_toolbar()
     item.left.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_ADD)); };
     item.enabling_callback = []()->bool {return wxGetApp().plater()->can_add_model(); };
     if (!m_main_toolbar.add_item(item))
+        return false;
+
+    item.name          = "more";
+    item.icon_filename = "instance_add.svg";
+    item.tooltip       = _u8L("Add instance") + " [+]";
+    item.sprite_id++;
+    item.left.action_callback = [this]() {
+        if (m_canvas != nullptr)
+            wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_MORE));
+    };
+    item.visibility_callback = GLToolbarItem::Default_Visibility_Callback;
+    item.enabling_callback   = []() -> bool { return wxGetApp().plater()->can_increase_instances(); };
+
+    if (!m_main_toolbar.add_item(item))
+        return false;
+
+    item.name          = "fewer";
+    item.icon_filename = "instance_remove.svg";
+    item.tooltip       = _u8L("Remove instance") + " [-]";
+    item.sprite_id++;
+    item.left.action_callback = [this]() {
+        if (m_canvas != nullptr)
+            wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_FEWER));
+    };
+    item.visibility_callback = GLToolbarItem::Default_Visibility_Callback;
+    item.enabling_callback   = []() -> bool { return wxGetApp().plater()->can_decrease_instances(); };
+    if (!m_main_toolbar.add_item(item))
+        return false;
+
+    if (!m_main_toolbar.add_separator())
         return false;
 
     item.name = "addplate";
