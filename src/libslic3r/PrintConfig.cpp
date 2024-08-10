@@ -2462,7 +2462,7 @@ void PrintConfigDef::init_fff_params()
     def->label = L("Top surface");
     def->tooltip = L("Jerk for top surface");
     def->sidetext = L("mm/s");
-    def->min = 1;
+    def->min = 0;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(9));
 
@@ -2470,7 +2470,7 @@ void PrintConfigDef::init_fff_params()
     def->label = L("Infill");
     def->tooltip = L("Jerk for infill");
     def->sidetext = L("mm/s");
-    def->min = 1;
+    def->min = 0;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(9));
 
@@ -2478,7 +2478,7 @@ void PrintConfigDef::init_fff_params()
     def->label = L("Initial layer");
     def->tooltip = L("Jerk for initial layer");
     def->sidetext = L("mm/s");
-    def->min = 1;
+    def->min = 0;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(9));
 
@@ -2486,7 +2486,7 @@ void PrintConfigDef::init_fff_params()
     def->label = L("Travel");
     def->tooltip = L("Jerk for travel");
     def->sidetext = L("mm/s");
-    def->min = 1;
+    def->min = 0;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(12));
 
