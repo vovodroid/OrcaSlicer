@@ -1487,7 +1487,7 @@ void SeamPlacer::init(const Print &print, std::function<void(void)> throw_if_can
 }
 
 void SeamPlacer::place_seam(const Layer *layer, ExtrusionLoop &loop,
-                            const Point &last_pos, float& overhang) const {
+                            const Point &last_pos, bool reverse_staggered_seam, float& overhang) const {
   using namespace SeamPlacerImpl;
   const PrintObject *po = layer->object();
   // Must not be called with supprot layer.
@@ -1502,6 +1502,16 @@ void SeamPlacer::place_seam(const Layer *layer, ExtrusionLoop &loop,
     if (current.segment_idx >= loop.paths[current.path_idx].polyline.points.size()) {
       current.path_idx = next_idx_modulo(current.path_idx, loop.paths.size());
       current.segment_idx = 0;
+    }
+    current.foot_pt = loop.paths[current.path_idx].polyline.points[current.segment_idx];
+    return current;
+  };
+
+  auto get_prev_loop_point = [loop](ExtrusionLoop::ClosestPathPoint current) {
+    current.segment_idx -= 1;
+    if (current.segment_idx < 0) {
+      current.path_idx = prev_idx_modulo(current.path_idx, loop.paths.size());
+      current.segment_idx = loop.paths.size();
     }
     current.foot_pt = loop.paths[current.path_idx].polyline.points[current.segment_idx];
     return current;
@@ -1593,7 +1603,7 @@ void SeamPlacer::place_seam(const Layer *layer, ExtrusionLoop &loop,
       depth = std::max(loop.paths[projected_point.path_idx].width, depth);
 
       while (depth > 0.0f) {
-        auto next_point = get_next_loop_point(projected_point);
+        auto next_point = reverse_staggered_seam ? get_prev_loop_point(projected_point) : get_next_loop_point(projected_point);
         Vec2f a = unscale(projected_point.foot_pt).cast<float>();
         Vec2f b = unscale(next_point.foot_pt).cast<float>();
         float dist = (a - b).norm();
