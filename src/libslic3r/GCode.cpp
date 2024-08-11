@@ -4589,7 +4589,16 @@ std::string GCode::extrude_loop(ExtrusionLoop loop, std::string description, dou
     float seam_overhang = std::numeric_limits<float>::lowest();
     if (!m_config.spiral_mode && description == "perimeter") {
         assert(m_layer != nullptr);
-        m_seam_placer.place_seam(m_layer, loop, this->last_pos(), seam_overhang);
+        bool rev = false;
+
+        if (region_perimeters.size() > 1) {
+            ExtrusionLoop* p0 = dynamic_cast<ExtrusionLoop*>(region_perimeters[0]);
+            ExtrusionLoop* p1 = dynamic_cast<ExtrusionLoop*>(region_perimeters[1]);
+            if (p0 && p1)
+                rev = p0->is_clockwise() != p1->is_clockwise();
+        }
+
+        m_seam_placer.place_seam(m_layer, loop, this->last_pos(), rev, seam_overhang);
     } else
         loop.split_at(last_pos, false);
 
