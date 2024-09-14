@@ -1032,6 +1032,14 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
 
+    def = this->add("reverse_external", coBool);
+    def->label = L("Reverse external perimeters");
+    def->full_label = L("Reverse external perimeters");
+    def->category = L("Quality");
+    def->tooltip = L("Apply the reverse perimeters logic on external perimeters. \n\nThis setting greatly reduces part stresses as they are now distributed in alternating directions. This should reduce part warping while also maintaining external wall quality. This feature can be very useful for warp prone material, like ABS/ASA, and also for elastic filaments, like TPU and Silk PLA. It can also help reduce warping on floating regions over supports.");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
+
     def = this->add("counterbore_hole_bridging", coEnum);
     def->label = L("Bridge counterbore holes");
     def->category = L("Quality");

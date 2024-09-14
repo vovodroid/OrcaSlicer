@@ -1804,9 +1804,9 @@ void PerimeterGenerator::apply_extra_perimeters(ExPolygons &infill_area)
 }
 
 // Reorient loop direction
-static void reorient_perimeters(ExtrusionEntityCollection &entities, bool reverse_overhang, bool steep_overhang_contour, bool steep_overhang_hole, bool reverse_internal)
+static void reorient_perimeters(ExtrusionEntityCollection &entities, bool reverse_overhang, bool steep_overhang_contour, bool steep_overhang_hole, bool reverse_internal, bool reverse_external)
 {
-    if (reverse_overhang || reverse_internal) {
+    if (reverse_overhang || reverse_internal || reverse_external) {
         for (auto entity : entities) {
             if (entity->is_loop()) {
                 ExtrusionLoop *eloop = static_cast<ExtrusionLoop *>(entity);
@@ -1815,7 +1815,7 @@ static void reorient_perimeters(ExtrusionEntityCollection &entities, bool revers
                 
                 for(auto path : eloop->paths) {
                     if(path.role() == erExternalPerimeter) {
-                        need_reverse = reverse_overhang && (((eloop->loop_role() & elrHole) == elrHole) ? steep_overhang_hole : steep_overhang_contour);
+                        need_reverse = reverse_external || reverse_overhang && (((eloop->loop_role() & elrHole) == elrHole) ? steep_overhang_hole : steep_overhang_contour);
                         break;
                     } else{
                         need_reverse = reverse_internal;
@@ -2179,13 +2179,14 @@ void PerimeterGenerator::process_classic()
 
             bool overhang_reverse = detect_threshold_overhang;
             bool internal_reverse =                                     
-                    (this->config->wall_loops > 2) ?
+                    (this->config->wall_loops > 2 || this->config->reverse_external) ?
                         internal_reverse = this->config->reverse_internal && (this->layer_id % 2 == 1)
                         :
                         internal_reverse = this->config->reverse_internal && this->layer_id != 0 && !(overhang_reverse && (steep_overhang_contour || steep_overhang_hole));
+            bool reverse_external = this->config->reverse_external && (this->layer_id % 2 == 1);
 
             reorient_perimeters(entities, overhang_reverse, steep_overhang_contour, steep_overhang_hole,
-                                internal_reverse);
+                                internal_reverse, reverse_external);
 
             // if brim will be printed, reverse the order of perimeters so that
             // we continue inwards after having finished the brim
@@ -3192,13 +3193,14 @@ void PerimeterGenerator::process_arachne()
         if (ExtrusionEntityCollection extrusion_coll = traverse_extrusions(*this, ordered_extrusions, detect_threshold_overhang, steep_overhang_contour, steep_overhang_hole); !extrusion_coll.empty()) {
             bool overhang_reverse = detect_threshold_overhang;
             bool internal_reverse =                                     
-                    (this->config->wall_loops > 2) ?
+                    (this->config->wall_loops > 2 || this->config->reverse_external) ?
                         internal_reverse = this->config->reverse_internal && (this->layer_id % 2 == 1)
                         :
                         internal_reverse = this->config->reverse_internal && this->layer_id != 0 && !(overhang_reverse && (steep_overhang_contour || steep_overhang_hole));
+            bool reverse_external = this->config->reverse_external && (this->layer_id % 2 == 1);
 
             reorient_perimeters(extrusion_coll, overhang_reverse, steep_overhang_contour, steep_overhang_hole,
-                                internal_reverse);
+                                internal_reverse, reverse_external);
 
             this->loops->append(extrusion_coll);
         }

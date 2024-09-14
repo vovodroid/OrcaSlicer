@@ -734,7 +734,8 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, co
     for (auto el : { "hole_to_polyhole_threshold", "hole_to_polyhole_twisted" })
         toggle_line(el, config->opt_bool("hole_to_polyhole"));
 
-    toggle_line("reverse_internal", config->opt_int("wall_loops") > 1);
+    for (auto el : { "reverse_internal", "reverse_external" })
+        toggle_line(el, config->opt_int("wall_loops") > 1);
 
     bool has_detect_overhang_wall = config->opt_bool("detect_overhang_wall");
     bool has_overhang_reverse     = config->opt_bool("overhang_reverse");

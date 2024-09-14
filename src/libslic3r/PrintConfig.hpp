@@ -979,6 +979,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionBool,                 hole_to_polyhole_twisted))
     ((ConfigOptionBool,                 overhang_reverse))
     ((ConfigOptionBool,                 reverse_internal))
+    ((ConfigOptionBool,                 reverse_external))
     ((ConfigOptionFloatOrPercent,       overhang_reverse_threshold))
     ((ConfigOptionEnum<CounterboreHoleBridgingOption>, counterbore_hole_bridging))
     ((ConfigOptionEnum<WallSequence>,  wall_sequence))
