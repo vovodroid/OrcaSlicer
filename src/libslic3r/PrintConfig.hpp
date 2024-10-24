@@ -1060,6 +1060,8 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionFloat,                small_perimeter_threshold))
     ((ConfigOptionFloat,                top_solid_infill_flow_ratio))
     ((ConfigOptionFloat,                bottom_solid_infill_flow_ratio))
+    ((ConfigOptionFloat,                solid_infill_flow_ratio))
+    ((ConfigOptionFloat,                internal_walls_flow_ratio))
     ((ConfigOptionFloatOrPercent,       infill_anchor))
     ((ConfigOptionFloatOrPercent,       infill_anchor_max))
 
