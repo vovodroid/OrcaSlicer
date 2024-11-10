@@ -1109,6 +1109,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionBool, detect_overhang_wall))
     ((ConfigOptionInt, wall_filament))
     ((ConfigOptionFloatOrPercent, inner_wall_line_width))
+    ((ConfigOptionBool, inner_wall_line_width_var))
     ((ConfigOptionFloat, inner_wall_speed))
     // Total number of perimeters.
     ((ConfigOptionInt, wall_loops))

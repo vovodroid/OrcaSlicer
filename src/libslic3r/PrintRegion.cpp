@@ -18,13 +18,13 @@ unsigned int PrintRegion::extruder(FlowRole role) const
     return extruder;
 }
 
-Flow PrintRegion::flow(const PrintObject &object, FlowRole role, double layer_height, bool first_layer) const
+Flow PrintRegion::flow(const PrintObject &object, FlowRole role, double layer_height, int layer_number) const
 {
     const PrintConfig          &print_config = object.print()->config();
     ConfigOptionFloatOrPercent config_width;
     // Get extrusion width from configuration.
     // (might be an absolute value, or a percent value, or zero for auto)
-    if (first_layer && print_config.initial_layer_line_width.value > 0) {
+    if (layer_number == 0 && print_config.initial_layer_line_width.value > 0) {
         config_width = print_config.initial_layer_line_width;
     } else if (role == frExternalPerimeter) {
         config_width = m_config.outer_wall_line_width;
@@ -42,7 +42,10 @@ Flow PrintRegion::flow(const PrintObject &object, FlowRole role, double layer_he
 
     if (config_width.value == 0)
         config_width = object.config().line_width;
-    
+
+    if (role == frPerimeter && m_config.inner_wall_line_width_var && layer_number % 2 == 1)
+        config_width.value *= 0.85;
+
     // Get the configured nozzle_diameter for the extruder associated to the flow role requested.
     // Here this->extruder(role) - 1 may underflow to MAX_INT, but then the get_at() will follback to zero'th element, so everything is all right.
     auto nozzle_diameter = float(print_config.nozzle_diameter.get_at(this->extruder(role) - 1));
