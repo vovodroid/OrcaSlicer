@@ -786,6 +786,7 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, co
     //toggle_field("support_material_synchronize_layers", have_support_soluble);
 
     toggle_field("inner_wall_line_width", have_perimeters || have_skirt || have_brim);
+    toggle_field("inner_wall_line_width_var", have_perimeters);
     toggle_field("support_filament", have_support_material || have_skirt);
 
     toggle_line("raft_contact_distance", have_raft && !have_support_soluble);
