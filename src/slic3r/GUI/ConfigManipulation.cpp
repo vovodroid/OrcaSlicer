@@ -1132,6 +1132,8 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, in
     //toggle_field("support_material_synchronize_layers", have_support_soluble);
 
     toggle_field("inner_wall_line_width", have_perimeters || have_skirt || have_brim, -1, _L("Enable walls, a skirt or a brim to edit inner wall line width."));
+    toggle_field("inner_wall_line_width_var", have_perimeters);
+
     toggle_field("support_filament", have_support_material || have_skirt, -1, _L("Enable support, a raft, or a skirt to select the support filament."));
 
     toggle_line("raft_contact_distance", have_raft && !have_support_soluble, -1,
