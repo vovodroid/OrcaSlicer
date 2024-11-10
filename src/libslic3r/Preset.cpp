@@ -1135,6 +1135,7 @@ static std::vector<std::string> s_Preset_print_options{
     "line_width",
     "initial_layer_line_width",
     "inner_wall_line_width",
+    "inner_wall_line_width_var",
     "outer_wall_line_width",
     "sparse_infill_line_width",
     "internal_solid_infill_line_width",
