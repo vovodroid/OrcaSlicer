@@ -2319,7 +2319,12 @@ void TabPrint::build()
         optgroup->append_single_option_line("line_width","quality_settings_line_width");
         optgroup->append_single_option_line("initial_layer_line_width","quality_settings_line_width#first-layer");
         optgroup->append_single_option_line("outer_wall_line_width","quality_settings_line_width#outer-wall");
-        optgroup->append_single_option_line("inner_wall_line_width","quality_settings_line_width#inner-wall");
+
+        Line line = { L("Inner wall"), L("") };
+        line.append_option(optgroup->get_option("inner_wall_line_width"));
+        line.append_option(optgroup->get_option("inner_wall_line_width_var"));
+        optgroup->append_line(line);
+
         optgroup->append_single_option_line("top_surface_line_width","quality_settings_line_width#top-surface");
         optgroup->append_single_option_line("sparse_infill_line_width","quality_settings_line_width#sparse-infill");
         optgroup->append_single_option_line("internal_solid_infill_line_width","quality_settings_line_width#internal-solid-infill");
@@ -2525,7 +2530,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("enable_overhang_speed", "speed_settings_overhang_speed#slow-down-for-overhang");
 
         optgroup->append_single_option_line("slowdown_for_curled_perimeters", "speed_settings_overhang_speed#slow-down-for-curled-perimeters");
-        Line line = { L("Overhang speed"), L("This is the speed for various overhang degrees. Overhang degrees are expressed as a percentage of line width. 0 speed means no slowing down for the overhang degree range and wall speed is used") };
+        line = { L("Overhang speed"), L("This is the speed for various overhang degrees. Overhang degrees are expressed as a percentage of line width. 0 speed means no slowing down for the overhang degree range and wall speed is used") };
         line.label_path = "speed_settings_overhang_speed#speed";
         line.append_option(optgroup->get_option("overhang_1_4_speed"));
         line.append_option(optgroup->get_option("overhang_2_4_speed"));
