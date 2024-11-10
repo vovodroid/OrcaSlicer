@@ -4594,7 +4594,7 @@ void PrintConfigDef::init_fff_params()
     def->set_default_value(new ConfigOptionInt(1));
 
     def = this->add("inner_wall_line_width", coFloatOrPercent);
-    def->label = L("Inner wall");
+    def->label = L("");
     def->category = L("Quality");
     def->tooltip = L("Line width of inner wall. If expressed as a %, it will be computed over the nozzle diameter.");
     def->sidetext = L("mm or %");
@@ -4604,6 +4604,13 @@ void PrintConfigDef::init_fff_params()
     def->max_literal = 10;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloatOrPercent(0., false));
+    
+    def = this->add("inner_wall_line_width_var", coBool);
+    def->label = L("Alternate");
+    def->category = L("Quality");
+    def->tooltip = L("Decrease width by 15% on even layers to increase interlayer adhesion by shifting walls contact line.");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
 
     def = this->add("inner_wall_speed", coFloat);
     def->label = L("Inner wall");
