@@ -958,7 +958,7 @@ std::vector<SurfaceFill> group_fills(const Layer &layer, LockRegionParam &lock_p
 		        } else {
 					// Internal infill. Calculating infill line spacing independent of the current layer height and 1st layer status,
 					// so that internall infill will be aligned over all layers of the current region.
-		            params.spacing = layerm.region().flow(*layer.object(), frInfill, layer.object()->config().layer_height, false).spacing();
+		            params.spacing = layerm.region().flow(*layer.object(), frInfill, layer.object()->config().layer_height, layer.id()).spacing();
 		            // Anchor a sparse infill to inner perimeters with the following anchor length:
 			        params.anchor_length = float(region_config.infill_anchor);
 					if (region_config.infill_anchor.percent)
