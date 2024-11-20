@@ -100,6 +100,7 @@ public:
     float       angle;
     // Orca: enable angle shifting for layer change
     bool        rotate_angle{ true };
+    size_t      rotate_step_bit{ 1 };
     // In scaled coordinates. Maximum lenght of a perimeter segment connecting two infill lines.
     // Used by the FillRectilinear2, FillGrid2, FillTriangles, FillStars and FillCubic.
     // If left to zero, the links will not be limited.
@@ -178,7 +179,7 @@ protected:
         ExPolygon                      expolygon,
         ThickPolylines& thick_polylines_out) {}
 
-    virtual float _layer_angle(size_t idx) const { return (rotate_angle && (idx & 1)) ? float(M_PI/2.) : 0; }
+    virtual float _layer_angle(size_t idx) const { return (rotate_angle && (idx & this->rotate_step_bit)) ? float(M_PI/2.) : 0; }
 
     virtual std::pair<float, Point> _infill_direction(const Surface *surface) const;
     
