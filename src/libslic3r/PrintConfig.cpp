@@ -143,7 +143,9 @@ static t_config_enum_values s_keys_map_InfillPattern {
     { "octagramspiral",     ipOctagramSpiral },
     { "supportcubic",       ipSupportCubic },
     { "lightning",          ipLightning },
-    { "crosshatch",         ipCrossHatch}
+    { "crosshatch",         ipCrossHatch },
+    { "monocentric",        ipMonoCentric },
+    { "recticentric",       ipRectiCentric}
 };
 CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(InfillPattern)
 
@@ -1587,7 +1589,12 @@ void PrintConfigDef::init_fff_params()
     def->tooltip       = L("Line pattern of internal solid infill. if the detect narrow internal solid infill be enabled, the concentric pattern will be used for the small area.");
     def->enum_keys_map = &ConfigOptionEnum<InfillPattern>::get_enum_values();
     def->enum_values   = def_top_fill_pattern->enum_values;
+    def->enum_values.push_back("monocentric");
+    def->enum_values.push_back("recticentric");
     def->enum_labels   = def_top_fill_pattern->enum_labels;
+    def->enum_labels.push_back(L("MonoCentric"));
+    def->enum_labels.push_back(L("RectiCentric"));
+
     def->set_default_value(new ConfigOptionEnum<InfillPattern>(ipMonotonic));
     
     def = this->add("outer_wall_line_width", coFloatOrPercent);
@@ -2300,6 +2307,7 @@ void PrintConfigDef::init_fff_params()
     def->enum_keys_map = &ConfigOptionEnum<InfillPattern>::get_enum_values();
     def->enum_values.push_back("concentric");
     def->enum_values.push_back("zig-zag");
+    def->enum_values.push_back("monotonic");
     def->enum_values.push_back("grid");
     def->enum_values.push_back("line");
     def->enum_values.push_back("cubic");
@@ -2316,8 +2324,12 @@ void PrintConfigDef::init_fff_params()
     def->enum_values.push_back("supportcubic");
     def->enum_values.push_back("lightning");
     def->enum_values.push_back("crosshatch");
+    def->enum_values.push_back("monocentric");
+    def->enum_values.push_back("recticentric");
+    
     def->enum_labels.push_back(L("Concentric"));
     def->enum_labels.push_back(L("Rectilinear"));
+    def->enum_labels.push_back(L("Monotonic"));
     def->enum_labels.push_back(L("Grid"));
     def->enum_labels.push_back(L("Line"));
     def->enum_labels.push_back(L("Cubic"));
@@ -2334,6 +2346,9 @@ void PrintConfigDef::init_fff_params()
     def->enum_labels.push_back(L("Support Cubic"));
     def->enum_labels.push_back(L("Lightning"));
     def->enum_labels.push_back(L("Cross Hatch"));
+    def->enum_labels.push_back(L("MonoCentric"));
+    def->enum_labels.push_back(L("RectiCentric"));
+
     def->set_default_value(new ConfigOptionEnum<InfillPattern>(ipCrossHatch));
 
     auto def_infill_anchor_min = def = this->add("infill_anchor", coFloatOrPercent);

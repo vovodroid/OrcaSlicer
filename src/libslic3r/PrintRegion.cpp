@@ -17,14 +17,14 @@ unsigned int PrintRegion::extruder(FlowRole role) const
         throw Slic3r::InvalidArgument("Unknown role");
     return extruder;
 }
-
+#pragma optimize("", off)
 Flow PrintRegion::flow(const PrintObject &object, FlowRole role, double layer_height, int layer_number) const
 {
     const PrintConfig          &print_config = object.print()->config();
     ConfigOptionFloatOrPercent config_width;
     // Get extrusion width from configuration.
     // (might be an absolute value, or a percent value, or zero for auto)
-    if (layer_number == 0 && print_config.initial_layer_line_width.value > 0) {
+     if (layer_number == 0 && print_config.initial_layer_line_width.value > 0) {
         config_width = print_config.initial_layer_line_width;
     } else if (role == frExternalPerimeter) {
         config_width = m_config.outer_wall_line_width;
