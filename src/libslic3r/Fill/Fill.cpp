@@ -650,7 +650,7 @@ std::vector<SurfaceFill> group_fills(const Layer &layer)
                 params.bridge_angle = float(surface.bridge_angle);
                 if (params.extrusion_role == erInternalInfill) {
                     params.angle = float(Geometry::deg2rad(region_config.infill_direction.value));
-                    params.rotate_angle = (params.pattern == ipRectilinear || params.pattern == ipLine);
+                    params.rotate_angle = (params.pattern == ipRectilinear || params.pattern == ipMonotonic || params.pattern == ipLine || params.pattern == ipMonoCentric || params.pattern == ipRectiCentric);
                 } else {
                     params.angle = float(Geometry::deg2rad(region_config.solid_infill_direction.value));
                     params.rotate_angle = region_config.rotate_solid_infill_direction;
@@ -911,12 +911,21 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
 
     for (SurfaceFill &surface_fill : surface_fills) {
         // Create the filler object.
+        size_t rotate_step_bit = 1;
+        if (surface_fill.params.pattern == ipMonoCentric || surface_fill.params.pattern == ipRectiCentric) {
+            rotate_step_bit = 2;
+            if (this->id() % 2 == 1)
+                surface_fill.params.pattern = ipConcentric;
+            else
+                surface_fill.params.pattern = (surface_fill.params.pattern == ipMonoCentric ? ipMonotonic : ipRectilinear);
+        }
         std::unique_ptr<Fill> f = std::unique_ptr<Fill>(Fill::new_from_type(surface_fill.params.pattern));
         f->set_bounding_box(bbox);
         f->layer_id = this->id();
         f->z 		= this->print_z;
         f->angle 	= surface_fill.params.angle;
         f->rotate_angle = surface_fill.params.rotate_angle;
+        f->rotate_step_bit = rotate_step_bit;
         f->adapt_fill_octree   = (surface_fill.params.pattern == ipSupportCubic) ? support_fill_octree : adaptive_fill_octree;
         f->print_config        = &this->object()->print()->config();
         f->print_object_config = &this->object()->config();
