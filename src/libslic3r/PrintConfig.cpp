@@ -155,7 +155,8 @@ static t_config_enum_values s_keys_map_InfillPattern {
     { "supportcubic",       ipSupportCubic },
     { "lightning",          ipLightning },
     { "crosshatch",         ipCrossHatch},
-    { "quartercubic",       ipQuarterCubic}
+    { "quartercubic",       ipQuarterCubic},
+    { "monocentric",        ipMonoCentric },
 };
 CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(InfillPattern)
 
@@ -1626,7 +1627,10 @@ void PrintConfigDef::init_fff_params()
     def->tooltip       = L("Line pattern of internal solid infill. if the detect narrow internal solid infill be enabled, the concentric pattern will be used for the small area.");
     def->enum_keys_map = &ConfigOptionEnum<InfillPattern>::get_enum_values();
     def->enum_values   = def_top_fill_pattern->enum_values;
+    def->enum_values.push_back("monocentric");
     def->enum_labels   = def_top_fill_pattern->enum_labels;
+    def->enum_labels.push_back(L("MonoCentric"));
+
     def->set_default_value(new ConfigOptionEnum<InfillPattern>(ipMonotonic));
     
     def = this->add("outer_wall_line_width", coFloatOrPercent);

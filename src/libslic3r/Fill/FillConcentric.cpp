@@ -141,6 +141,9 @@ void FillConcentric::_fill_surface_single(const FillParams& params,
                 continue;
             ThickPolyline thick_polyline = Arachne::to_thick_polyline(*extrusion);
             
+            if (layer_id & rotate_step_bit)
+                thick_polyline.reverse();
+
             if (extrusion->is_closed) {
                 int ind = (params.density >= STAGGER_SEAM_THRESHOLD) ?
                             stagger_seam_index(last_pos.nearest_point_index(thick_polyline.points), thick_polyline, min_nozzle_diameter / 2, dir) :

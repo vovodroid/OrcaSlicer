@@ -64,6 +64,7 @@ Fill* Fill::new_from_type(const InfillPattern type)
     // BBS: for bottom and top surface only
     // Orca: Replace BBS implementation with Prusa implementation
     case ipMonotonicLine:       return new FillMonotonicLines();
+    case ipMonoCentric:         return new FillConcentric();
     default: throw Slic3r::InvalidArgument("unknown type");
     }
 }
