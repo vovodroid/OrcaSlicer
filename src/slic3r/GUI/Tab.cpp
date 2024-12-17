@@ -5135,6 +5135,7 @@ void TabPrinter::build_unregular_pages(bool from_initial_build/* = false*/)
                 existed_page = i;
             break;
         }
+    m_rebuild_kinematics_page = false;
 
     if (existed_page < n_before_extruders && (is_marlin_flavor || from_initial_build)) {
         auto page = build_kinematics_page();
@@ -7724,6 +7725,7 @@ void Tab::switch_excluder(int extruder_id)
                 if (opt.second.second >= 0) {
                     const_cast<int &>(opt.second.second) = index;
                     page->m_opt_id_map.insert({opt.second.first + "#" + std::to_string(index), opt.first});
+                    group->draw_multi_extruder = !is_extruder && variant_ctrl->IsThisEnabled();
                 }
             }
         }
