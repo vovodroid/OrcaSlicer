@@ -62,7 +62,7 @@ enum InfillPattern : int {
     ipHilbertCurve, ipArchimedeanChords, ipOctagramSpiral, ipSupportCubic, ipSupportBase, ipConcentricInternal,
     ipLightning, ipCrossHatch, ipQuarterCubic,
     ipMonoCentric, ipRectiCentric,
-    ipCount
+    ipCount,
 };
 
 enum class IroningType {
