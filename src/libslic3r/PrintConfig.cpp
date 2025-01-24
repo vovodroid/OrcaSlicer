@@ -2414,7 +2414,6 @@ void PrintConfigDef::init_fff_params()
     def->enum_keys_map = &ConfigOptionEnum<InfillPattern>::get_enum_values();
     def->enum_values.push_back("concentric");
     def->enum_values.push_back("zig-zag");
-    def->enum_values.push_back("monotonic");
     def->enum_values.push_back("grid");
     def->enum_values.push_back("2dlattice");
     def->enum_values.push_back("line");
@@ -2433,12 +2432,8 @@ void PrintConfigDef::init_fff_params()
     def->enum_values.push_back("lightning");
     def->enum_values.push_back("crosshatch");
     def->enum_values.push_back("quartercubic");
-    def->enum_values.push_back("monocentric");
-    def->enum_values.push_back("recticentric");
-    
     def->enum_labels.push_back(L("Concentric"));
     def->enum_labels.push_back(L("Rectilinear"));
-    def->enum_labels.push_back(L("Monotonic"));
     def->enum_labels.push_back(L("Grid"));
     def->enum_labels.push_back(L("2D Lattice"));
     def->enum_labels.push_back(L("Line"));
@@ -2457,9 +2452,6 @@ void PrintConfigDef::init_fff_params()
     def->enum_labels.push_back(L("Lightning"));
     def->enum_labels.push_back(L("Cross Hatch"));
     def->enum_labels.push_back(L("Quarter Cubic"));
-    def->enum_labels.push_back(L("MonoCentric"));
-    def->enum_labels.push_back(L("RectiCentric"));
-
     def->set_default_value(new ConfigOptionEnum<InfillPattern>(ipCrossHatch));
 
     def           = this->add("lattice_angle_1", coFloat);
