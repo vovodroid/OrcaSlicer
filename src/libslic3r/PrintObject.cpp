@@ -2170,7 +2170,7 @@ void PrintObject::bridge_over_infill()
                     // initially consider the whole layer unsupported, but also gather solid layers to later cut off supported parts
                     unsupported_area.insert(unsupported_area.end(), fill_polys.begin(), fill_polys.end());
                     for (const Surface &surface : region->fill_surfaces) {
-                        if (surface.surface_type != stInternal /*|| region->region().config().sparse_infill_density.value == 100*/) {
+                        if (surface.surface_type != stInternal || region->region().config().sparse_infill_density.value == 100) {
                             Polygons p = to_polygons(surface.expolygon);
                             lower_layer_solids.insert(lower_layer_solids.end(), p.begin(), p.end());
                         }
