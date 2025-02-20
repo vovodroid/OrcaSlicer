@@ -6357,6 +6357,12 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         // cap speed with max_volumetric_speed anyway (even if user is not using autospeed)
         speed = std::min(speed, FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm);
     }
+
+    if (EXTRUDER_CONFIG(filament_max_speed) > 0) {
+        // cap speed with max_speed anyway (even if user is not using autospeed)
+        speed = std::min(speed, EXTRUDER_CONFIG(filament_max_speed));
+    }
+
     // ORCA: resonance‑avoidance on short external perimeters
 {
     double ref_speed = speed;  // stash the pre‑cap speed
@@ -6392,7 +6398,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         m_resonance_avoidance = true;
     }
 }
-    
+
     bool variable_speed = false;
     std::vector<ProcessedPoint> new_points {};
 
