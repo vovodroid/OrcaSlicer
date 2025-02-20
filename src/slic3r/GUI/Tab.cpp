@@ -3959,9 +3959,10 @@ void TabFilament::build()
         };
 
         //BBS
-        optgroup = page->new_optgroup(L("Volumetric speed limitation"), L"param_volumetric_speed");
+        optgroup = page->new_optgroup(L("Speed limitation"), L"param_volumetric_speed");
         optgroup->append_single_option_line("filament_adaptive_volumetric_speed", "material_volumetric_speed_limitation#adaptive-volumetric-speed", 0);
         optgroup->append_single_option_line("filament_max_volumetric_speed", "material_volumetric_speed_limitation#max-volumetric-speed", 0);
+        optgroup->append_single_option_line("filament_max_speed");
 
         //line = { "", "" };
         //line.full_width = 1;
