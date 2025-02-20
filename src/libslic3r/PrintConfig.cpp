@@ -3392,6 +3392,15 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloats { 2. });
 
+    def = this->add("filament_max_speed", coFloats);
+    def->label = L("Max speed");
+    def->tooltip = L("Printing speed is limited by max speed, in case of too high and unreasonable speed setting. "
+                     "Zero means no limit");
+    def->sidetext = L("mm/s");
+    def->min = 0;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloats { 0. });
+
     def = this->add("filament_max_external_volumetric_speed", coFloats);
     def->label = L("Max external volumetric speed");
     def->tooltip = L("Lower volumetric speed limit for the visible external features: outer walls, external bridges and overhang walls, "
