@@ -5399,7 +5399,14 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         );
     }
 
-    
+    if (EXTRUDER_CONFIG(filament_max_speed) > 0) {
+        // cap speed with max_speed anyway (even if user is not using autospeed)
+        speed = std::min(
+            speed,
+            EXTRUDER_CONFIG(filament_max_speed)
+        );
+    }
+
     bool variable_speed = false;
     std::vector<ProcessedPoint> new_points {};
 
