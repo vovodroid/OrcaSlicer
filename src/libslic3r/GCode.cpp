@@ -9348,6 +9348,12 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_d
         // cap speed with max_volumetric_speed anyway (even if user is not using autospeed)
         speed = std::min(speed, FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm);
     }
+
+    if (EXTRUDER_CONFIG(filament_max_speed) > 0) {
+        // cap speed with max_speed anyway (even if user is not using autospeed)
+        speed = std::min(speed, EXTRUDER_CONFIG(filament_max_speed));
+    }
+
     // ORCA: resonance‑avoidance on short external perimeters
 {
     double ref_speed = speed;  // stash the pre‑cap speed
@@ -9383,7 +9389,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_d
         m_resonance_avoidance = true;
     }
 }
-    
+
     bool requires_segmented_extrusion = false;
     // A uniform fan state can be represented by the normal path-wide marker. Only a
     // transition within the path requires point-by-point emission.
