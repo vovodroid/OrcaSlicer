@@ -2395,6 +2395,15 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloats { 2. });
 
+    def = this->add("filament_max_speed", coFloats);
+    def->label = L("Max speed");
+    def->tooltip = L("Printing speed is limited by max speed, in case of too high and unreasonable speed setting. "
+                     "Zero means no limit");
+    def->sidetext = L("mm/s");
+    def->min = 0;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloats { 0. });
+
     def = this->add("machine_load_filament_time", coFloat);
     def->label = L("Filament load time");
     def->tooltip = L("Time to load new filament when switch filament. It's usually applicable for single-extruder multi-material machines. "
