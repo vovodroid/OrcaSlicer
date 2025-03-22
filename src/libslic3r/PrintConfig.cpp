@@ -1347,7 +1347,7 @@ void PrintConfigDef::init_fff_params()
     def = this->add("brim_object_gap", coFloat);
     def->label = L("Brim-object gap");
     def->category = L("Support");
-    def->tooltip = L("A gap between innermost brim line and object can make brim be removed more easily.");
+    def->tooltip = L("A gap between innermost brim line and object (after applying elefant foot compensation) can make brim be removed more easily.");
     def->sidetext = "mm";	// milimeters, don't need translation
     def->min = 0;
     def->max = 2;
