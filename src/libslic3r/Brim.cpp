@@ -153,7 +153,7 @@ static Polygons top_level_outer_brim_islands(const ConstPrintObjectPtrs &top_lev
             continue;
 
         //FIXME how about the brim type?
-        auto     brim_object_gap = float(scale_(object->config().brim_object_gap.value));
+        auto     brim_object_gap = float(scale_(object->config().brim_object_gap.value - object->config().elefant_foot_compensation.value));
         Polygons islands_object;
         for (const ExPolygon &ex_poly : get_print_object_bottom_layer_expolygons(*object)) {
             Polygons contour_offset = offset(ex_poly.contour, brim_object_gap, ClipperLib::jtSquare);
@@ -202,7 +202,7 @@ static ExPolygons top_level_outer_brim_area(const Print                   &print
     for(size_t print_object_idx = 0; print_object_idx < print.objects().size(); ++print_object_idx) {
         const PrintObject *object            = print.objects()[print_object_idx];
         const BrimType     brim_type         = object->config().brim_type.value;
-        const float        brim_object_gap   = scale_(object->config().brim_object_gap.value);
+        const float        brim_object_gap   = scale_(object->config().brim_object_gap.value - object->config().elefant_foot_compensation.value);
         // recording the autoAssigned brimWidth and corresponding objs
         double brimWidthAuto = object->config().brim_width.value;
         double flowWidth = print.brim_flow().scaled_spacing() * SCALING_FACTOR;
@@ -288,7 +288,7 @@ static ExPolygons top_level_outer_brim_area(const Print& print, const ConstPrint
         for (const auto &objectWithExtruder : objPrintVec) {
             const PrintObject* object = print.get_object(objectWithExtruder.first);
             const BrimType brim_type = object->config().brim_type.value;
-            const float    brim_offset = scale_(object->config().brim_object_gap.value);
+            const float    brim_offset = scale_(object->config().brim_object_gap.value - object->config().elefant_foot_compensation.value);
             // recording the autoAssigned brimWidth and corresponding objs
             double brimWidthAuto = object->config().brim_width.value;
             double flowWidth = print.brim_flow().scaled_spacing() * SCALING_FACTOR;
@@ -380,7 +380,7 @@ static ExPolygons inner_brim_area(const Print                   &print,
     for(size_t print_object_idx = 0; print_object_idx < print.objects().size(); ++print_object_idx) {
         const PrintObject *object          = print.objects()[print_object_idx];
         const BrimType     brim_type       = object->config().brim_type.value;
-        const float        brim_object_gap = scale_(object->config().brim_object_gap.value);
+        const float        brim_object_gap = scale_(object->config().brim_object_gap.value - object->config().elefant_foot_compensation.value);
         double flowWidth = print.brim_flow().scaled_spacing() * SCALING_FACTOR;
         const float    brim_width = scale_(floor(object->config().brim_width.value / flowWidth / 2) * flowWidth * 2);
         const bool         top_outer_brim  = top_level_objects_idx.find(object->id().id) != top_level_objects_idx.end();
@@ -462,7 +462,7 @@ static ExPolygons inner_brim_area(const Print& print, const ConstPrintObjectPtrs
         for (const auto& objectWithExtruder : objPrintVec) {
             const PrintObject* object = print.get_object(objectWithExtruder.first);
             const BrimType brim_type = object->config().brim_type.value;
-            const float    brim_offset = scale_(object->config().brim_object_gap.value);
+            const float    brim_offset = scale_(object->config().brim_object_gap.value - object->config().elefant_foot_compensation.value);
             double flowWidth = print.brim_flow().scaled_spacing() * SCALING_FACTOR;
             const float    brim_width = scale_(floor(object->config().brim_width.value / flowWidth / 2) * flowWidth * 2);
             const bool     top_outer_brim = top_level_objects_idx.find(object->id().id) != top_level_objects_idx.end();
@@ -916,7 +916,7 @@ static ExPolygons outer_inner_brim_area(const Print& print,
         for (const auto& objectWithExtruder : objPrintVec) {
             const PrintObject* object = print.get_object(objectWithExtruder.first);
             const BrimType     brim_type = object->config().brim_type.value;
-            float              brim_offset = scale_(object->config().brim_object_gap.value);
+            float              brim_offset = scale_(object->config().brim_object_gap.value - object->config().elefant_foot_compensation.value);
             double             flowWidth = print.brim_flow().scaled_spacing() * SCALING_FACTOR;
             float              brim_width = scale_(floor(object->config().brim_width.value / flowWidth / 2) * flowWidth * 2);
             const float        scaled_flow_width = print.brim_flow().scaled_spacing();
@@ -1282,7 +1282,7 @@ static void make_inner_island_brim(const Print& print, const ConstPrintObjectPtr
         }
 
         //BBS: 3 generate loops, only save part of loop which inside hole
-        const float    brim_offset = scale_(object->config().brim_object_gap.value);
+        const float    brim_offset = scale_(object->config().brim_object_gap.value - object->config().elefant_foot_compensation.value);
         const float    brim_width = scale_(object->config().brim_width.value);
         if (brim_type == BrimType::btInnerOnly) {
             // If brim_type is btInnerOnly, we actually doesn't generate loops for inner island.
@@ -1425,7 +1425,7 @@ static void make_inner_island_brim(const Print& print, const ConstPrintObjectPtr
                 }
 
                 //BBS: 3 generate loops, only save part of loop which inside hole
-                const float    brim_offset = scale_(object->config().brim_object_gap.value);
+                const float    brim_offset = scale_(object->config().brim_object_gap.value - object->config().elefant_foot_compensation.value);
                 const float    brim_width = floor(scale_(object->config().brim_width.value) / 2 / flow.scaled_spacing()) * 2 * flow.scaled_spacing();
                 if (objectWithExtruder.second == extruderNo && brimToWrite.at(object->id()).obj) {
                     if (brim_type == BrimType::btInnerOnly) {
