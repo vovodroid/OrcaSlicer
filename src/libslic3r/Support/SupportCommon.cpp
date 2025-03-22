@@ -331,8 +331,8 @@ SupportGeneratorLayersPtr generate_raft_base(
         const bool     brim_outer      = brim_type == btOuterOnly || brim_type == btOuterAndInner;
         const bool     brim_inner      = brim_type == btInnerOnly || brim_type == btOuterAndInner;
         // BBS: the pattern of raft and brim are the same, thus the brim can be serpated by support raft.
-        const auto     brim_object_gap = scaled<float>(object.config().brim_object_gap.value);
-        //const auto     brim_object_gap = scaled<float>(object.config().brim_object_gap.value + object.config().brim_width.value);
+        const auto     brim_object_gap = scaled<float>(object.config().brim_object_gap.value - object.config().elefant_foot_compensation.value);
+        //const auto     brim_object_gap = scaled<float>(object.config().brim_object_gap.value - object.config().elefant_foot_compensation.value + object.config().brim_width.value);
         for (const ExPolygon &ex : object.layers().front()->lslices) {
             if (brim_outer && brim_inner)
                 polygons_append(brim, offset(ex, brim_object_gap));
@@ -448,7 +448,7 @@ SupportGeneratorLayersPtr generate_raft_base(
             // BBS: if first layer of support is intersected with object island, it must have the same function as brim unless in nobrim mode.
             // brim_object_gap is changed to 0 by default, it's no longer appropriate to use it to determine the gap of first layer support.
             //if (object.has_brim())
-            //    trimming = offset(object.layers().front()->lslices, (float)scale_(object.config().brim_object_gap.value), SUPPORT_SURFACES_OFFSET_PARAMETERS);
+            //    trimming = offset(object.layers().front()->lslices, (float)scale_(object.config().brim_object_gap.value - object->config().elefant_foot_compensation.value), SUPPORT_SURFACES_OFFSET_PARAMETERS);
             //else
                 trimming = offset(object.layers().front()->lslices, (float)scale_(support_params.gap_xy_first_layer), SUPPORT_SURFACES_OFFSET_PARAMETERS);
             if (inflate_factor_1st_layer > SCALED_EPSILON) {
