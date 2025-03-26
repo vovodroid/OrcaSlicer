@@ -2021,7 +2021,7 @@ void PerimeterGenerator::process_classic()
         int loop_number = this->config->wall_loops + surface.extra_perimeters - 1;  // 0-indexed loops
         int sparse_infill_density = this->config->sparse_infill_density.value;
         if (this->config->alternate_extra_wall && this->layer_id % 2 == 1 && !m_spiral_vase && sparse_infill_density > 0) // add alternating extra wall
-            loop_number++;
+            loop_number += this->config->alternate_extra_wall;
         if (this->layer_id == object_config->raft_layers && this->config->only_one_wall_first_layer)
             loop_number = 0;
         // Set the topmost layer to be one wall
@@ -2245,8 +2245,8 @@ void PerimeterGenerator::process_classic()
 
             ExtrusionEntityCollection entities = traverse_loops(*this, contours.front(), thin_walls, detect_threshold_overhang, steep_overhang_contour, steep_overhang_hole);
             bool internal_reverse =                                     
-                    (this->config->wall_loops > 2 || this->config->reverse_external) ?
-                        internal_reverse = this->config->reverse_internal && (this->layer_id % 2 == 1)
+                    (loop_number > 1 || this->config->reverse_external) ?
+                        internal_reverse = this->config->reverse_internal && (this->layer_id % 4 > 1)
                         :
                         internal_reverse = this->config->reverse_internal && this->layer_id != 0 && !(overhang_reverse && (steep_overhang_contour || steep_overhang_hole));
             bool reverse_external = this->config->reverse_external && (this->layer_id % 2 == 1);
@@ -2941,7 +2941,7 @@ void PerimeterGenerator::process_arachne()
         int loop_number = this->config->wall_loops + surface.extra_perimeters - 1; // 0-indexed loops
         int sparse_infill_density = this->config->sparse_infill_density.value;
         if (this->config->alternate_extra_wall && this->layer_id % 2 == 1 && !m_spiral_vase && sparse_infill_density > 0) // add alternating extra wall
-            loop_number++;
+            loop_number += this->config->alternate_extra_wall;
 
         // Set the bottommost layer to be one wall
         const bool is_bottom_layer = (this->layer_id == object_config->raft_layers) ? true : false;
@@ -3276,8 +3276,8 @@ void PerimeterGenerator::process_arachne()
 
         if (ExtrusionEntityCollection extrusion_coll = traverse_extrusions(*this, ordered_extrusions, detect_threshold_overhang, steep_overhang_contour, steep_overhang_hole); !extrusion_coll.empty()) {
             bool internal_reverse =                                     
-                    (this->config->wall_loops > 2 || this->config->reverse_external) ?
-                        internal_reverse = this->config->reverse_internal && (this->layer_id % 2 == 1)
+                    (loop_number > 1 || this->config->reverse_external) ?
+                        internal_reverse = this->config->reverse_internal && (this->layer_id % 4 > 1)
                         :
                         internal_reverse = this->config->reverse_internal && this->layer_id != 0 && !(overhang_reverse && (steep_overhang_contour || steep_overhang_hole));
             bool reverse_external = this->config->reverse_external && (this->layer_id % 2 == 1);
