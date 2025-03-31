@@ -2375,23 +2375,18 @@ void Print::_make_skirt()
     // Brims were generated inside out, reverse to print the outmost contour first.
     m_skirt.reverse();
 
-    // Remember the outer edge of the last skirt line extruded as m_skirt_convex_hull.
-    for (Polygon &poly : offset(convex_hull, distance + 0.5f * float(scale_(spacing)), ClipperLib::jtRound, float(scale_(0.1))))
-        append(m_skirt_convex_hull, std::move(poly.points));
-
     if (m_config.skirt_type == stPerObject) {
         // BBS
         for (auto obj_cvx_hull : object_convex_hulls) {
-            double object_skirt_distance = float(scale_(m_config.skirt_distance.value - spacing/2.));
             PrintObject* object = obj_cvx_hull.first;
             object->m_skirt.clear();
             extruded_length.assign(extruded_length.size(), 0.);
             for (size_t i = m_config.skirt_loops.value, extruder_idx = 0; i > 0; -- i) {
-                object_skirt_distance += float(scale_(spacing));
+                distance += float(scale_(spacing));
                 Polygon loop;
                 {
                     // BBS. skirt_distance is defined as the gap between skirt and outer most brim, so no need to add max_brim_width
-                    Polygons loops = offset(obj_cvx_hull.second, object_skirt_distance, ClipperLib::jtRound, float(scale_(0.1)));
+                    Polygons loops = offset(obj_cvx_hull.second, distance, ClipperLib::jtRound, float(scale_(0.1)));
                     Geometry::simplify_polygons(loops, scale_(0.05), &loops);
                     if (loops.empty())
                         break;
@@ -2431,6 +2426,11 @@ void Print::_make_skirt()
             object->m_skirt.reverse();
         }
     }
+
+    // Remember the outer edge of the last skirt line extruded as m_skirt_convex_hull.
+    if (m_config.skirt_loops)
+        for (Polygon &poly : offset(convex_hull, distance + 0.5f * float(scale_(spacing)), ClipperLib::jtRound, float(scale_(0.1))))
+            append(m_skirt_convex_hull, std::move(poly.points));
 }
 
 Polygons Print::first_layer_islands() const
