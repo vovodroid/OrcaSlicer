@@ -384,7 +384,8 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
             //BBS: when enable arc fitting, we must re-generate perimeter
             || opt_key == "enable_arc_fitting"
             || opt_key == "print_order"
-            || opt_key == "wall_sequence") {
+            || opt_key == "wall_sequence"
+            || opt_key == "print_overhangs_after") {
             osteps.emplace_back(posPerimeters);
             osteps.emplace_back(posEstimateCurledExtrusions);
             osteps.emplace_back(posInfill);
