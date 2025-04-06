@@ -918,6 +918,7 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, co
     bool has_overhang_reverse     = config->opt_bool("overhang_reverse");
     bool allow_overhang_reverse   = !has_spiral_vase;
     toggle_line("overhang_reverse", allow_overhang_reverse);
+    toggle_line("print_overhangs_after", config->opt_int("wall_loops") > 1 && has_detect_overhang_wall && !has_spiral_vase);
     toggle_field("alternate_internal_walls", !has_spiral_vase && (config->opt_int("wall_loops") > 1));
     toggle_line("overhang_reverse_threshold", has_detect_overhang_wall && allow_overhang_reverse && has_overhang_reverse);
     toggle_line("timelapse_type", is_BBL_Printer);
