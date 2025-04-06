@@ -1162,9 +1162,10 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionBool,                 overhang_reverse))
     ((ConfigOptionFloatOrPercent,       overhang_reverse_threshold))
     ((ConfigOptionEnum<CounterboreHoleBridgingOption>, counterbore_hole_bridging))
-    ((ConfigOptionEnum<WallSequence>,  wall_sequence))
-    ((ConfigOptionBool,                is_infill_first))
-    ((ConfigOptionBool,                small_area_infill_flow_compensation))
+    ((ConfigOptionEnum<WallSequence>,   wall_sequence))
+    ((ConfigOptionBool,                 print_overhangs_after))
+    ((ConfigOptionBool,                 is_infill_first))
+    ((ConfigOptionBool,                 small_area_infill_flow_compensation))
     ((ConfigOptionEnum<WallDirection>,  wall_direction))
     ((ConfigOptionBool,                 alternate_internal_walls))
 
