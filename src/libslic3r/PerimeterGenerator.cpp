@@ -1876,27 +1876,30 @@ void PerimeterGenerator::apply_extra_perimeters(ExPolygons &infill_area)
 }
 
 // Reorient loop direction
-static void reorient_perimeters(ExtrusionEntityCollection &entities, bool steep_overhang_contour, bool steep_overhang_hole, bool reverse_internal_only)
+static void reorient_perimeters(ExtrusionEntityCollection &entities, bool steep_overhang_contour, bool steep_overhang_hole,
+                        bool reverse_internal_walls)
 {
-    if (steep_overhang_hole || steep_overhang_contour) {
+    if (steep_overhang_contour || steep_overhang_hole || reverse_internal_walls) {
+        int i = 0;
         for (auto entity : entities) {
             if (entity->is_loop()) {
                 ExtrusionLoop *eloop = static_cast<ExtrusionLoop *>(entity);
-                // Only reverse when needed
-                bool need_reverse = ((eloop->loop_role() & elrHole) == elrHole) ? steep_overhang_hole : steep_overhang_contour;
-                
-                bool isExternal = false;
-                if(reverse_internal_only){
-                    for(auto path : eloop->paths){
-                        if(path.role() == erExternalPerimeter){
-                            isExternal = true;
-                            break;
+
+                for(auto path : eloop->paths){
+                    if(path.role() == erExternalPerimeter){
+                        if (((eloop->loop_role() & elrHole) == elrHole) ? steep_overhang_hole : steep_overhang_contour) {
+                            eloop->reverse();
+                            i++;
                         }
+                        break;
                     }
-                }
-                
-                if (need_reverse && !isExternal) {
-                    eloop->reverse();
+
+                    if(path.role() == erPerimeter){
+                        i++;
+                        if (i % 2 == 1)
+                            eloop->reverse();
+                        break;
+                    }
                 }
             }
         }
@@ -2257,10 +2260,14 @@ void PerimeterGenerator::process_classic()
             }
             ExtrusionEntityCollection entities = traverse_loops(*this, contours.front(), thin_walls, steep_overhang_contour, steep_overhang_hole);
             // All walls are counter-clockwise initially, so we don't need to reorient it if that's what we want
-            if (config->overhang_reverse) {
+            if (config->overhang_reverse || this->config->reverse_internal_walls) {
+                if (!config->overhang_reverse) {
+                    // Skip steep overhang reverse if not specified
+                    steep_overhang_contour = false;
+                    steep_overhang_hole    = false;
+                }
                 reorient_perimeters(entities, steep_overhang_contour, steep_overhang_hole,
-                                    // Reverse internal only if the wall direction is auto
-                                    this->config->overhang_reverse_internal_only);
+                                    this->config->reverse_internal_walls);
             }
 
             // if brim will be printed, reverse the order of perimeters so that
@@ -3280,14 +3287,20 @@ void PerimeterGenerator::process_arachne()
         bool steep_overhang_contour = false;
         bool steep_overhang_hole    = false;
         if (!config->overhang_reverse) {
-            // Skip steep overhang detection no reverse is specified
+            // Skip steep overhang detection if no reverse is specified
             steep_overhang_contour = true;
             steep_overhang_hole    = true;
         }
         if (ExtrusionEntityCollection extrusion_coll = traverse_extrusions(*this, ordered_extrusions, steep_overhang_contour, steep_overhang_hole); !extrusion_coll.empty()) {
-            if (config->overhang_reverse) {
+            
+            if (config->overhang_reverse || this->config->reverse_internal_walls){
+                if (!config->overhang_reverse) {
+                    // Skip steep overhang reverse if not specified
+                    steep_overhang_contour = false;
+                    steep_overhang_hole    = false;
+                }
                 reorient_perimeters(extrusion_coll, steep_overhang_contour, steep_overhang_hole,
-                                    this->config->overhang_reverse_internal_only);
+                                    this->config->reverse_internal_walls);
             }
             this->loops->append(extrusion_coll);
         }
