@@ -1407,6 +1407,13 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
 
+    def = this->add("print_overhangs_after", coBool);
+    def->label = L("Print after internal wall");
+    def->category = L("Quality");
+    def->tooltip = L("Wall with overhang will be printed after internal one despite 'Walls printing order' option. 'Detect overhang wall' should be on, and 'Reverse threshold' defines which overhang print second.");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionBool{false});
+
     def = this->add("overhang_reverse", coBool);
     def->label = L("Reverse on even");
     def->full_label = L("Overhang reversal");
@@ -1434,11 +1441,11 @@ void PrintConfigDef::init_fff_params()
     def->set_default_value(new ConfigOptionEnum<CounterboreHoleBridgingOption>(chbNone));
 
     def = this->add("overhang_reverse_threshold", coFloatOrPercent);
-    def->label = L("Reverse threshold");
-    def->full_label = L("Overhang reversal threshold");
+    def->label = L("Overhang threshold");
+    def->full_label = L("Overhang detection threshold");
     def->category = L("Quality");
     // xgettext:no-c-format, no-boost-format
-    def->tooltip = L("Number of mm the overhang need to be for the reversal to be considered useful. Can be a % of the perimeter width."
+    def->tooltip = L("Number of mm the overhang need to be for the reversal and prining internal wall first to be considered useful. Can be a % of the perimeter width."
                      "\nValue 0 enables reversal on every even layers regardless."
                      "\nWhen Detect overhang wall is not enabled, this option is ignored and reversal happens on every even layers regardless.");
     def->sidetext = L("mm or %");
