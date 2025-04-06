@@ -135,7 +135,9 @@ static ExtrusionEntityCollection traverse_loops(const PerimeterGenerator &perime
     
     // Detect steep overhangs
     bool overhangs_reverse = perimeter_generator.config->overhang_reverse &&
-                             perimeter_generator.layer_id % 2 == 1; // Only calculate overhang degree on even (from GUI POV) layers
+                             perimeter_generator.layer_id % 2 == 1
+                             ||
+                             perimeter_generator.config->print_overhangs_after;
 
     for (const PerimeterGeneratorLoop &loop : loops) {
         bool is_external = loop.is_external();
@@ -409,7 +411,9 @@ static ExtrusionEntityCollection traverse_extrusions(const PerimeterGenerator& p
 {
     // Detect steep overhangs
     bool overhangs_reverse = perimeter_generator.config->overhang_reverse &&
-                             perimeter_generator.layer_id % 2 == 1;  // Only calculate overhang degree on even (from GUI POV) layers
+                             perimeter_generator.layer_id % 2 == 1
+                             ||
+                             perimeter_generator.config->print_overhangs_after;
 
     ExtrusionEntityCollection extrusion_coll;
     for (PerimeterGeneratorArachneExtrusion& pg_extrusion : pg_extrusions) {
@@ -1395,7 +1399,7 @@ static void reorient_walls(ExtrusionEntitiesPtr &entities, bool steep_overhang_c
                 ExtrusionLoop *eloop = static_cast<ExtrusionLoop *>(entity);
                 for(auto path : eloop->paths){
                     if(path.role() == erExternalPerimeter){
-                        if (((eloop->loop_role() & elrHole) == elrHole) ? steep_overhang_hole : steep_overhang_contour) {
+                        if ((eloop->loop_role() & elrHole) == elrHole ? steep_overhang_hole : steep_overhang_contour) {
                             eloop->reverse();
                             reverse_count++;
                         }
@@ -1895,15 +1899,18 @@ void PerimeterGenerator::process_classic()
             // at this point, all loops should be in contours[0]
             bool steep_overhang_contour = false;
             bool steep_overhang_hole    = false;
-            if (!config->overhang_reverse) {
+            if (!config->overhang_reverse && !config->print_overhangs_after) {
                 // Skip steep overhang detection no reverse is specified
                 steep_overhang_contour = true;
                 steep_overhang_hole    = true;
             }
             ExtrusionEntityCollection entities = traverse_loops(*this, contours.front(), thin_walls, steep_overhang_contour, steep_overhang_hole);
+            bool saved_steep_overhang_contour = steep_overhang_contour;
+            bool saved_steep_overhang_hole    = steep_overhang_hole;
+
             // All walls are counter-clockwise initially, so we don't need to reorient it if that's what we want
             if (config->overhang_reverse || this->config->alternate_internal_walls) {
-                if (!config->overhang_reverse) {
+                if (!config->overhang_reverse || layer_id % 2 != 1) {
                     // Skip steep overhang reverse if not specified
                     steep_overhang_contour = false;
                     steep_overhang_hole    = false;
@@ -1912,9 +1919,34 @@ void PerimeterGenerator::process_classic()
                                     this->config->alternate_internal_walls);
             }
 
+            bool is_outer_wall_first = this->config->wall_sequence != WallSequence::InnerOuter;
+            if (config->print_overhangs_after && is_outer_wall_first && (saved_steep_overhang_contour || saved_steep_overhang_hole)) {
+                auto it_b = entities.begin();
+                auto it_e = it_b;
+
+                for (auto entity : entities) {
+                    if (entity->is_loop()) {
+                        ExtrusionLoop *eloop = static_cast<ExtrusionLoop *>(entity);
+
+                        if ((eloop->loop_role()& elrHole) == (static_cast<ExtrusionLoop*>(*it_b)->loop_role() & elrHole)) {
+                            it_e++;
+                            continue;
+                        }
+
+                        if (((static_cast<ExtrusionLoop*>(*it_b)->loop_role() & elrHole) == elrHole) ? steep_overhang_hole : steep_overhang_contour)
+                        {
+                            std::reverse(it_b, it_e);
+                        }
+                        it_b = it_e;
+                        it_e = it_b;
+                    }
+                }
+                std::reverse(it_b, it_e);
+            }
+
             // if brim will be printed, reverse the order of perimeters so that
             // we continue inwards after having finished the brim
-            bool is_outer_wall_first = this->config->wall_sequence == WallSequence::OuterInner;
+            is_outer_wall_first = this->config->wall_sequence == WallSequence::OuterInner;
             // Orca: a contour with only a narrow wall hole beside it has nothing to sandwich, and prints the hole first,
             // then the contour, then the gap fill between them, as Arachne does.
             const PerimeterGeneratorLoops &island_loops = contours.front();
@@ -2961,9 +2993,7 @@ void PerimeterGenerator::process_arachne()
             int end_perimeter = -1;
             int direction = -1;
 
-    		bool is_outer_wall_first =
-                	this->config->wall_sequence == WallSequence::OuterInner ||
-                	this->config->wall_sequence == WallSequence::InnerOuterInner;
+            bool is_outer_wall_first = this->config->wall_sequence != WallSequence::InnerOuter;
         
             if (layer_id == 0){ // disable inner outer inner algorithm after the first layer
             	is_outer_wall_first =
@@ -3154,19 +3184,47 @@ void PerimeterGenerator::process_arachne()
         
             bool steep_overhang_contour = false;
             bool steep_overhang_hole    = false;
-            if (!config->overhang_reverse) {
+            if (!config->overhang_reverse && !config->print_overhangs_after) {
                 // Skip steep overhang detection if no reverse is specified
                 steep_overhang_contour = true;
                 steep_overhang_hole    = true;
             }
             if (ExtrusionEntityCollection extrusion_coll = traverse_extrusions(*this, ordered_extrusions, steep_overhang_contour, steep_overhang_hole); !extrusion_coll.empty()) {
+                bool saved_steep_overhang_contour = steep_overhang_contour;
+                bool saved_steep_overhang_hole    = steep_overhang_hole;
+
                 if (config->overhang_reverse || this->config->alternate_internal_walls){
-                    if (!config->overhang_reverse) {
+                    if (!config->overhang_reverse || layer_id % 2 != 1) {
                         steep_overhang_contour = false;
                         steep_overhang_hole    = false;
                     }
+
                     reorient_perimeters(extrusion_coll, steep_overhang_contour, steep_overhang_hole,
                                         this->config->alternate_internal_walls);
+            }
+
+            if (config->print_overhangs_after && is_outer_wall_first && (saved_steep_overhang_contour || saved_steep_overhang_hole)) {
+                auto it_b = extrusion_coll.begin();
+                auto it_e = it_b;
+
+                for (auto entity : extrusion_coll) {
+                    if (entity->is_loop()) {
+                        ExtrusionLoop *eloop = static_cast<ExtrusionLoop *>(entity);
+
+                        if ((eloop->loop_role()& elrHole) == (static_cast<ExtrusionLoop*>(*it_b)->loop_role() & elrHole)) {
+                            it_e++;
+                            continue;
+                        }
+
+                        if (((static_cast<ExtrusionLoop*>(*it_b)->loop_role() & elrHole) == elrHole) ? steep_overhang_hole : steep_overhang_contour)
+                        {
+                            std::reverse(it_b, it_e);
+                        }
+                        it_b = it_e;
+                        it_e = it_b;
+                    }
+                }
+                std::reverse(it_b, it_e);
                 }
                 defer_unsupported_loops(*this, extrusion_coll);
                 result.loops     = std::move(extrusion_coll);

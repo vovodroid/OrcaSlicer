@@ -1319,6 +1319,7 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, in
     bool allow_overhang_reverse   = !has_spiral_vase;
     toggle_line("unsupported_wall_last", has_detect_overhang_wall, -1, _L("Enable overhang wall detection to use this setting."));
     toggle_line("overhang_reverse", allow_overhang_reverse, -1, _L("Reverse overhang direction is unavailable in spiral vase mode."));
+    toggle_line("print_overhangs_after", config->opt_int("wall_loops") > 1 && has_detect_overhang_wall && !has_spiral_vase);
     toggle_field("alternate_internal_walls", !has_spiral_vase && (config->opt_int("wall_loops") > 1));
     toggle_line("overhang_reverse_threshold", has_detect_overhang_wall && allow_overhang_reverse && has_overhang_reverse, -1, _L("Enable overhang wall detection and reverse overhang direction, and disable spiral vase mode."));
     toggle_line("timelapse_type", is_BBL_Printer, -1, _L("This setting requires a Bambu Lab printer."));
