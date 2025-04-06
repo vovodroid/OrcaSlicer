@@ -2186,6 +2186,7 @@ void TabPrint::build()
 
         optgroup = page->new_optgroup(L("Overhangs"), L"param_overhang");
         optgroup->append_single_option_line("detect_overhang_wall");
+        optgroup->append_single_option_line("print_overhangs_after");
         optgroup->append_single_option_line("make_overhang_printable");
         optgroup->append_single_option_line("make_overhang_printable_angle");
         optgroup->append_single_option_line("make_overhang_printable_hole_size");
