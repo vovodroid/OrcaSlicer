@@ -2371,19 +2371,24 @@ void Print::_make_skirt()
         }
         // Brims were generated inside out, reverse to print the outmost contour first.
         m_skirt.reverse();
+        // Remember the outer edge of the last skirt line extruded as m_skirt_convex_hull.
+        if (m_config.skirt_loops > 0)
+            for (Polygon &poly : offset(convex_hull, distance + 0.5f * float(scale_(spacing)), ClipperLib::jtRound, float(scale_(0.1))))
+                append(m_skirt_convex_hull, std::move(poly.points));
     } else {
         //stPerObject
         // BBS
         for (auto obj_cvx_hull : object_convex_hulls) {
+            double object_skirt_distance = float(scale_(m_config.skirt_distance.value - spacing/2.));
             PrintObject* object = obj_cvx_hull.first;
             object->m_skirt.clear();
             extruded_length.assign(extruded_length.size(), 0.);
-            for (size_t i = m_config.skirt_loops, extruder_idx = 0; i > 0; -- i) {
-                distance += float(scale_(spacing));
+            for (size_t i = m_config.skirt_loops.value, extruder_idx = 0; i > 0; -- i) {
+                object_skirt_distance += float(scale_(spacing));
                 Polygon loop;
                 {
                     // BBS. skirt_distance is defined as the gap between skirt and outer most brim, so no need to add max_brim_width
-                    Polygons loops = offset(obj_cvx_hull.second, distance, ClipperLib::jtRound, float(scale_(0.1)));
+                    Polygons loops = offset(obj_cvx_hull.second, object_skirt_distance, ClipperLib::jtRound, float(scale_(0.1)));
                     Geometry::simplify_polygons(loops, scale_(0.05), &loops);
                     if (loops.empty())
                         break;
@@ -2401,15 +2406,15 @@ void Print::_make_skirt()
                     )));
                 eloop.paths.back().polyline = loop.split_at_first_point();
                 object->m_skirt.append(std::move(eloop));
-                if (m_config.min_skirt_length > 0) {
+                if (m_config.min_skirt_length.value > 0) {
                     // The skirt length is limited. Sum the total amount of filament length extruded, in mm.
                     extruded_length[extruder_idx] += unscale<double>(loop.length()) * extruders_e_per_mm[extruder_idx];
-                    if (extruded_length[extruder_idx] < m_config.min_skirt_length) {
+                    if (extruded_length[extruder_idx] < m_config.min_skirt_length.value) {
                         // Not extruded enough yet with the current extruder. Add another loop.
                         if (i == 1)
                             ++ i;
                     } else {
-                        assert(extruded_length[extruder_idx] >= m_config.min_skirt_length);
+                        assert(extruded_length[extruder_idx] >= m_config.min_skirt_length.value);
                         // Enough extruded with the current extruder. Extrude with the next one,
                         // until the prescribed number of skirt loops is extruded.
                         if (extruder_idx + 1 < extruders.size())
@@ -2421,13 +2426,12 @@ void Print::_make_skirt()
 
             }
             object->m_skirt.reverse();
+            // Remember the outer edge of the last skirt line extruded as object->m_skirt_convex_hull.
+            if (m_config.skirt_loops > 0)
+                for (Polygon& poly : offset(obj_cvx_hull.second, object_skirt_distance + 0.5f * float(scale_(spacing)), ClipperLib::jtRound, float(scale_(0.1))))
+                    append(object->m_skirt_convex_hull, std::move(poly.points));
         }
     }
-    
-    // Remember the outer edge of the last skirt line extruded as m_skirt_convex_hull.
-    if (m_config.skirt_loops > 0)
-        for (Polygon &poly : offset(convex_hull, distance + 0.5f * float(scale_(spacing)), ClipperLib::jtRound, float(scale_(0.1))))
-            append(m_skirt_convex_hull, std::move(poly.points));
 }
 
 Polygons Print::first_layer_islands() const
@@ -2445,6 +2449,13 @@ Polygons Print::first_layer_islands() const
                 for (ExPolygon &expoly : expolys_first_layer) { object_islands.push_back(expoly.contour); }
             }
         }
+
+        if (!object->m_skirt_convex_hull.empty()) {
+            Polygon poly;
+            poly.points = object->m_skirt_convex_hull;
+            object_islands.push_back(poly);
+        }
+
         islands.reserve(islands.size() + object_islands.size() * object->instances().size());
         for (const PrintInstance &instance : object->instances())
             for (Polygon &poly : object_islands) {
@@ -2962,6 +2973,7 @@ void Print::export_gcode_from_previous_file(const std::string& file, GCodeProces
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ <<  boost::format(":  process the G-code file %1% successfully")%file.c_str();
 }
 
+#pragma optimize("", off)
 float Print::object_skirt_offset() const
 {
     if (config().skirt_loops == 0 || config().skirt_type == stCombined)
@@ -2979,17 +2991,17 @@ float Print::object_skirt_offset() const
     if (is_all_objects_are_short())
         return skirt_border;
 
-    if (!config().first_layer_at_once)
-    {
+    //first_layer_at_once
+    if (config().first_layer_at_once) {
         if (config().draft_shield == dsDisabled) { 
             
             if (config().skirt_height == 1)
             {
-                if (skirt_border <= extruder_clearance_radius)
-                    return skirt_border / 2;
+                if (skirt_border <= extruder_clearance_radius / 2)
+                    return 0;
                 else
-                    return skirt_border / 2 + (skirt_border - extruder_clearance_radius) / 2;
-            } else 
+                    return skirt_border / 2 + (skirt_border - extruder_clearance_radius)/ 2;
+            } else
                 if (short_skirt)
                     return skirt_border / 2;
                 else
@@ -3004,18 +3016,21 @@ float Print::object_skirt_offset() const
         }
     }
 
-    //first_layer_at_once
+
     if (config().draft_shield == dsDisabled) { 
             
         if (config().skirt_height == 1)
         {
-            if (skirt_border <= extruder_clearance_radius / 2)
-                return 0;
-            else
-                return skirt_border / 2 + (skirt_border - extruder_clearance_radius)/ 2;
-        } else
-            if (short_skirt)
+            if (skirt_border <= extruder_clearance_radius)
                 return skirt_border / 2;
+            else
+                return skirt_border  - extruder_clearance_radius / 2;
+        } else 
+            if (short_skirt)
+                if (skirt_border <= extruder_clearance_radius)
+                    return skirt_border / 2 + config().nozzle_height/2;
+                else
+                    return skirt_border  - extruder_clearance_radius / 2 + config().nozzle_height/2;
             else
                 return skirt_border;
     }
@@ -3027,6 +3042,7 @@ float Print::object_skirt_offset() const
             return config().skirt_distance + line_width;
     }
 
+    //make compiler happy
     return 0;
 }
 

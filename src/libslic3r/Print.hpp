@@ -541,10 +541,10 @@ private:
 
     // BBS: per object skirt
     ExtrusionEntityCollection               m_skirt;
+    Points                                  m_skirt_convex_hull;
 
     PrintObject*                            m_shared_object{ nullptr };
 
-    
     // SoftFever
     // 
     // object id
