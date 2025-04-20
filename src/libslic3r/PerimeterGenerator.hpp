@@ -57,6 +57,14 @@ template<> struct hash<Slic3r::FuzzySkinConfig>
 
 namespace Slic3r {
 
+    struct ProcessSurfaceResult
+{
+    ExPolygons inner_perimeter;
+    ExPolygons gap_srf;
+    ExPolygons top_fills;
+    ExPolygons fill_clip;
+};
+
 class PerimeterGenerator {
 public:
     // Inputs:
@@ -72,6 +80,7 @@ public:
     Flow                         ext_perimeter_flow;
     Flow                         overhang_flow;
     Flow                         solid_infill_flow;
+    Flow                         infill_flow;
     const PrintRegionConfig     *config;
     const PrintObjectConfig     *object_config;
     const PrintConfig           *print_config;
@@ -117,7 +126,7 @@ public:
         ExPolygons*                 fill_no_overlap)
         : slices(slices), compatible_regions(compatible_regions), upper_slices(nullptr), lower_slices(nullptr), layer_height(layer_height),
             slice_z(slice_z), layer_id(-1), perimeter_flow(flow), ext_perimeter_flow(flow),
-            overhang_flow(flow), solid_infill_flow(flow),
+            overhang_flow(flow), solid_infill_flow(flow), infill_flow(flow),
             config(config), object_config(object_config), print_config(print_config),
             m_spiral_vase(spiral_mode),
             m_scaled_resolution(scaled<double>(print_config->resolution.value > EPSILON ? print_config->resolution.value : EPSILON)),
@@ -153,6 +162,13 @@ private:
     //BBS
     double      m_ext_mm3_per_mm_smaller_width;
     Polygons    m_lower_slices_polygons;
+    // for one_peri_on_top
+    void split_top_surfaces(const ExPolygons *lower_slices,
+                            const ExPolygons *upper_slices,
+                            const ExPolygons &orig_polygons,
+                            ExPolygons &      top_fills,
+                            ExPolygons &      non_top_polygons,
+                            ExPolygons &      fill_clip);
 };
 
 }

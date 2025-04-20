@@ -15,6 +15,8 @@
 #include <boost/log/trivial.hpp>
 #include <boost/algorithm/clamp.hpp>
 
+#pragma optimize("", off)
+
 namespace Slic3r {
 
 Flow LayerRegion::flow(FlowRole role) const
@@ -116,6 +118,7 @@ void LayerRegion::make_perimeters(const SurfaceCollection &slices, const LayerRe
     g.ext_perimeter_flow    = this->flow(frExternalPerimeter);
     g.overhang_flow         = this->bridging_flow(frPerimeter, object_config.thick_bridges);
     g.solid_infill_flow     = this->flow(frSolidInfill);
+    g.infill_flow           = this->flow(frInfill);
 
     if (this->layer()->object()->config().wall_generator.value == PerimeterGeneratorType::Arachne && !spiral_mode)
         g.process_arachne();
@@ -484,8 +487,8 @@ void LayerRegion::process_external_surfaces(const Layer *lower_layer, const Poly
         expansion_min = perimeter_flow.scaled_spacing();
     } else {
         // TODO: Maybe there is better solution when printing with zero perimeters, but this works reasonably well, given the situation
-        shell_width   = float(SCALED_EPSILON);
-        expansion_min = float(SCALED_EPSILON);;
+        shell_width   = 0;//float(SCALED_EPSILON);
+        expansion_min = 0;//float(SCALED_EPSILON);;
     }
 
     // Scaled expansions of the respective external surfaces.
@@ -498,6 +501,32 @@ void LayerRegion::process_external_surfaces(const Layer *lower_layer, const Poly
     static constexpr const size_t   max_nr_expansion_steps  = 5;
     // Radius (with added epsilon) to absorb empty regions emering from regularization of ensuring, viz  const float narrow_ensure_vertical_wall_thickness_region_radius = 0.5f * 0.65f * min_perimeter_infill_spacing;
     const float closing_radius = 0.55f * 0.65f * 1.05f * this->flow(frSolidInfill).scaled_spacing();
+
+    coord_t                         expansion_solid = shell_width;
+    const bool has_infill = this->region().config().sparse_infill_density.value > 0.;
+
+        //if no infill, reduce the margin for everything to only the perimeter
+    if (!has_infill) {
+        coord_t margin = scale_(20/*this->region().config().external_infill_margin.get_abs_value(unscaled(shell_width))*/);
+        //coord_t margin_bridged = scale_t(this->region().config().bridged_infill_margin.get_abs_value(this->flow(frExternalPerimeter).width()));
+        expansion_solid = std::min((float)margin, shell_width);
+        //expansion_bottom_bridge = std::min(margin_bridged, shell_width);
+    } else {
+        expansion_solid = scale_(20/*this->region().config().external_infill_margin.get_abs_value(unscaled(shell_width))*/);
+        //expansion_bottom_bridge = scale_t(this->region().config().bridged_infill_margin.get_abs_value(this->flow(frExternalPerimeter).width()));
+    }
+    if (expansion_min <= 0) {
+        expansion_min = SCALED_EPSILON;
+    }
+    if (expansion_solid <= 0) {
+        expansion_solid = SCALED_EPSILON;
+    }
+    //if (expansion_bottom_bridge <= 0) {
+   //     expansion_bottom_bridge = SCALED_EPSILON;
+  //  }
+    expansion_min = std::min(expansion_min, (float)expansion_solid);
+
+
 
     // Expand the top / bottom / bridge surfaces into the shell thickness solid infills.
     double     layer_thickness;
