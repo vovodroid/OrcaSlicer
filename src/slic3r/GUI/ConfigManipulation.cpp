@@ -48,7 +48,7 @@ void ConfigManipulation::toggle_line(const std::string& opt_key, const bool togg
         toggle_field(opt_key, toggle);
         return;
     }
-    
+
     if (local_config) {
         if (local_config->option(opt_key) == nullptr)
             return;
