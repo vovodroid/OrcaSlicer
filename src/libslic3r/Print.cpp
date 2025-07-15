@@ -3474,10 +3474,32 @@ std::tuple<float, float> Print::object_skirt_offset(double margin_height) const
     return std::make_tuple(object_skirt_offset, object_skirt_witdh);
 }
 
+std::string convert_time(const std::string& input) {
+    // Ищем часы и минуты по отдельности
+    std::regex h_regex(R"((\d+)h)");
+    std::regex m_regex(R"((\d+)m)");
+
+    std::smatch h_match, m_match;
+
+    int hours = 0, minutes = 0;
+
+    if (std::regex_search(input, h_match, h_regex)) {
+        hours = std::stoi(h_match[1]);
+    }
+
+    if (std::regex_search(input, m_match, m_regex)) {
+        minutes = std::stoi(m_match[1]);
+    }
+
+    std::ostringstream oss;
+    oss << hours << std::setw(2) << std::setfill('0') << minutes;
+    return oss.str();  // например, "102", "114"
+}
+
 DynamicConfig PrintStatistics::config() const
 {
     DynamicConfig config;
-    std::string normal_print_time = short_time(this->estimated_normal_print_time);
+    std::string normal_print_time = convert_time(short_time(this->estimated_normal_print_time));
     std::string silent_print_time = short_time(this->estimated_silent_print_time);
     config.set_key_value("print_time", new ConfigOptionString(normal_print_time));
     config.set_key_value("normal_print_time", new ConfigOptionString(normal_print_time));
