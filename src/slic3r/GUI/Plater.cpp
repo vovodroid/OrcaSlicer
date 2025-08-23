@@ -5957,20 +5957,16 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
                             wxString text  = wxString::Format(_L("The 3MF file version %s is newer than %s's version %s, found the following unrecognized keys:"),
                                                              file_version.to_string(), std::string(SLIC3R_APP_FULL_NAME), app_version.to_string());
                             text += "\n";
-                            bool     first = true;
-                            // std::string context = into_u8(text);
                             wxString context = text;
-                            // if (wxGetApp().app_config->get("user_mode") == "develop") {
-                            //     for (auto &key : config_substitutions.unrecogized_keys) {
-                            //         context += "  -";
-                            //         context += key;
-                            //         context += ";\n";
-                            //         first = false;
-                            //     }
-                            // }
+                            if (wxGetApp().app_config->get("user_mode") == "develop") {
+                                for (auto &key : config_substitutions.unrecogized_keys) {
+                                    context += "  -";
+                                    context += key;
+                                    context += ";\n";
+                                }
+                            }
                             wxString append = _L("You'd better upgrade your software.\n");
                             context += "\n\n";
-                            // context += into_u8(append);
                             context += append;
                             show_info(q, context, _L("Newer 3MF version"));
                         }
