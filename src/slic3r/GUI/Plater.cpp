@@ -10625,9 +10625,9 @@ void Plater::priv::update_title_dirty_status()
 
     wxString title;
     if (is_project_dirty())
-        title = "*" + m_project_name;
+        title = "*" + m_project_name + " - OrcaVVD";
     else
-        title = m_project_name;
+        title = m_project_name + " - OrcaVVD";
 
 #ifdef __APPLE__
     wxGetApp().mainframe->SetTitle(title);
