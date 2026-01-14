@@ -516,6 +516,7 @@ public:
     int  convert_filament_map_nozzle_id_to_task_nozzle_id(int nozzle_id) const;
 
     bool is_ams_drying(MachineObject* obj);
+    bool is_selected_ams_drying(MachineObject* obj);
 
     PrintFromType get_print_type() {return m_print_type;};
     wxString    format_steel_name(NozzleType type);
