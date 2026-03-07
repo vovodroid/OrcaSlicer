@@ -1480,6 +1480,20 @@ void PrintObject::apply_conical_overhang() {
     }
 }
 
+//double perimeter(const Polygon& poly)
+//{
+//    double perim = 0.0;
+//    int    n     = poly.points.size();
+//    for (int i = 0; i < n; ++i) {
+//        const auto& p1 = poly.points[i];
+//        const auto& p2 = poly.points[(i + 1) % n]; // замыкаем цикл
+//        double      dx = p2.x() - p1.x();
+//        double      dy = p2.y() - p1.y();
+//        perim += std::sqrt(dx * dx + dy * dy);
+//    }
+//    return perim;
+//}
+
 //BBS: this function is used to offset contour and holes of expolygons seperately by different value
 ExPolygons PrintObject::_shrink_contour_holes(double contour_delta, double hole_delta, const ExPolygons& polys) const
 {
@@ -1489,7 +1503,8 @@ ExPolygons PrintObject::_shrink_contour_holes(double contour_delta, double hole_
         Polygons holes;
         //BBS: modify hole
         for (const Polygon& hole : ex_poly.holes) {
-            if (hole_delta != 0) {
+            //double dia = unscaled(perimeter(hole)) / PI;
+            if (hole_delta != 0 /*&& dia <= 5*/) {
                 for (Polygon& newHole : offset(hole, -hole_delta)) {
                     newHole.make_counter_clockwise();
                     holes.emplace_back(std::move(newHole));
