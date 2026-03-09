@@ -2327,6 +2327,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("resolution", "quality_settings_precision#resolution");
         optgroup->append_single_option_line("enable_arc_fitting", "quality_settings_precision#arc-fitting");
         optgroup->append_single_option_line("xy_hole_compensation", "quality_settings_precision#x-y-compensation");
+        optgroup->append_single_option_line("xy_hole_threshold", "quality_settings_precision#x-y-compensation");
         optgroup->append_single_option_line("xy_contour_compensation", "quality_settings_precision#x-y-compensation");
         optgroup->append_single_option_line("elefant_foot_compensation", "quality_settings_precision#elephant-foot-compensation");
         optgroup->append_single_option_line("elefant_foot_compensation_layers", "quality_settings_precision#elephant-foot-compensation");

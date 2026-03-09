@@ -6609,6 +6609,15 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(0));
 
+    def           = this->add("xy_hole_threshold", coFloat);
+    def->label    = L("X-Y hole compensation threshold");
+    def->category = L("Quality");
+    def->tooltip  = L("Apply X-Y hole compensation obkt for holes diamater less than threshold.");
+    def->sidetext = L("mm"); // milimeters, CIS languages need translation
+    def->mode     = comAdvanced;
+    def->min      = 0;
+    def->set_default_value(new ConfigOptionFloat(0));
+
     def = this->add("xy_contour_compensation", coFloat);
     def->label = L("X-Y contour compensation");
     def->category = L("Quality");

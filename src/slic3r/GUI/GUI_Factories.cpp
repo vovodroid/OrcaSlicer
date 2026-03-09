@@ -84,7 +84,8 @@ std::map<std::string, std::vector<SimpleSettingData>>  SettingsFactory::OBJECT_C
                     {"slice_closing_radius", "",3}, {"resolution", "",4},
                     {"xy_hole_compensation", "",5}, {"xy_contour_compensation", "",6}, {"elefant_foot_compensation", "",7},
                     {"make_overhang_printable_angle","", 8},{"make_overhang_printable_hole_size","",9}, {"wall_sequence","",10}, {"print_overhangs_after","",10},
-                    {"precise_z_height", "",10}
+                    {"precise_z_height", "",10},
+                    {"xy_hole_threshold", "",11}
 
                     }},
     { L("Support"), {{"brim_type", "",1},{"brim_width", "",2},{"brim_object_gap", "",3},{"brim_use_efc_outline", "",4},
@@ -151,7 +152,7 @@ std::vector<SimpleSettingData> SettingsFactory::get_visible_options(const std::s
 
     t_config_option_keys object_options = {
         //Quality
-        "layer_height", "initial_layer_print_height", "adaptive_layer_height", "seam_position", "xy_hole_compensation", "xy_contour_compensation", "elefant_foot_compensation", "support_line_width",
+        "layer_height", "initial_layer_print_height", "adaptive_layer_height", "seam_position", "xy_hole_compensation", "xy_hole_threshold", "xy_contour_compensation", "elefant_foot_compensation", "support_line_width",
         //Support
         "enable_support", "support_type", "support_threshold_angle", "support_threshold_overlap", "support_on_build_plate_only", "support_critical_regions_only", "enforce_support_layers",
         //tree support
