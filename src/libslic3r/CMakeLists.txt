@@ -240,6 +240,8 @@ set(lisbslic3r_sources
     GCode/SeamPlacer.hpp
     #GCodeSender.cpp
     #GCodeSender.hpp
+    GCode/Interpolator.cpp
+    GCode/Interpolator.hpp
     GCode/SmallAreaInfillFlowCompensator.cpp
     GCode/SmallAreaInfillFlowCompensator.hpp
     GCode/SpiralVase.cpp
