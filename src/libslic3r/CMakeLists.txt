@@ -263,6 +263,8 @@ set(lisbslic3r_sources
     GCode/PreciseSeamInternal.hpp
     #GCodeSender.cpp
     #GCodeSender.hpp
+    GCode/Interpolator.cpp
+    GCode/Interpolator.hpp
     GCode/SmallAreaInfillFlowCompensator.cpp
     GCode/SmallAreaInfillFlowCompensator.hpp
     GCode/SpiralVase.cpp
