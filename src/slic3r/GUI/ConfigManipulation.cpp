@@ -325,19 +325,21 @@ void ConfigManipulation::update_print_fff_config(DynamicPrintConfig* config, con
         apply(config, &new_conf);
         is_msg_dlg_already_exist = false;
     }
+    
+    if (!config->option<ConfigOptionStrings>("xy_hole_compensation_model")->empty()) {
+        std::unique_ptr<XYCompensator> m_xy_compensator = make_unique<XYCompensator>(*config->option<ConfigOptionStrings>("xy_hole_compensation_model"));
+        
+        if (std::max(abs(m_xy_compensator->max_y()), abs(m_xy_compensator->max_y())) > 2) {
+            const wxString msg_text = _(L("This setting is only used for tuning model size by small amounts.\nFor example, when the model size has small errors or when tolerances are incorrect. For large adjustments, please use the model scale function."));
 
-    if (abs(config->option<ConfigOptionFloat>("xy_hole_compensation")->value) > 2)
-    {
-        const wxString msg_text = _(L("This setting is only used for tuning model size by small amounts.\nFor example, when the model size has small errors or when tolerances are incorrect. For large adjustments, please use the model scale function.\n\nThe value will be reset to 0."));
-        MessageDialog dialog(m_msg_dlg_parent, msg_text, "", wxICON_WARNING | wxOK);
-        DynamicPrintConfig new_conf = *config;
-        is_msg_dlg_already_exist = true;
-        dialog.ShowModal();
-        new_conf.set_key_value("xy_hole_compensation", new ConfigOptionFloat(0));
-        apply(config, &new_conf);
-        is_msg_dlg_already_exist = false;
+            MessageDialog      dialog(m_msg_dlg_parent, msg_text, "", wxICON_WARNING | wxOK);
+            DynamicPrintConfig new_conf = *config;
+            is_msg_dlg_already_exist    = true;
+            dialog.ShowModal();
+            is_msg_dlg_already_exist = false;
+        }
     }
-
+    
     if (abs(config->option<ConfigOptionFloat>("xy_contour_compensation")->value) > 2)
     {
         const wxString msg_text = _(L("This setting is only used for tuning model size by small amounts.\nFor example, when the model size has small errors or when tolerances are incorrect. For large adjustments, please use the model scale function.\n\nThe value will be reset to 0."));
