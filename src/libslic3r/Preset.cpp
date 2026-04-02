@@ -1112,6 +1112,7 @@ static std::vector<std::string> s_Preset_print_options{
     "elefant_foot_layers_density",
     "xy_contour_compensation",
     "xy_hole_compensation",
+    "xy_hole_compensation_model",
     "resolution",
     "enable_prime_tower",
     "prime_tower_enable_framework",
