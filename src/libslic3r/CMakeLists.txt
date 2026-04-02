@@ -278,6 +278,8 @@ set(lisbslic3r_sources
     GCode/WipeTower.hpp
     GCode/WipeTowerEstimate.cpp
     GCode/WipeTowerEstimate.hpp
+    GCode/XYCompensator.cpp
+    GCode/XYCompensator.hpp
     GCodeWriter.cpp
     GCodeWriter.hpp
     Geometry/ArcWelder.hpp
