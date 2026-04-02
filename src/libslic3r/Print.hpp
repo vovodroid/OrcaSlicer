@@ -16,6 +16,7 @@
 #include "GCode/WipeTower2.hpp"
 #include "GCode/ThumbnailData.hpp"
 #include "GCode/GCodeProcessor.hpp"
+#include "GCode/XYCompensator.hpp"
 #include "MultiMaterialSegmentation.hpp"
 #include "libslic3r.h"
 
@@ -513,7 +514,7 @@ private:
 
     void slice_volumes();
     //BBS
-    ExPolygons _shrink_contour_holes(double contour_delta, double hole_delta, const ExPolygons& polys) const;
+    ExPolygons _shrink_contour_holes(double contour_delta, bool hole, const ExPolygons& polys) const;
     // BBS
     void detect_overhangs_for_lift();
     void clear_overhangs_for_lift();
@@ -580,6 +581,8 @@ private:
     // object id
     size_t               m_id;
     void apply_conical_overhang();
+
+    std::unique_ptr<XYCompensator> m_xy_compensator;
 
  public:
     //BBS: When printing multi-material objects, this settings will make slicer to clip the overlapping object parts one by the other.

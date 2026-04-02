@@ -966,7 +966,8 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionEnum<InfillPattern>, support_ironing_pattern))
     ((ConfigOptionPercent,             support_ironing_flow))
     ((ConfigOptionFloat,               support_ironing_spacing))
-    ((ConfigOptionFloat,               xy_hole_compensation))
+    ((ConfigOptionBool,                xy_hole_compensation))
+    ((ConfigOptionStrings,             xy_hole_compensation_model))
     ((ConfigOptionFloat,               xy_contour_compensation))
     ((ConfigOptionBool,                flush_into_objects))
     // BBS

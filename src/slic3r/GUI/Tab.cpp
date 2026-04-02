@@ -2327,6 +2327,11 @@ void TabPrint::build()
         optgroup->append_single_option_line("resolution", "quality_settings_precision#resolution");
         optgroup->append_single_option_line("enable_arc_fitting", "quality_settings_precision#arc-fitting");
         optgroup->append_single_option_line("xy_hole_compensation", "quality_settings_precision#x-y-compensation");
+        Option option         = optgroup->get_option("xy_hole_compensation_model");
+        option.opt.full_width = true;
+        option.opt.is_code    = true;
+        option.opt.height     = 15;
+        optgroup->append_single_option_line(option, "quality_settings_wall_and_surfaces#small-area-flow-compensation");
         optgroup->append_single_option_line("xy_contour_compensation", "quality_settings_precision#x-y-compensation");
         optgroup->append_single_option_line("elefant_foot_compensation", "quality_settings_precision#elephant-foot-compensation");
         optgroup->append_single_option_line("elefant_foot_compensation_layers", "quality_settings_precision#elephant-foot-compensation");
@@ -2383,7 +2388,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("max_travel_detour_distance", "quality_settings_wall_and_surfaces#max-detour-length");
 
         optgroup->append_single_option_line("small_area_infill_flow_compensation", "quality_settings_wall_and_surfaces#small-area-flow-compensation");
-        Option option = optgroup->get_option("small_area_infill_flow_compensation_model");
+        option = optgroup->get_option("small_area_infill_flow_compensation_model");
         option.opt.full_width = true;
         option.opt.is_code = true;
         option.opt.height = 15;

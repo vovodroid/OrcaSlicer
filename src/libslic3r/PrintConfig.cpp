@@ -6641,15 +6641,28 @@ void PrintConfigDef::init_fff_params()
     def->max = max_temp;
     def->set_default_value(new ConfigOptionInts{0});
 
-    def = this->add("xy_hole_compensation", coFloat);
+    def = this->add("xy_hole_compensation", coBool);
     def->label = L("X-Y hole compensation");
     def->category = L("Quality");
     def->tooltip = L("Holes in objects will expand or contract in the XY plane by the configured value. "
-                     "Positive values make holes bigger, negative values make holes smaller. "
                      "This function is used to adjust sizes slightly when the objects have assembling issues.");
-    def->sidetext = L("mm");	// millimeters, CIS languages need translation
     def->mode = comAdvanced;
-    def->set_default_value(new ConfigOptionFloat(0));
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def             = this->add("xy_hole_compensation_model", coStrings);
+    def->label      = L("XY Compensation Model");
+    def->tooltip    = L("XY Hole Compensation Model, used to adjust the hole diameter."
+                           "The model is expressed as a comma separated pair of values for "
+                           "diameter and compensation delta. Each pair is on a "
+                           "separate line, followed by a semicolon, in the following format: \"1.234, 5.678;\" "
+                           "Positive values make holes bigger, negative values make holes smaller. Most chanses you need positive values "
+                           "gradually decrasing as diameter grows.");
+    def->mode       = comAdvanced;
+    def->gui_flags  = "serialized";
+    def->multiline  = true;
+    def->full_width = true;
+    def->height     = 15;
+    def->set_default_value(new ConfigOptionStrings{"0,0"});
 
     def = this->add("xy_contour_compensation", coFloat);
     def->label = L("X-Y contour compensation");
@@ -7815,6 +7828,18 @@ void PrintConfigDef::handle_legacy(t_config_option_key &opt_key, std::string &va
 // Don't convert single options here, implement such conversion in PrintConfigDef::handle_legacy() instead.
 void PrintConfigDef::handle_legacy_composite(DynamicPrintConfig &config)
 {
+    if (!config.has("xy_hole_compensation_model")) {
+
+        auto*        opt = config.option<ConfigOptionFloat>("xy_hole_compensation");
+        if (opt) {
+            std::string s = opt->serialize();
+            if (s != "0") {
+                //config.option("xy_hole_compensation_model", true)
+                config.set_key_value("xy_hole_compensation_model", new ConfigOptionStrings{"0,"+s});
+            }
+        }
+    }
+
     if (config.has("thumbnails")) {
         std::string extention;
         if (config.has("thumbnails_format")) {
