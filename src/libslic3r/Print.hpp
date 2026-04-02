@@ -27,6 +27,7 @@
 #include "GCode/WipeTower2.hpp"
 #include "GCode/ThumbnailData.hpp"
 #include "GCode/GCodeProcessor.hpp"
+#include "GCode/XYCompensator.hpp"
 #include "MultiMaterialSegmentation.hpp"
 #include "BeltBrim.hpp"
 #include "BeltTransform.hpp"
@@ -637,7 +638,7 @@ private:
     // otherwise be restored on top of fresh content); the plan calls it too.
     void   belt_undo_purge_plan() { belt_restore_dropped_fills(); belt_restore_truncated_layers(); }
     //BBS
-    ExPolygons _shrink_contour_holes(double contour_delta, double hole_delta, const ExPolygons& polys) const;
+    ExPolygons _shrink_contour_holes(double contour_delta, bool hole, const ExPolygons& polys) const;
     // BBS
     void detect_overhangs_for_lift();
     void clear_overhangs_for_lift();
@@ -741,6 +742,8 @@ private:
     // object id
     size_t               m_id{0};
     void apply_conical_overhang();
+
+    std::unique_ptr<XYCompensator> m_xy_compensator;
 
  public:
     //BBS: When printing multi-material objects, this settings will make slicer to clip the overlapping object parts one by the other.
