@@ -8742,7 +8742,7 @@ bool DynamicPrintConfig::is_using_different_extruders()
     return ret;
 }
 
-bool DynamicPrintConfig::support_different_extruders(int& extruder_count)
+bool DynamicPrintConfig::support_different_extruders(int& extruder_count) const
 {
     std::set<std::string> variant_set;
 
