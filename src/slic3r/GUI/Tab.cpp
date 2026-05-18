@@ -514,7 +514,30 @@ void Tab::create_preset_tab()
             reload_config();
             update_changed_ui();
         });
-        m_main_sizer->Add(m_extruder_switch, 0, wxALIGN_CENTER | wxTOP, m_em_unit);
+        m_extruder_sync_box = new wxPanel(panel, wxID_ANY);
+        m_extruder_sync_box->SetBackgroundColour(panel->GetBackgroundColour());
+        m_extruder_sync_box->SetToolTip(_L("Synchronization of different extruder drives or nozzle volume types is not supported."));
+        m_extruder_sync = new ScalableButton(m_extruder_sync_box, wxID_ANY, "extruder_sync");
+        m_extruder_sync->SetToolTip(_L("Synchronize the modification of parameters to the corresponding parameters of another extruder."));
+        m_extruder_sync->Bind(wxEVT_BUTTON, [this](auto &evt) {
+            evt.Skip();
+            sync_excluder();
+        });
+
+        auto sync_box_sizer = new wxBoxSizer(wxHORIZONTAL);
+        sync_box_sizer->Add(m_extruder_sync, 1, wxEXPAND);
+        m_extruder_sync_box->SetSizer(sync_box_sizer);
+
+        m_variant_sizer  = new wxBoxSizer(wxHORIZONTAL);
+        auto right_sizer = new wxBoxSizer(wxHORIZONTAL);
+
+        m_variant_sizer->AddStretchSpacer(1);
+        m_variant_sizer->Add(m_extruder_switch, 0, wxALIGN_CENTER, 0);
+        m_variant_sizer->Add(right_sizer, 1, wxALIGN_CENTER);
+        right_sizer->AddStretchSpacer(1);
+        right_sizer->Add(m_extruder_sync_box, 0, wxALIGN_CENTER | wxRIGHT, m_em_unit);
+
+        m_main_sizer->Add(m_variant_sizer, 0, wxEXPAND | wxTOP, m_em_unit);
     } else if (dynamic_cast<TabFilament *>(this)) {
         m_variant_combo = new MultiSwitchButton(panel);
         m_variant_combo->Bind(wxCUSTOMEVT_MULTISWITCH_SELECTION, [this](auto &evt) {
@@ -527,8 +550,15 @@ void Tab::create_preset_tab()
                 m_active_page->update_visibility(m_mode, true);
             m_page_view->GetParent()->Layout();
         });
-        m_variant_combo->Hide();
-        m_main_sizer->Add(m_variant_combo, 0, wxEXPAND | wxTOP | wxLEFT | wxRIGHT, m_em_unit);
+
+
+        wxBoxSizer *combo_sizer = new wxBoxSizer(wxHORIZONTAL);
+        combo_sizer->Add(m_variant_combo, 1, wxEXPAND);
+        wxBoxSizer *top_sizer = new wxBoxSizer(wxHORIZONTAL);
+        top_sizer->Add(combo_sizer, 1, wxEXPAND | wxLEFT, m_em_unit);
+        m_variant_sizer  = new wxBoxSizer(wxVERTICAL);
+        m_variant_sizer->Add(top_sizer, 0, wxLEFT, m_em_unit);
+        m_main_sizer->Add(m_variant_sizer, 0, wxEXPAND | wxTOP, m_em_unit);
     }
 
     this->SetSizer(m_main_sizer);
@@ -1596,6 +1626,8 @@ void Tab::sys_color_changed()
         bmp->msw_rescale();
     if (m_detach_preset_btn)
         m_detach_preset_btn->msw_rescale();
+    if (m_extruder_sync)
+        m_extruder_sync->msw_rescale();
 
     // update icons for tree_ctrl
     for (ScalableBitmap& bmp : m_scaled_icons_list)
@@ -6723,9 +6755,10 @@ bool Tab::tree_sel_change_delayed(wxCommandEvent& event)
         // update_undo_buttons();
         this->OnActivate();
         m_parent->set_active_tab(this);
-        wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
-        if (variant_ctrl) {
-            m_main_sizer->Show(variant_ctrl, variant_ctrl->IsThisEnabled() && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder "));
+        if (m_variant_sizer) {
+            wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
+            m_main_sizer->Show(m_variant_sizer, variant_ctrl->IsThisEnabled() && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder "));
+            if (m_extruder_sync) m_extruder_sync->Show(variant_ctrl->IsShown());
             GetParent()->Layout();
         }
 
@@ -6738,9 +6771,10 @@ bool Tab::tree_sel_change_delayed(wxCommandEvent& event)
         return false;
 
     m_active_page = page;
-    wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
-    if (variant_ctrl) {
-        m_main_sizer->Show(variant_ctrl, variant_ctrl->IsThisEnabled() && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder"));
+    if (m_variant_sizer) {
+        wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
+        m_main_sizer->Show(m_variant_sizer, variant_ctrl->IsThisEnabled() && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder"));
+        if (m_extruder_sync) m_extruder_sync->Show(variant_ctrl->IsShown());
         GetParent()->Layout();
     }
 
@@ -7549,8 +7583,10 @@ void Tab::update_extruder_variants(int extruder_id)
 
             m_extruder_switch->SetSelection(selection_index);
             m_extruder_switch->Enable(true);
+            m_extruder_sync->Enable(true);
         } else {
             m_extruder_switch->Enable(false);
+            m_extruder_sync->Enable(false);
         }
     } else if (m_variant_combo) {
         if (extruder_id >= 0)
@@ -7566,9 +7602,10 @@ void Tab::update_extruder_variants(int extruder_id)
         m_variant_combo->Enable(options.size() > 1);
     }
     switch_excluder(extruder_id);
-    wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
-    if (variant_ctrl) {
-        m_main_sizer->Show(variant_ctrl, variant_ctrl->IsThisEnabled() && m_active_page && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder "));
+    if (m_variant_sizer) {
+        wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
+        m_main_sizer->Show(m_variant_sizer, variant_ctrl->IsThisEnabled() && m_active_page && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder "));
+        if (m_extruder_sync) m_extruder_sync->Show(variant_ctrl->IsShown());
         GetParent()->Layout();
     }
 }
@@ -7665,6 +7702,60 @@ NozzleVolumeType Tab::get_actual_nozzle_volume_type(int extruder_id)
     return m_actual_nozzle_volumes[extruder_id];
 }
 
+bool Tab::get_extruder_sync_enable_state(int extruder_id)
+{
+    Preset& printer_preset = m_preset_bundle->printers.get_edited_preset();
+    auto nozzle_volumes = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
+    auto extruders = printer_preset.config.option<ConfigOptionEnumsGeneric>("extruder_type");
+    if (nozzle_volumes->values.size() < 2 || extruders->values.size() < 2) {
+        return false;
+    }
+
+    NozzleVolumeType left_nozzle    = NozzleVolumeType(nozzle_volumes->values[0]);
+    NozzleVolumeType right_nozzle   = NozzleVolumeType(nozzle_volumes->values[1]);
+    ExtruderType     left_extruder  = ExtruderType(extruders->values[0]);
+    ExtruderType     right_extruder = ExtruderType(extruders->values[1]);
+
+    if (left_extruder != right_extruder) {
+        return false;
+    }
+
+    if (left_nozzle == right_nozzle) {
+        return true;
+    }
+    
+    // TODO: Orca: Support hybrid
+    //if (left_nozzle != NozzleVolumeType::nvtHybrid && right_nozzle != NozzleVolumeType::nvtHybrid) {
+    //    return false;
+    //}
+
+    //if (left_nozzle == NozzleVolumeType::nvtHybrid && right_nozzle == NozzleVolumeType::nvtHybrid) {
+    //    return true;
+    //}
+
+    //// Hybrid rules
+    //auto current_nozzle = get_actual_nozzle_volume_type(extruder_id);
+    //if (left_nozzle != NozzleVolumeType::nvtHybrid) {
+    //    if (extruder_id == 0) {
+    //        return true;
+    //    }
+    //    if (extruder_id == 1 && current_nozzle == left_nozzle) {
+    //        return true;
+    //    }
+    //    return false;
+    //}
+    //if (right_nozzle != NozzleVolumeType::nvtHybrid) {
+    //    if (extruder_id == 1) {
+    //        return true;
+    //    }
+    //    if (extruder_id == 0 && current_nozzle == right_nozzle) {
+    //        return true;
+    //    }
+    //    return false;
+    //}
+    return false;
+}
+
 void Tab::switch_excluder(int extruder_id)
 {
     Preset & printer_preset = m_preset_bundle->printers.get_edited_preset();
@@ -7673,12 +7764,17 @@ void Tab::switch_excluder(int extruder_id)
 
     if (!m_variant_combo && (extruder_id >= (int)nozzle_volumes->size() || extruder_id >= (int)extruders->size()))
         extruder_id = 0;
-    if (m_extruder_switch && m_type != Preset::TYPE_PRINTER) {
+    if (m_extruder_switch) {
         int current_extruder = get_current_active_extruder();
-        if (extruder_id == -1)
-            extruder_id = current_extruder;
-        else if (extruder_id != current_extruder)
-            return;
+        bool sync_enable = get_extruder_sync_enable_state(current_extruder);
+        m_extruder_sync->Enable(m_extruder_switch->IsThisEnabled() && sync_enable);
+        m_extruder_sync->Show();
+        if (m_type != Preset::TYPE_PRINTER) {
+            if (extruder_id == -1)
+                extruder_id = current_extruder;
+            else if (extruder_id != current_extruder)
+                return;
+        }
     } else if (m_variant_combo) {
         int current_variant = m_variant_combo->GetSelection();
         if (current_variant < 0)
@@ -7729,6 +7825,82 @@ void Tab::switch_excluder(int extruder_id)
                 }
             }
         }
+    }
+}
+
+void Tab::sync_excluder()
+{
+    Preset & printer_preset = m_preset_bundle->printers.get_edited_preset();
+    auto nozzle_volumes = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
+    auto extruders      = printer_preset.config.option<ConfigOptionEnumsGeneric>("extruder_type");
+    auto get_index_for_extruder =
+            [this, &extruders, &nozzle_volumes, variant_keys = extruder_variant_keys[m_type >= Preset::TYPE_COUNT ? Preset::TYPE_PRINT : m_type]](int extruder_id, NozzleVolumeType nozzle_type) {
+        return m_config->get_index_for_extruder(extruder_id + 1, variant_keys.first,
+            ExtruderType(extruders->values[extruder_id]), nozzle_type, variant_keys.second);
+    };
+    int active_index = get_current_active_extruder();
+    auto active_nozzle = get_actual_nozzle_volume_type(active_index);
+    int from_index = get_index_for_extruder(active_index, active_nozzle);
+    int dest_index = get_index_for_extruder(1 - active_index, active_nozzle);
+    auto from_str = std::to_string(from_index);
+    auto dest_str = std::to_string(dest_index);
+    auto dirty_options = m_presets->current_dirty_options(true);
+    DynamicConfig config_origin, config_to_apply;
+    for (int i = 0; i < dirty_options.size(); ++i) {
+        auto &opt = dirty_options[i];
+        auto n= opt.find('#');
+        if (n == std::string::npos)
+            continue;
+        auto field = m_active_page->get_field(opt.substr(0, n), from_index + 256);
+        auto line  = m_active_page->get_line(opt.substr(0, n), from_index + 256);
+        if (field == nullptr || line == nullptr)
+            continue;
+        ++n;
+        bool dirty  = opt.substr(n) == from_str;
+        while (i + 1 < dirty_options.size() && dirty_options[i + 1].compare(0, n, opt, 0, n) == 0) {
+            dirty |= dirty_options[i + 1].substr(n) == from_str;
+            ++i;
+        }
+        if (dirty) {
+            auto key = opt.substr(0, n - 1);
+            auto option = dynamic_cast<ConfigOptionVectorBase*>(m_config->option(key));
+            auto option2 = dynamic_cast<ConfigOptionVectorBase*>(option->clone());
+            option2->set_at(option, dest_index, from_index);
+            if (*option == *option2) {
+                delete option2;
+                continue;
+            }
+            config_origin.set_key_value(key, option->clone());
+            config_to_apply.set_key_value(key, option2);
+        }
+    }
+    if (config_to_apply.empty()) {
+        MessageDialog md(wxGetApp().plater(), _L("No modifications need to be copied."), _L("Copy paramters"), wxICON_INFORMATION | wxOK);
+        md.ShowModal();
+        return;
+    }
+
+    std::string pt = m_preset_bundle->printers.get_edited_preset().get_printer_type(m_preset_bundle);
+    std::string active_nozzle_name = DevPrinterConfigUtil::get_toolhead_display_name(pt, active_index, ToolHeadComponent::Nozzle, ToolHeadNameCase::LowerCase);
+    std::string other_nozzle_name  = DevPrinterConfigUtil::get_toolhead_display_name(pt, 1 - active_index, ToolHeadComponent::Nozzle, ToolHeadNameCase::LowerCase);
+    wxString title  = wxString::Format(_L("Modify paramters of %s"), _L(active_nozzle_name));
+    wxString header = wxString::Format(_L("Do you want to modify the following parameters of the %s to that of the %s?"),
+                                       _L(active_nozzle_name), _L(other_nozzle_name));
+    UnsavedChangesDialog dlg(title, header, &config_origin, from_index, dest_index, active_index == 0, active_nozzle);
+    dlg.ShowModal();
+    if (dlg.transfer_changes()) {
+        m_config->apply(config_to_apply);
+        auto &applying_keys = const_cast<t_config_option_keys&>(m_config_manipulation.applying_keys());
+        if (m_type > Preset::TYPE_COUNT)
+            applying_keys = config_to_apply.keys();
+        reload_config();
+        if (m_type > Preset::TYPE_COUNT)
+            applying_keys.clear();
+        update_changed_ui();
+        update();
+        if (m_active_page)
+            m_active_page->update_visibility(m_mode, true);
+        m_page_view->GetParent()->Layout();
     }
 }
 
