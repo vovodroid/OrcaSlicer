@@ -893,21 +893,9 @@ void Tab::filter_diff_option(std::vector<std::string> &options)
                 break;
             }
         }
-        if (found) continue;
-
-        // Keep key#index if that exact option is tracked.
-        if (m_options_list.find(opt) != m_options_list.end())
-            continue;
-
-        const std::string base = opt.substr(0, hash_pos);
-        const std::string idx0 = base + "#0";
-        if (m_options_list.find(idx0) != m_options_list.end()) {
-            opt = idx0;
-            continue;
-        }
-        if (m_options_list.find(base) != m_options_list.end())
-            opt = base;
+        if (!found) opt = opt.substr(0, hash_pos);
     }
+    options.erase(std::remove(options.begin(), options.end(), ""), options.end());
 }
 
 // Update UI according to changes
@@ -929,11 +917,9 @@ void Tab::update_changed_ui()
     }
 
     update_custom_dirty(dirty_options, nonsys_options);
-
-    if (m_extruder_switch == nullptr || m_extruder_switch->IsEnabled()) {
-        filter_diff_option(dirty_options);
-        filter_diff_option(nonsys_options);
-    }
+    
+    filter_diff_option(dirty_options);
+    filter_diff_option(nonsys_options);
 
     for (auto& it : m_options_list)
         it.second = m_opt_status_value;
