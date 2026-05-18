@@ -497,7 +497,7 @@ void Tab::create_preset_tab()
 
     if (dynamic_cast<TabPrinter *>(this) || dynamic_cast<TabPrint *>(this)) {
         m_extruder_switch = new MultiSwitchButton(panel);
-        m_extruder_switch->SetMaxSize({em_unit(this) * 24, -1});
+        m_extruder_switch->SetMaxSize({em_unit(this) * 40, -1});
         m_extruder_switch->Bind(wxCUSTOMEVT_MULTISWITCH_SELECTION, [this](auto &evt) {
             evt.Skip();
             int selection = evt.GetInt();
@@ -7524,41 +7524,6 @@ void Tab::set_just_edit(bool just_edit)
 /// </summary>
 /// <param name="extruder_id"></param>
 
-std::vector<wxString> Tab::generate_extruder_options()
-{
-    std::vector<wxString> options;
-    if (m_type != Preset::TYPE_FILAMENT)
-        return options;
-
-    auto *variants = m_config->option<ConfigOptionStrings>("filament_extruder_variant");
-    if (!variants)
-        return options;
-
-    const std::vector<std::string> known_nozzle_types = {
-        get_nozzle_volume_type_string(NozzleVolumeType::nvtHighFlow),
-        get_nozzle_volume_type_string(NozzleVolumeType::nvtStandard),
-    };
-
-    for (const std::string &variant : variants->values) {
-        std::string drive;
-        std::string nozzle;
-
-        for (const std::string &nozzle_type : known_nozzle_types) {
-            if (variant.size() > nozzle_type.size() &&
-                variant.substr(variant.size() - nozzle_type.size()) == nozzle_type &&
-                variant[variant.size() - nozzle_type.size() - 1] == ' ') {
-                drive  = variant.substr(0, variant.size() - nozzle_type.size() - 1);
-                nozzle = nozzle_type;
-                break;
-            }
-        }
-
-        options.push_back(nozzle.empty() ? from_u8(variant) : wxString::Format(wxT("%s: %s"), from_u8(drive), from_u8(nozzle)));
-    }
-
-    return options;
-}
-
 void Tab::update_extruder_variants(int extruder_id)
 {
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << extruder_id;
@@ -7605,6 +7570,78 @@ void Tab::update_extruder_variants(int extruder_id)
         m_main_sizer->Show(variant_ctrl, variant_ctrl->IsThisEnabled() && m_active_page && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder "));
         GetParent()->Layout();
     }
+}
+
+std::vector<wxString> Tab::generate_extruder_options()
+{
+    std::vector<wxString> options;
+    if (m_type == Preset::TYPE_FILAMENT) {
+        auto variants = m_config->option<ConfigOptionStrings>("filament_extruder_variant");
+        if (!variants)
+            return options;
+
+        for (auto &v : variants->values) {
+            std::string drive, nozzle;
+
+            static std::vector<std::string> known_nozzle_types;
+            if (known_nozzle_types.empty()) {
+                for (auto nvt : get_valid_nozzle_volume_type()) {
+                    known_nozzle_types.push_back(get_nozzle_volume_type_string(nvt));
+                }
+                std::sort(known_nozzle_types.begin(), known_nozzle_types.end(),
+                    [](const std::string& a, const std::string& b) { return a.size() > b.size(); });
+            }
+            bool found = false;
+            for (const auto& nozzle_type : known_nozzle_types) {
+                if (v.size() > nozzle_type.size() &&
+                    v.substr(v.size() - nozzle_type.size()) == nozzle_type &&
+                    v[v.size() - nozzle_type.size() - 1] == ' ') {
+                    drive = v.substr(0, v.size() - nozzle_type.size() - 1);
+                    nozzle = nozzle_type;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                size_t pos = v.rfind(' ');
+                if (pos != std::string::npos) {
+                    drive = v.substr(0, pos);
+                    nozzle = v.substr(pos + 1);
+                } else {
+                    drive = v;
+                    nozzle = "";
+                }
+            }
+            options.push_back(wxString::Format(_L("%s: %s"), _L(drive), _L(nozzle)));
+        }
+        return options;
+    }
+
+    auto nozzle_volumes     = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
+    auto nozzle_volumes_def = m_preset_bundle->project_config.def()->get("nozzle_volume_type");
+    int  extruder_nums      = m_preset_bundle->get_printer_extruder_count();
+
+    if (!nozzle_volumes || extruder_nums <= 0) {
+        return options;
+    }
+
+    std::string pt = m_preset_bundle->printers.get_edited_preset().get_printer_type(m_preset_bundle);
+    for (int i = 0; i < extruder_nums; ++i) {
+        int ext_id = (i == 0) ? DEPUTY_EXTRUDER_ID : MAIN_EXTRUDER_ID;
+        wxString extruder_name = _L(DevPrinterConfigUtil::get_toolhead_display_name(
+            pt, ext_id, ToolHeadComponent::Nozzle, ToolHeadNameCase::TitleCase, true));
+        NozzleVolumeType volume_type = NozzleVolumeType(nozzle_volumes->values[i]);
+        
+        // TODO: Orca: Support hybrid
+        /*if (volume_type == NozzleVolumeType::nvtHybrid) {
+            options.push_back(wxString::Format(_L("%s: %s"), extruder_name, _L("Standard")));
+            options.push_back(wxString::Format(_L("%s: %s"), extruder_name, _L("High Flow")));
+        } else*/ {
+            wxString volume_name = get_nozzle_volume_type_name(volume_type);
+            options.push_back(wxString::Format(_L("%s: %s"), extruder_name, volume_name));
+        }
+    }
+    return options;
 }
 
 NozzleVolumeType Tab::get_actual_nozzle_volume_type(int extruder_id)
