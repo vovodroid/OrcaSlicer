@@ -88,6 +88,15 @@ static void validate_custom_gcode_cb(Tab* tab, const wxString& title, const t_co
 
 static const std::vector<std::string> plate_keys = { "curr_bed_type", "skirt_start_angle", "first_layer_print_sequence", "first_layer_sequence_choice", "other_layers_print_sequence", "other_layers_sequence_choice", "print_sequence", "spiral_mode"};
 
+static std::pair<std::string, std::string> extruder_variant_keys[]{
+    {},                                                  // invalid
+    {"print_extruder_id", "print_extruder_variant"},     // Preset::TYPE_PRINT
+    {},                                                  // invalid
+    {"", "filament_extruder_variant"},                   // Preset::TYPE_FILAMENT filament don't use id anymore
+    {},                                                  // invalid
+    {"printer_extruder_id", "printer_extruder_variant"}, // Preset::TYPE_PRINTER
+};
+
 void Tab::Highlighter::set_timer_owner(wxEvtHandler* owner, int timerid/* = wxID_ANY*/)
 {
     m_timer.SetOwner(owner, timerid);
@@ -487,12 +496,21 @@ void Tab::create_preset_tab()
     m_main_sizer->Add(m_tabctrl, 0, wxEXPAND | wxALL, 0 );
 
     if (dynamic_cast<TabPrinter *>(this) || dynamic_cast<TabPrint *>(this)) {
-        m_extruder_switch = new SwitchButton(panel);
+        m_extruder_switch = new MultiSwitchButton(panel);
         m_extruder_switch->SetMaxSize({em_unit(this) * 24, -1});
-        m_extruder_switch->SetLabels(_L("Left"), _L("Right"));
-        m_extruder_switch->Bind(wxEVT_TOGGLEBUTTON, [this] (auto & evt) {
+        m_extruder_switch->Bind(wxCUSTOMEVT_MULTISWITCH_SELECTION, [this](auto &evt) {
             evt.Skip();
-            switch_excluder(evt.GetInt());
+            int selection = evt.GetInt();
+
+            int extruder_id;
+            NozzleVolumeType nozzle_type;
+            parse_extruder_selection(selection, extruder_id, nozzle_type);
+            int extruder_count = m_preset_bundle->get_printer_extruder_count();
+            m_actual_nozzle_volumes.resize(extruder_count, NozzleVolumeType::nvtStandard);
+            if (extruder_id >= 0 && extruder_id < m_preset_bundle->get_printer_extruder_count())
+                m_actual_nozzle_volumes[extruder_id] = nozzle_type;
+
+            switch_excluder(extruder_id);
             reload_config();
             update_changed_ui();
         });
@@ -555,6 +573,79 @@ void Tab::create_preset_tab()
     rebuild_page_tree();
 
     m_completed = true;
+}
+
+void Tab::parse_extruder_selection(int selection, int &extruder_id, NozzleVolumeType &nozzle_type)
+{
+    auto nozzle_volumes = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
+    int  extruder_nums  = m_preset_bundle->get_printer_extruder_count();
+
+    int current_index = 0;
+
+    for (int i = 0; i < extruder_nums; ++i) {
+        NozzleVolumeType volume_type = NozzleVolumeType(nozzle_volumes->values[i]);
+
+        // TODO: Orca: Support hybrid
+        //if (volume_type == NozzleVolumeType::nvtHybrid) {
+        //    if (selection == current_index) {
+        //        extruder_id = i;
+        //        nozzle_type = NozzleVolumeType::nvtStandard;
+        //        return;
+        //    } else if (selection == current_index + 1) {
+        //        extruder_id = i;
+        //        nozzle_type = NozzleVolumeType::nvtHighFlow;
+        //        return;
+        //    }
+        //    current_index += 2;
+        //} else {
+            if (selection == current_index) {
+                extruder_id = i;
+                nozzle_type = volume_type;
+                return;
+            }
+            current_index += 1;
+        //}
+    }
+
+    extruder_id = 0;
+    nozzle_type = NozzleVolumeType::nvtStandard;
+}
+
+int Tab::calculate_selection_index_for_extruder(int extruder_id, NozzleVolumeType nozzle_type)
+{
+    auto nozzle_volumes = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
+    int  extruder_nums  = m_preset_bundle->get_printer_extruder_count();
+
+    int index = 0;
+
+    for (int i = 0; i < extruder_nums; ++i) {
+        if (i == extruder_id) {
+            // TODO: Orca: Support hybrid
+            NozzleVolumeType volume_type = NozzleVolumeType(nozzle_volumes->values[i]);
+            /*if (volume_type == NozzleVolumeType::nvtHybrid) {
+                return nozzle_type == NozzleVolumeType::nvtHighFlow ? index + 1 : index;
+            } else*/ {
+                return index;
+            }
+        }
+
+        NozzleVolumeType volume_type = NozzleVolumeType(nozzle_volumes->values[i]);
+        index += /*(volume_type == NozzleVolumeType::nvtHybrid) ? 2 :*/ 1;
+    }
+
+    return 0;
+}
+
+int Tab::get_current_active_extruder()
+{
+    if (m_extruder_switch && m_extruder_switch->IsThisEnabled()) {
+        int selection = m_extruder_switch->GetSelection();
+        int extruder_id;
+        NozzleVolumeType nozzle_type;
+        parse_extruder_selection(selection, extruder_id, nozzle_type);
+        return extruder_id;
+    }
+    return 0;
 }
 
 void Tab::add_scaled_button(wxWindow* parent,
@@ -917,7 +1008,8 @@ void Tab::update_changed_ui()
     }
 
     update_custom_dirty(dirty_options, nonsys_options);
-    
+    update_all_extruder_options_status();
+
     filter_diff_option(dirty_options);
     filter_diff_option(nonsys_options);
 
@@ -936,6 +1028,7 @@ void Tab::update_changed_ui()
     }
 
     decorate();
+    update_extruder_switch_colors();
 
     wxTheApp->CallAfter([this]() {
         if (parent()) //To avoid a crash, parent should be exist for a moment of a tree updating
@@ -951,6 +1044,168 @@ void add_correct_opts_to_options_list(const std::string &opt_key, std::map<std::
     map.emplace(opt_key + "#0", value);
 }
 
+void Tab::update_all_extruder_options_status()
+{
+    if (!m_extruder_switch && !m_variant_combo) {
+        return;
+    }
+    m_all_extruder_options_status.clear();
+
+    int extruder_count = m_preset_bundle->get_printer_extruder_count();
+    auto extruders = m_preset_bundle->printers.get_edited_preset().config.option<ConfigOptionEnumsGeneric>("extruder_type");
+    auto nozzle_volumes = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
+
+    std::set<int> all_config_indices;
+    for (int extruder_id = 0; extruder_id < extruder_count; ++extruder_id) {
+        for (auto nozzle_type : get_valid_nozzle_volume_type()) {
+            auto variant_keys = extruder_variant_keys[m_type >= Preset::TYPE_COUNT ? Preset::TYPE_PRINT : m_type];
+            int config_index = m_config->get_index_for_extruder(
+                extruder_id + 1,
+                variant_keys.first,
+                ExtruderType(extruders->values[extruder_id]),
+                nozzle_type,
+                variant_keys.second
+            );
+            if (config_index >= 0) {
+                all_config_indices.insert(config_index);
+            }
+        }
+    }
+
+    auto dirty_options = m_presets->current_dirty_options(true);
+    auto nonsys_options = m_presets->current_different_from_parent_options(true);
+    auto filter_extruder_options = [](const std::vector<std::string>& options) {
+        std::vector<std::string> filtered_options;
+        for (const auto& opt : options) {
+            if (opt.find('#') != std::string::npos) {
+                filtered_options.push_back(opt);
+            }
+        }
+        return filtered_options;
+    };
+
+    auto filtered_dirty_options = filter_extruder_options(dirty_options);
+    auto filtered_nonsys_options = filter_extruder_options(nonsys_options);
+
+    for (int config_index : all_config_indices) {
+        int status_value = m_opt_status_value;
+        for (const auto &opt_key : filtered_dirty_options) {
+              m_all_extruder_options_status[opt_key] = status_value & ~osInitValue;
+        }
+        for (const auto &opt_key : filtered_nonsys_options) {
+            auto iter = m_all_extruder_options_status.find(opt_key);
+            if (iter != m_all_extruder_options_status.end()) {
+                iter->second &= ~osSystemValue;
+            } else {
+                m_all_extruder_options_status[opt_key] = status_value & ~osSystemValue;
+            }
+        }
+    }
+}
+
+void Tab::update_extruder_switch_colors()
+{
+    if (!m_extruder_switch && !m_variant_combo) {
+        return;
+    }
+
+    auto options = generate_extruder_options();
+    auto extruders = m_preset_bundle->printers.get_edited_preset().config.option<ConfigOptionEnumsGeneric>("extruder_type");
+
+    for (size_t switch_index = 0; switch_index < options.size(); ++switch_index) {
+        int selection = m_extruder_switch ? m_extruder_switch->GetSelection() : (m_variant_combo ? m_variant_combo->GetSelection() : 0);
+        if (switch_index == selection) continue;
+
+        bool sys_extruder = true;
+        bool modified_extruder = false;
+        std::vector<PageShp> pages_to_check;
+
+        if (m_active_page) {
+            if (m_active_page->title() == "Speed" || m_active_page->title() == "Motion ability" || m_active_page->title() == "Filament" ||
+                m_active_page->title() == "Setting Overrides" || m_active_page->title() == "Multimaterial") {
+                for (auto page_ptr : m_pages) {
+                    if (page_ptr.get() == m_active_page) {
+                        pages_to_check.push_back(page_ptr);
+                        break;
+                    }
+                }
+            }
+        }
+        if (pages_to_check.empty()) {
+            continue;
+        }
+        check_extruder_options_status(switch_index, sys_extruder, modified_extruder, pages_to_check);
+
+        StateColor default_color(std::make_pair(0x6B6B6B, (int) StateColor::NotChecked), std::make_pair(0xFFFFFE, (int) StateColor::Normal));
+        StateColor color = modified_extruder ? StateColor(m_modified_label_clr) : default_color;
+
+        if (m_extruder_switch)
+            m_extruder_switch->SetButtonTextColor(switch_index, color);
+        if (m_variant_combo) {
+            Button *btn = m_variant_combo->GetButton(switch_index);
+            if (btn) {
+                m_variant_combo->SetButtonTextColor(switch_index, color);
+            }
+        }
+    }
+}
+
+void Tab::check_extruder_options_status(int index, bool &sys_extruder, bool &modified_extruder, const std::vector<PageShp>& pages_to_check)
+{
+    int config_index = index;
+    if (m_type == Preset::TYPE_PRINT || m_type == Preset::TYPE_PRINTER) {
+        int extruder_id;
+        NozzleVolumeType nozzle_type;
+        parse_extruder_selection(index, extruder_id, nozzle_type);
+
+        auto extruders = m_preset_bundle->printers.get_edited_preset().config.option<ConfigOptionEnumsGeneric>("extruder_type");
+        auto variant_keys = extruder_variant_keys[m_type >= Preset::TYPE_COUNT ? Preset::TYPE_PRINT : m_type];
+        config_index = m_config->get_index_for_extruder(
+            extruder_id + 1,
+            variant_keys.first,
+            ExtruderType(extruders->values[extruder_id]),
+            nozzle_type,
+            variant_keys.second
+        );
+    }
+
+    for (auto page : pages_to_check) {
+        /*if (page->title() != "Speed" && page->title() != "Motion ability" && page->title() != "Filament" && page->title() != "Setting Overrides" && page->title() != "Multimaterial") {
+            continue;
+        }*/
+        for (auto group : page->m_optgroups) {
+            for (const auto &kvp : group->opt_map()) {
+                std::string base_opt_key = kvp.second.first;
+                // For filament tab, common options will not change color when edited
+                if (m_type == Preset::TYPE_FILAMENT && kvp.second.second == -1) {
+                    continue;
+                }
+                std::string target_opt_key = base_opt_key + "#" + std::to_string(config_index);
+
+                auto status_iter = m_all_extruder_options_status.find(target_opt_key);
+                if (status_iter != m_all_extruder_options_status.end()) {
+                    bool found_modified_for_this_config = false;
+                    const bool deep_compare = (m_type == Preset::TYPE_PRINTER || m_type == Preset::TYPE_PRINT || m_type == Preset::TYPE_FILAMENT || m_type == Preset::TYPE_SLA_MATERIAL ||
+                                   m_type == Preset::TYPE_MODEL);
+                    auto original_dirty_options = m_presets->current_dirty_options(deep_compare);
+                    for (const std::string &orig_opt : original_dirty_options) {
+                        if (orig_opt == target_opt_key) {
+                            found_modified_for_this_config = true;
+                            break;
+                        }
+                    }
+
+                    if (found_modified_for_this_config) {
+                        sys_extruder = (status_iter->second & osSystemValue) != 0;
+                        modified_extruder |= (status_iter->second & osInitValue) == 0;
+
+                        if (!sys_extruder && modified_extruder) { return; }
+                    }
+                }
+            }
+        }
+    }
+}
 void Tab::init_options_list()
 {
     if (!m_options_list.empty())
@@ -1074,6 +1329,13 @@ void Tab::update_changed_tree_ui()
                     if (m_type == Slic3r::Preset::TYPE_FILAMENT || m_type == Slic3r::Preset::TYPE_SLA_MATERIAL)
                         get_sys_and_mod_flags("compatible_prints", sys_page, modified_page);
                     get_sys_and_mod_flags("compatible_printers", sys_page, modified_page);
+                }
+            }
+            if (page->title() == "Speed" || page->title() == "Motion ability" || page->title() == "Filament" || page->title() == "Setting Overrides" || page->title() == "Multimaterial") {
+                auto options = generate_extruder_options();
+                for (size_t switch_index = 0; switch_index < options.size(); ++switch_index) {
+                    std::vector<PageShp> pages_to_check = { page };
+                    check_extruder_options_status(switch_index, sys_page, modified_page, pages_to_check);
                 }
             }
             for (auto group : page->m_optgroups)
@@ -1292,9 +1554,9 @@ void Tab::msw_rescale()
         bmp->msw_rescale();
 
     if (m_mode_view)
-    {
         m_mode_view->Rescale();
-    }
+    if (m_extruder_switch)
+        m_extruder_switch->Rescale();
     if (m_variant_combo)
         m_variant_combo->Rescale();
 
@@ -5372,7 +5634,7 @@ void TabPrinter::toggle_options()
         auto get_index_for_extruder =
             [this, &extruders, &nozzle_volumes](int extruder_id, int stride = 1) {
         return m_config->get_index_for_extruder(extruder_id + 1, "printer_extruder_id",
-            ExtruderType(extruders->values[extruder_id]), NozzleVolumeType(nozzle_volumes->values[extruder_id]), "printer_extruder_variant", stride);
+            ExtruderType(extruders->values[extruder_id]), get_actual_nozzle_volume_type(extruder_id), "printer_extruder_variant", stride);
     };
 
     //BBS: whether the preset is Bambu Lab printer
@@ -6460,7 +6722,11 @@ bool Tab::tree_sel_change_delayed(wxCommandEvent& event)
         // update_undo_buttons();
         this->OnActivate();
         m_parent->set_active_tab(this);
-        GetParent()->Layout();
+        wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
+        if (variant_ctrl) {
+            m_main_sizer->Show(variant_ctrl, variant_ctrl->IsThisEnabled() && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder "));
+            GetParent()->Layout();
+        }
 
         m_page_view->Thaw();
         return false;
@@ -6471,11 +6737,9 @@ bool Tab::tree_sel_change_delayed(wxCommandEvent& event)
         return false;
 
     m_active_page = page;
-    if (m_extruder_switch) {
-        m_main_sizer->Show(m_extruder_switch, m_extruder_switch->IsEnabled() && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder"));
-        GetParent()->Layout();
-    } else if (m_variant_combo) {
-        m_main_sizer->Show(m_variant_combo, m_variant_combo->IsEnabled() && !m_active_page->m_opt_id_map.empty());
+    wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
+    if (variant_ctrl) {
+        m_main_sizer->Show(variant_ctrl, variant_ctrl->IsThisEnabled() && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder"));
         GetParent()->Layout();
     }
 
@@ -7303,21 +7567,24 @@ void Tab::update_extruder_variants(int extruder_id)
         int extruder_nums = m_preset_bundle->get_printer_extruder_count();
         nozzle_volumes->values.resize(extruder_nums);
         if (extruder_nums == 2) {
-            auto     nozzle_volumes_def = m_preset_bundle->project_config.def()->get("nozzle_volume_type");
-            wxString left, right;
-            for (size_t i = 0; i < nozzle_volumes_def->enum_labels.size(); ++i) {
-                if (nozzle_volumes->values[0] == i) left = _L(nozzle_volumes_def->enum_labels[i]);
-                if (nozzle_volumes->values[1] == i) right = _L(nozzle_volumes_def->enum_labels[i]);
+            auto options = generate_extruder_options();
+            m_extruder_switch->SetOptions(options);
+
+            int selection_index;
+            if (extruder_id >= 0) {
+                NozzleVolumeType current_nozzle_type = get_actual_nozzle_volume_type(extruder_id);
+                selection_index = calculate_selection_index_for_extruder(extruder_id, current_nozzle_type);
+            } else {
+                selection_index = m_extruder_switch->GetSelection();
+                if (selection_index < 0) {
+                    selection_index = 0;
+                }
             }
-            m_extruder_switch->SetLabels(wxString::Format(_L("Left: %s"), left), wxString::Format(_L("Right: %s"), right));
-            m_extruder_switch->SetValue(extruder_id == 1);
+
+            m_extruder_switch->SetSelection(selection_index);
             m_extruder_switch->Enable(true);
-            assert(m_extruder_switch->IsEnabled());
         } else {
             m_extruder_switch->Enable(false);
-            m_main_sizer->Show(m_extruder_switch, false);
-            GetParent()->Layout();
-            return;
         }
     } else if (m_variant_combo) {
         if (extruder_id >= 0)
@@ -7333,13 +7600,31 @@ void Tab::update_extruder_variants(int extruder_id)
         m_variant_combo->Enable(options.size() > 1);
     }
     switch_excluder(extruder_id);
-    if (m_extruder_switch) {
-        m_main_sizer->Show(m_extruder_switch, m_active_page && !m_active_page->m_opt_id_map.empty());
-        GetParent()->Layout();
-    } else if (m_variant_combo) {
-        m_main_sizer->Show(m_variant_combo, m_variant_combo->IsEnabled() && m_active_page && !m_active_page->m_opt_id_map.empty());
+    wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
+    if (variant_ctrl) {
+        m_main_sizer->Show(variant_ctrl, variant_ctrl->IsThisEnabled() && m_active_page && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder "));
         GetParent()->Layout();
     }
+}
+
+NozzleVolumeType Tab::get_actual_nozzle_volume_type(int extruder_id)
+{
+    int extruder_count = m_preset_bundle->get_printer_extruder_count();
+    auto nozzle_volumes = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
+    if (extruder_count == 1) {
+        if (extruder_id < 0)
+            return NozzleVolumeType::nvtStandard;
+
+        return NozzleVolumeType(nozzle_volumes->values[extruder_id]);
+    }
+
+    if (extruder_id < 0 || extruder_id >= extruder_count)
+        return NozzleVolumeType::nvtStandard;
+
+    if (m_actual_nozzle_volumes.size() != static_cast<size_t>(extruder_count))
+        m_actual_nozzle_volumes.resize(extruder_count, NozzleVolumeType::nvtStandard);
+
+    return m_actual_nozzle_volumes[extruder_id];
 }
 
 void Tab::switch_excluder(int extruder_id)
@@ -7347,15 +7632,11 @@ void Tab::switch_excluder(int extruder_id)
     Preset & printer_preset = m_preset_bundle->printers.get_edited_preset();
     auto nozzle_volumes = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
     auto extruders      = printer_preset.config.option<ConfigOptionEnumsGeneric>("extruder_type");
-    std::pair<std::string, std::string> variant_keys[]{
-        {}, {"print_extruder_id", "print_extruder_variant"},     // Preset::TYPE_PRINT
-        {}, {"", "filament_extruder_variant"},                   // Preset::TYPE_FILAMENT filament don't use id anymore
-        {}, {"printer_extruder_id", "printer_extruder_variant"}, // Preset::TYPE_PRINTER
-    };
+
     if (!m_variant_combo && (extruder_id >= (int)nozzle_volumes->size() || extruder_id >= (int)extruders->size()))
         extruder_id = 0;
     if (m_extruder_switch && m_type != Preset::TYPE_PRINTER) {
-        int current_extruder = m_extruder_switch->GetValue() ? 1 : 0;
+        int current_extruder = get_current_active_extruder();
         if (extruder_id == -1)
             extruder_id = current_extruder;
         else if (extruder_id != current_extruder)
@@ -7370,15 +7651,16 @@ void Tab::switch_excluder(int extruder_id)
             return;
     }
     auto get_index_for_extruder =
-            [this, &extruders, &nozzle_volumes, variant_keys = variant_keys[m_type >= Preset::TYPE_COUNT ? Preset::TYPE_PRINT : m_type]](int extruder_id, int stride = 1) {
+            [this, &extruders, &nozzle_volumes, variant_keys = extruder_variant_keys[m_type >= Preset::TYPE_COUNT ? Preset::TYPE_PRINT : m_type]](int extruder_id, int stride = 1) {
         return m_config->get_index_for_extruder(extruder_id + 1, variant_keys.first,
-            ExtruderType(extruders->values[extruder_id]), NozzleVolumeType(nozzle_volumes->values[extruder_id]), variant_keys.second, stride);
+            ExtruderType(extruders->values[extruder_id]), get_actual_nozzle_volume_type(extruder_id), variant_keys.second, stride);
     };
     auto index = m_variant_combo ? extruder_id : get_index_for_extruder(extruder_id == -1 ? 0 : extruder_id);
     if (index < 0)
         return;
-    if (m_variant_combo)
-        m_variant_combo->SetClientData(reinterpret_cast<void *>(static_cast<std::uintptr_t>(index)));
+    if (m_extruder_switch) m_extruder_switch->SetClientData(reinterpret_cast<void*>(static_cast<std::uintptr_t>(index)));
+    if (m_variant_combo) m_variant_combo->SetClientData(reinterpret_cast<void *>(static_cast<std::uintptr_t>(index)));
+    wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
     for (auto page : m_pages) {
         bool is_extruder = false;
         if (m_type == Preset::TYPE_PRINTER) {
