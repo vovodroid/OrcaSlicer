@@ -610,7 +610,7 @@ std::string GCodeWriter::travel_to_xy(const Vec2d &point, const std::string &com
     GCodeG1Formatter w;
     w.emit_xy(point_on_plate);
     auto speed = m_is_first_layer
-        ? this->config.get_abs_value("initial_layer_travel_speed") : this->config.travel_speed.value;
+        ? this->config.get_abs_value_at("initial_layer_travel_speed", get_extruder_index(this->config, filament()->id())) : this->config.travel_speed.get_at(get_extruder_index(this->config, filament()->id()));
     w.emit_f(speed * 60.0);
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
@@ -696,7 +696,7 @@ std::string GCodeWriter::travel_to_xyz(const Vec3d &point, const std::string &co
         // BBS
     Vec3d dest_point = point;
     auto travel_speed =
-        m_is_first_layer ? this->config.get_abs_value("initial_layer_travel_speed") : this->config.travel_speed.value;
+        m_is_first_layer ? this->config.get_abs_value_at("initial_layer_travel_speed", get_extruder_index(this->config, filament()->id())) : this->config.travel_speed.get_at(get_extruder_index(this->config, filament()->id()));
     //BBS: a z_hop need to be handle when travel
     if (std::abs(m_to_lift) > EPSILON) {
         assert(std::abs(m_lifted) < EPSILON);
@@ -793,13 +793,13 @@ std::string GCodeWriter::travel_to_xyz(const Vec3d &point, const std::string &co
     {
         //force to move xy first then z after filament change
         w.emit_xy(Vec2d(point_on_plate.x(), point_on_plate.y()));
-        w.emit_f(this->config.travel_speed.value * 60.0);
+        w.emit_f(this->config.travel_speed.get_at(get_extruder_index(this->config, filament()->id())) * 60.0);
         w.emit_comment(GCodeWriter::full_gcode_comment, comment);
         out_string = w.string() + _travel_to_z(point_on_plate.z(), comment);
     } else {
         GCodeG1Formatter w;
         w.emit_xyz(point_on_plate);
-        w.emit_f(this->config.travel_speed.value * 60.0);
+        w.emit_f(this->config.travel_speed.get_at(get_extruder_index(this->config, filament()->id())) * 60.0);
         w.emit_comment(GCodeWriter::full_gcode_comment, comment);
         out_string = w.string();
     }
@@ -832,10 +832,10 @@ std::string GCodeWriter::_travel_to_z(double z, const std::string &comment)
 {
     m_pos(2) = z;
 
-    double speed = this->config.travel_speed_z.value;
+    double speed = this->config.travel_speed_z.get_at(get_extruder_index(this->config, filament()->id()));
     if (speed == 0.) {
-        speed = m_is_first_layer ? this->config.get_abs_value("initial_layer_travel_speed")
-                                 : this->config.travel_speed.value;
+        speed = m_is_first_layer ? this->config.get_abs_value_at("initial_layer_travel_speed", get_extruder_index(this->config, filament()->id()))
+                                 : this->config.travel_speed.get_at(get_extruder_index(this->config, filament()->id()));
     }
 
     GCodeG1Formatter w;
@@ -849,11 +849,11 @@ std::string GCodeWriter::_travel_to_z(double z, const std::string &comment)
 std::string GCodeWriter::_spiral_travel_to_z(double z, const Vec2d &ij_offset, const std::string &comment)
 {
     std::string output;
-    double speed = this->config.travel_speed_z.value;
+    double speed = this->config.travel_speed_z.get_at(get_extruder_index(this->config, filament()->id()));
 
     if (speed == 0.) {
-        speed = m_is_first_layer ? this->config.get_abs_value("initial_layer_travel_speed")
-                                 : this->config.travel_speed.value;
+        speed = m_is_first_layer ? this->config.get_abs_value_at("initial_layer_travel_speed", get_extruder_index(this->config, filament()->id()))
+                                 : this->config.travel_speed.get_at(get_extruder_index(this->config, filament()->id()));
     }
 
     if (!this->config.enable_arc_fitting) { // Orca: if arc fitting is disabled, approximate the arc with small linear segments

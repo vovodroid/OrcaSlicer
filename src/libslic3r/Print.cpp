@@ -1732,6 +1732,7 @@ StringObjectException Print::validate(StringObjectException *warning, Polygons* 
     // check if print speed/accel/jerk is higher than the maximum speed of the printer
     if (warning) {
         try {
+            /* TODO: Orca: fix it
             auto check_motion_ability_object_setting = [&](const std::vector<std::string>& keys_to_check, double limit) -> std::string {
                 std::string warning_key;
                 for (const auto& key : keys_to_check) {
@@ -1759,12 +1760,15 @@ StringObjectException Print::validate(StringObjectException *warning, Polygons* 
 
             // check jerk
             if (!ignore_jerk_validation) {
-                if (m_default_object_config.default_jerk == 1 || m_default_object_config.outer_wall_jerk == 1 ||
-                    m_default_object_config.inner_wall_jerk == 1) {
+                auto is_jerk_too_low = [](const ConfigOptionFloatsNullable& cfg) {
+                    return std::any_of(cfg.values.begin(), cfg.values.end(), [](const float v) { return v == 1; });
+                };
+                if (is_jerk_too_low(m_default_object_config.default_jerk) || is_jerk_too_low(m_default_object_config.outer_wall_jerk) ||
+                    is_jerk_too_low(m_default_object_config.inner_wall_jerk)) {
                    warning->string = L("Setting the jerk speed too low could lead to artifacts on curved surfaces");
-                   if (m_default_object_config.outer_wall_jerk == 1)
+                   if (is_jerk_too_low(m_default_object_config.outer_wall_jerk))
                         warning_key = "outer_wall_jerk";
-                   else if (m_default_object_config.inner_wall_jerk == 1)
+                   else if (is_jerk_too_low(m_default_object_config.inner_wall_jerk))
                         warning_key = "inner_wall_jerk";
                    else
                         warning_key = "default_jerk";
@@ -1856,6 +1860,7 @@ StringObjectException Print::validate(StringObjectException *warning, Polygons* 
                     }
                }
             }
+            */
 
             // check speed
             // Orca: disable the speed check for now as we don't cap the speed

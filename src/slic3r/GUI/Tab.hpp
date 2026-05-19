@@ -405,6 +405,7 @@ public:
 	bool			current_preset_is_dirty() const;
 	bool			saved_preset_is_dirty() const;
 	void            update_saved_preset_from_current_preset();
+    void            update_pages_with_multi_variant();
 
 	DynamicPrintConfig*	get_config() { return m_config; }
     PresetCollection *  get_presets() { return m_presets; }
@@ -437,8 +438,8 @@ public:
     virtual const std::string&	get_custom_gcode(const t_config_option_key& opt_key);
     virtual void				set_custom_gcode(const t_config_option_key& opt_key, const std::string& value);
 
-    void        update_extruder_variants(int extruder_id = -1);
-    void        switch_excluder(int extruder_id = -1);
+    void        update_extruder_variants(int extruder_id = -1, bool reload = true);
+    void        switch_excluder(int extruder_id = -1, bool reload = true);
     void        sync_excluder();
 	void        parse_extruder_selection(int selection, int &extruder_id, NozzleVolumeType &nozzle_type);
     int         calculate_selection_index_for_extruder(int extruder_id, NozzleVolumeType nozzle_type);

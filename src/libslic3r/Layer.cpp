@@ -146,9 +146,9 @@ bool Layer::is_perimeter_compatible(const Print& print, const PrintRegion& a, co
 		&& config.wall_sequence               == other_config.wall_sequence
 		&& config.is_infill_first             == other_config.is_infill_first
 		&& config.inner_wall_speed.get_at(print.get_extruder_id(config.wall_filament)) == other_config.inner_wall_speed.get_at(print.get_extruder_id(config.wall_filament))
-		&& config.outer_wall_speed    == other_config.outer_wall_speed
-		&& config.small_perimeter_speed    == other_config.small_perimeter_speed
-        && config.gap_infill_speed.value == other_config.gap_infill_speed.value
+		&& config.outer_wall_speed.get_at(print.get_extruder_id(config.wall_filament)) == other_config.outer_wall_speed.get_at(print.get_extruder_id(config.wall_filament))
+		&& config.small_perimeter_speed.get_at(print.get_extruder_id(config.wall_filament)) == other_config.small_perimeter_speed.get_at(print.get_extruder_id(config.wall_filament))
+        && config.gap_infill_speed.get_at(print.get_extruder_id(config.wall_filament)) == other_config.gap_infill_speed.get_at(print.get_extruder_id(config.wall_filament))
         && config.filter_out_gap_fill.value == other_config.filter_out_gap_fill.value
 		&& config.detect_overhang_wall                   == other_config.detect_overhang_wall
 		&& config.overhang_reverse                       == other_config.overhang_reverse

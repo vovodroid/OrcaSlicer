@@ -685,6 +685,32 @@ bool ConfigBase::set_deserialize_raw(const t_config_option_key &opt_key_src, con
     return success;
 }
 
+double ConfigBase::get_abs_value_at(const t_config_option_key &opt_key, size_t index) const
+{
+    const ConfigOption *raw_opt = this->option(opt_key);
+    assert(raw_opt != nullptr);
+    if (raw_opt->type() == coFloats) {
+        return static_cast<const ConfigOptionFloats*>(raw_opt)->get_at(index);
+    }
+    if (raw_opt->type() == coFloatsOrPercents) {
+        const ConfigDef *def = this->def();
+        if (def == nullptr) throw NoDefinitionException(opt_key);
+        const ConfigOptionDef *opt_def = def->get(opt_key);
+        assert(opt_def != nullptr);
+
+        if (opt_def->ratio_over.empty()) {
+            return 0;
+        } else {
+            const ConfigOption *ratio_opt = this->option(opt_def->ratio_over);
+            assert(ratio_opt->type() == coFloats);
+            const ConfigOptionFloats *ratio_values = static_cast<const ConfigOptionFloats *>(ratio_opt);
+            return static_cast<const ConfigOptionFloatsOrPercents *>(raw_opt)->get_at(index).get_abs_value(ratio_values->get_at(index));
+        }
+    }
+
+    throw ConfigurationError("ConfigBase::get_abs_value_at(): Not a valid option type for get_abs_value_at()");
+}
+
 // Return an absolute value of a possibly relative config variable.
 // For example, return absolute infill extrusion width, either from an absolute value, or relative to the layer height.
 double ConfigBase::get_abs_value(const t_config_option_key &opt_key) const

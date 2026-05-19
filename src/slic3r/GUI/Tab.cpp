@@ -511,8 +511,6 @@ void Tab::create_preset_tab()
                 m_actual_nozzle_volumes[extruder_id] = nozzle_type;
 
             switch_excluder(extruder_id);
-            reload_config();
-            update_changed_ui();
         });
         m_extruder_sync_box = new wxPanel(panel, wxID_ANY);
         m_extruder_sync_box->SetBackgroundColour(panel->GetBackgroundColour());
@@ -2166,15 +2164,12 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
         int extruder_idx = std::atoi(opt_key.substr(opt_key.find_last_of('#') + 1).c_str());
         for (auto tab : wxGetApp().tabs_list) {
             tab->update_extruder_variants(extruder_idx);
-            tab->reload_config();
         }
         if (auto tab = wxGetApp().plate_tab) {
             tab->update_extruder_variants(extruder_idx);
-            tab->reload_config();
         }
         for (auto tab : wxGetApp().model_tabs_list) {
             tab->update_extruder_variants(extruder_idx);
-            tab->reload_config();
         }
         if (wxGetApp().app_config->get("auto_calculate_flush") == "all") {
             wxGetApp().plater()->sidebar().auto_calc_flushing_volumes(-1,extruder_idx);
@@ -2756,66 +2751,66 @@ void TabPrint::build()
 
     page = add_options_page(L("Speed"), "custom-gcode_speed"); // ORCA: icon only visible on placeholders
         optgroup = page->new_optgroup(L("First layer speed"), L"param_speed_first", 15);
-        optgroup->append_single_option_line("initial_layer_speed", "speed_settings_initial_layer_speed#initial-layer");
-        optgroup->append_single_option_line("initial_layer_infill_speed", "speed_settings_initial_layer_speed#initial-layer-infill");
-        optgroup->append_single_option_line("initial_layer_travel_speed", "speed_settings_initial_layer_speed#initial-layer-travel-speed");
+        optgroup->append_single_option_line("initial_layer_speed", "speed_settings_initial_layer_speed#initial-layer", 0);
+        optgroup->append_single_option_line("initial_layer_infill_speed", "speed_settings_initial_layer_speed#initial-layer-infill", 0);
+        optgroup->append_single_option_line("initial_layer_travel_speed", "speed_settings_initial_layer_speed#initial-layer-travel-speed", 0);
         optgroup->append_single_option_line("slow_down_layers", "speed_settings_initial_layer_speed#number-of-slow-layers");
         optgroup = page->new_optgroup(L("Other layers speed"), L"param_speed", 15);
-        optgroup->append_single_option_line("outer_wall_speed", "speed_settings_other_layers_speed#outer-wall");
+        optgroup->append_single_option_line("outer_wall_speed", "speed_settings_other_layers_speed#outer-wall", 0);
         optgroup->append_single_option_line("inner_wall_speed", "speed_settings_other_layers_speed#inner-wall", 0);
-        optgroup->append_single_option_line("small_perimeter_speed", "speed_settings_other_layers_speed#small-perimeters");
-        optgroup->append_single_option_line("small_perimeter_threshold", "speed_settings_other_layers_speed#small-perimeters-threshold");
-        optgroup->append_single_option_line("sparse_infill_speed", "speed_settings_other_layers_speed#sparse-infill");
-        optgroup->append_single_option_line("internal_solid_infill_speed", "speed_settings_other_layers_speed#internal-solid-infill");
-        optgroup->append_single_option_line("top_surface_speed", "speed_settings_other_layers_speed#top-surface");
-        optgroup->append_single_option_line("gap_infill_speed", "speed_settings_other_layers_speed#gap-infill");
+        optgroup->append_single_option_line("small_perimeter_speed", "speed_settings_other_layers_speed#small-perimeters", 0);
+        optgroup->append_single_option_line("small_perimeter_threshold", "speed_settings_other_layers_speed#small-perimeters-threshold", 0);
+        optgroup->append_single_option_line("sparse_infill_speed", "speed_settings_other_layers_speed#sparse-infill", 0);
+        optgroup->append_single_option_line("internal_solid_infill_speed", "speed_settings_other_layers_speed#internal-solid-infill", 0);
+        optgroup->append_single_option_line("top_surface_speed", "speed_settings_other_layers_speed#top-surface", 0);
+        optgroup->append_single_option_line("gap_infill_speed", "speed_settings_other_layers_speed#gap-infill", 0);
         optgroup->append_single_option_line("ironing_speed", "speed_settings_other_layers_speed#ironing-speed");
-        optgroup->append_single_option_line("support_speed", "speed_settings_other_layers_speed#support");
-        optgroup->append_single_option_line("support_interface_speed", "speed_settings_other_layers_speed#support-interface");
+        optgroup->append_single_option_line("support_speed", "speed_settings_other_layers_speed#support", 0);
+        optgroup->append_single_option_line("support_interface_speed", "speed_settings_other_layers_speed#support-interface", 0);
         optgroup = page->new_optgroup(L("Overhang speed"), L"param_overhang_speed", 15);
-        optgroup->append_single_option_line("enable_overhang_speed", "speed_settings_overhang_speed#slow-down-for-overhang");
+        optgroup->append_single_option_line("enable_overhang_speed", "speed_settings_overhang_speed#slow-down-for-overhang", 0);
 
-        optgroup->append_single_option_line("slowdown_for_curled_perimeters", "speed_settings_overhang_speed#slow-down-for-curled-perimeters");
+        optgroup->append_single_option_line("slowdown_for_curled_perimeters", "speed_settings_overhang_speed#slow-down-for-curled-perimeters", 0);
         Line line = { L("Overhang speed"), L("This is the speed for various overhang degrees. Overhang degrees are expressed as a percentage of line width. 0 speed means no slowing down for the overhang degree range and wall speed is used") };
         line.label_path = "speed_settings_overhang_speed#speed";
-        line.append_option(optgroup->get_option("overhang_1_4_speed"));
-        line.append_option(optgroup->get_option("overhang_2_4_speed"));
-        line.append_option(optgroup->get_option("overhang_3_4_speed"));
-        line.append_option(optgroup->get_option("overhang_4_4_speed"));
+        line.append_option(optgroup->get_option("overhang_1_4_speed", 0));
+        line.append_option(optgroup->get_option("overhang_2_4_speed", 0));
+        line.append_option(optgroup->get_option("overhang_3_4_speed", 0));
+        line.append_option(optgroup->get_option("overhang_4_4_speed", 0));
         optgroup->append_line(line);
         optgroup->append_separator();
         line = { L("Bridge"), L("Set speed for external and internal bridges") };
-        line.append_option(optgroup->get_option("bridge_speed"));
-        line.append_option(optgroup->get_option("internal_bridge_speed"));
+        line.append_option(optgroup->get_option("bridge_speed", 0));
+        line.append_option(optgroup->get_option("internal_bridge_speed", 0));
         optgroup->append_line(line);
 
         optgroup = page->new_optgroup(L("Travel speed"), L"param_travel_speed", 15);
-        optgroup->append_single_option_line("travel_speed", "speed_settings_travel");
+        optgroup->append_single_option_line("travel_speed", "speed_settings_travel", 0);
 
         optgroup = page->new_optgroup(L("Acceleration"), L"param_acceleration", 15);
-        optgroup->append_single_option_line("default_acceleration", "speed_settings_acceleration#normal-printing");
-        optgroup->append_single_option_line("outer_wall_acceleration", "speed_settings_acceleration#outer-wall");
-        optgroup->append_single_option_line("inner_wall_acceleration", "speed_settings_acceleration#inner-wall");
-        optgroup->append_single_option_line("bridge_acceleration", "speed_settings_acceleration#bridge");
-        optgroup->append_single_option_line("sparse_infill_acceleration", "speed_settings_acceleration#sparse-infill");
-        optgroup->append_single_option_line("internal_solid_infill_acceleration", "speed_settings_acceleration#internal-solid-infill");
-        optgroup->append_single_option_line("initial_layer_acceleration", "speed_settings_acceleration#initial-layer");
-        optgroup->append_single_option_line("initial_layer_travel_acceleration", "speed_settings_acceleration#initial-layer-travel");
-        optgroup->append_single_option_line("top_surface_acceleration", "speed_settings_acceleration#top-surface");
-        optgroup->append_single_option_line("travel_acceleration", "speed_settings_acceleration#travel");
+        optgroup->append_single_option_line("default_acceleration", "speed_settings_acceleration#normal-printing", 0);
+        optgroup->append_single_option_line("outer_wall_acceleration", "speed_settings_acceleration#outer-wall", 0);
+        optgroup->append_single_option_line("inner_wall_acceleration", "speed_settings_acceleration#inner-wall", 0);
+        optgroup->append_single_option_line("bridge_acceleration", "speed_settings_acceleration#bridge", 0);
+        optgroup->append_single_option_line("sparse_infill_acceleration", "speed_settings_acceleration#sparse-infill", 0);
+        optgroup->append_single_option_line("internal_solid_infill_acceleration", "speed_settings_acceleration#internal-solid-infill", 0);
+        optgroup->append_single_option_line("initial_layer_acceleration", "speed_settings_acceleration#initial-layer", 0);
+        optgroup->append_single_option_line("initial_layer_travel_acceleration", "speed_settings_acceleration#initial-layer-travel", 0);
+        optgroup->append_single_option_line("top_surface_acceleration", "speed_settings_acceleration#top-surface", 0);
+        optgroup->append_single_option_line("travel_acceleration", "speed_settings_acceleration#travel", 0);
         optgroup->append_single_option_line("accel_to_decel_enable", "speed_settings_acceleration");
         optgroup->append_single_option_line("accel_to_decel_factor", "speed_settings_acceleration");
 
         optgroup = page->new_optgroup(L("Jerk(XY)"), L"param_jerk", 15);
-        optgroup->append_single_option_line("default_junction_deviation", "speed_settings_jerk_xy#junction-deviation");
-        optgroup->append_single_option_line("default_jerk", "speed_settings_jerk_xy#default");
-        optgroup->append_single_option_line("outer_wall_jerk", "speed_settings_jerk_xy#outer-wall");
-        optgroup->append_single_option_line("inner_wall_jerk", "speed_settings_jerk_xy#inner-wall");
-        optgroup->append_single_option_line("infill_jerk", "speed_settings_jerk_xy#infill");
-        optgroup->append_single_option_line("top_surface_jerk", "speed_settings_jerk_xy#top-surface");
-        optgroup->append_single_option_line("initial_layer_jerk", "speed_settings_jerk_xy#initial-layer");
-        optgroup->append_single_option_line("initial_layer_travel_jerk", "speed_settings_jerk_xy#initial-layer-travel");
-        optgroup->append_single_option_line("travel_jerk", "speed_settings_jerk_xy#travel");
+        optgroup->append_single_option_line("default_junction_deviation", "speed_settings_jerk_xy#junction-deviation", 0);
+        optgroup->append_single_option_line("default_jerk", "speed_settings_jerk_xy#default", 0);
+        optgroup->append_single_option_line("outer_wall_jerk", "speed_settings_jerk_xy#outer-wall", 0);
+        optgroup->append_single_option_line("inner_wall_jerk", "speed_settings_jerk_xy#inner-wall", 0);
+        optgroup->append_single_option_line("infill_jerk", "speed_settings_jerk_xy#infill", 0);
+        optgroup->append_single_option_line("top_surface_jerk", "speed_settings_jerk_xy#top-surface", 0);
+        optgroup->append_single_option_line("initial_layer_jerk", "speed_settings_jerk_xy#initial-layer", 0);
+        optgroup->append_single_option_line("initial_layer_travel_jerk", "speed_settings_jerk_xy#initial-layer-travel", 0);
+        optgroup->append_single_option_line("travel_jerk", "speed_settings_jerk_xy#travel", 0);
 
         optgroup = page->new_optgroup(L("Advanced"), L"param_advanced", 15);
         optgroup->append_single_option_line("max_volumetric_extrusion_rate_slope", "speed_settings_advanced");
@@ -3075,7 +3070,7 @@ void TabPrint::toggle_options()
         m_config_manipulation.set_is_BBL_Printer(is_BBL_printer);
     }
 
-    m_config_manipulation.toggle_print_fff_options(m_config, m_type < Preset::TYPE_COUNT);
+    m_config_manipulation.toggle_print_fff_options(m_config, int(intptr_t(m_extruder_switch->GetClientData())), m_type < Preset::TYPE_COUNT);
 
     Field *field = m_active_page->get_field("support_style");
     auto   support_type = m_config->opt_enum<SupportType>("support_type");
@@ -4653,6 +4648,40 @@ wxSizer* Tab::description_line_widget(wxWindow* parent, ogStaticText* *StaticTex
     return sizer;
 }
 
+void Tab::update_pages_with_multi_variant()
+{
+    if (!m_active_page) {
+        return;
+    }
+    // TODO: Orca: support multi variant field
+    //for (auto optgroup : m_active_page->m_optgroups) {
+    //    Field *multi_variant_field = nullptr;
+    //    std::string opt_key;
+
+    //    for (const auto& opt : multi_variant_text_ctrl_options) {
+    //        Field* field = optgroup->get_fieldc(opt, 0);
+    //        if (field) {
+    //            auto *multi_variant = dynamic_cast<MultiVariantTextCtrl *>(field);
+    //            if (multi_variant) {;
+    //                multi_variant_field = field;
+    //                opt_key = opt;
+    //            }
+    //            break;
+    //        }
+    //    }
+    //    if (multi_variant_field) {
+    //        auto * multi_variant_ctrl = dynamic_cast<MultiVariantTextCtrl*>(multi_variant_field);
+    //        multi_variant_ctrl->refresh_text_ctrls_layout(optgroup->ctrl_parent());
+    //        if (optgroup->custom_ctrl) {
+    //            optgroup->custom_ctrl->update_line_height_for_field(opt_key);
+    //        }
+    //    }
+    //    m_page_view->GetParent()->Layout();
+    //    m_parent->Layout();
+    //}
+    update_changed_ui();
+}
+
 bool Tab::saved_preset_is_dirty() const { return m_presets->saved_is_dirty(); }
 void Tab::update_saved_preset_from_current_preset() { m_presets->update_saved_preset_from_current_preset(); }
 bool Tab::current_preset_is_dirty() const { return m_presets->current_is_dirty(); }
@@ -5927,7 +5956,6 @@ void Tab::load_current_preset()
 
     update_btns_enabling();
 
-    update();
     if (m_type == Slic3r::Preset::TYPE_PRINTER) {
         // For the printer profile, generate the extruder pages.
         if (preset.printer_technology() == ptFFF) {
@@ -5938,21 +5966,20 @@ void Tab::load_current_preset()
         else
             wxGetApp().obj_list()->update_objects_list_filament_column(1);
     }
-
-    // Reload preset pages with the new configuration values.
-    update_extruder_variants();
     if (m_type == Preset::TYPE_PRINT) {
         if (auto tab = wxGetApp().plate_tab) {
             tab->m_config->apply(*m_config);
             tab->update_extruder_variants();
-            tab->reload_config();
         }
         for (auto tab : wxGetApp().model_tabs_list) {
             tab->m_config->apply(*m_config);
             tab->update_extruder_variants();
-            tab->reload_config();
         }
     }
+    update();
+
+    // Reload preset pages with the new configuration values.
+    update_extruder_variants(-1, false);
     reload_config();
 
     update_ui_items_related_on_parent_preset(m_presets->get_selected_preset_parent());
@@ -7559,7 +7586,7 @@ void Tab::set_just_edit(bool just_edit)
 /// </summary>
 /// <param name="extruder_id"></param>
 
-void Tab::update_extruder_variants(int extruder_id)
+void Tab::update_extruder_variants(int extruder_id, bool reload)
 {
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << extruder_id;
     if (m_extruder_switch) {
@@ -7601,7 +7628,10 @@ void Tab::update_extruder_variants(int extruder_id)
 
         m_variant_combo->Enable(options.size() > 1);
     }
-    switch_excluder(extruder_id);
+    switch_excluder(extruder_id, reload);
+    if (m_type == Preset::TYPE_PRINT) {
+        update_pages_with_multi_variant();
+    }
     if (m_variant_sizer) {
         wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
         m_main_sizer->Show(m_variant_sizer, variant_ctrl->IsThisEnabled() && m_active_page && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder "));
@@ -7756,7 +7786,7 @@ bool Tab::get_extruder_sync_enable_state(int extruder_id)
     return false;
 }
 
-void Tab::switch_excluder(int extruder_id)
+void Tab::switch_excluder(int extruder_id, bool reload)
 {
     Preset & printer_preset = m_preset_bundle->printers.get_edited_preset();
     auto nozzle_volumes = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
@@ -7825,6 +7855,14 @@ void Tab::switch_excluder(int extruder_id)
                 }
             }
         }
+    }
+    if (reload) {
+        reload_config();
+        update_changed_ui();
+        toggle_options();
+        if (m_active_page)
+            m_active_page->update_visibility(m_mode, true);
+        m_page_view->GetParent()->Layout();
     }
 }
 

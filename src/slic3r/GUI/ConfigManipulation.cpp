@@ -567,7 +567,7 @@ void ConfigManipulation::apply_null_fff_config(DynamicPrintConfig *config, std::
     }
 }
 
-void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, const bool is_global_config)
+void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, int variant_index, const bool is_global_config)
 {
     PresetBundle *preset_bundle  = wxGetApp().preset_bundle;
 
@@ -669,7 +669,7 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, co
     for (auto el : { "top_surface_line_width", "top_surface_speed" })
         toggle_field(el, has_top_shell);
 
-    bool have_default_acceleration = config->opt_float("default_acceleration") > 0;
+    bool have_default_acceleration = config->opt_float_nullable("default_acceleration", variant_index) > 0;
 
     for (auto el : {"outer_wall_acceleration", "inner_wall_acceleration", "initial_layer_acceleration", "initial_layer_travel_acceleration",
         "top_surface_acceleration", "travel_acceleration", "bridge_acceleration", "sparse_infill_acceleration", "internal_solid_infill_acceleration"})
@@ -683,17 +683,17 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, co
     }
     toggle_line("default_junction_deviation", gcflavor == gcfMarlinFirmware);
     if (machine_supports_junction_deviation) {
-        toggle_field("default_junction_deviation", true);
-        toggle_field("default_jerk", false);
+        toggle_field("default_junction_deviation", true, variant_index);
+        toggle_field("default_jerk", false, variant_index);
         for (auto el : { "outer_wall_jerk", "inner_wall_jerk", "initial_layer_jerk", "initial_layer_travel_jerk", "top_surface_jerk", "travel_jerk", "infill_jerk"})
-            toggle_line(el, false);
+            toggle_line(el, false, variant_index);
     } else {
         toggle_field("default_junction_deviation", false);
         toggle_field("default_jerk", true);
-        bool have_default_jerk = config->has("default_jerk") && config->opt_float("default_jerk") > 0;
+        bool have_default_jerk = config->has("default_jerk") && config->opt_float_nullable("default_jerk", variant_index) > 0;
         for (auto el : { "outer_wall_jerk", "inner_wall_jerk", "initial_layer_jerk", "initial_layer_travel_jerk", "top_surface_jerk", "travel_jerk", "infill_jerk"}) {
-            toggle_line(el, true);
-            toggle_field(el, have_default_jerk);
+            toggle_line(el, true, variant_index);
+            toggle_field(el, have_default_jerk, variant_index);
         }
     }
 
@@ -869,11 +869,11 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, co
     for (auto el : {"first_layer_flow_ratio", "outer_wall_flow_ratio", "inner_wall_flow_ratio", "overhang_flow_ratio", "sparse_infill_flow_ratio", "internal_solid_infill_flow_ratio", "gap_fill_flow_ratio", "support_flow_ratio", "support_interface_flow_ratio"})
         toggle_line(el, has_set_other_flow_ratios);
 
-    bool has_overhang_speed = config->opt_bool("enable_overhang_speed");
+    bool has_overhang_speed = config->opt_bool_nullable("enable_overhang_speed", variant_index);
     for (auto el : {"overhang_1_4_speed", "overhang_2_4_speed", "overhang_3_4_speed", "overhang_4_4_speed"})
-        toggle_line(el, has_overhang_speed);
+        toggle_line(el, has_overhang_speed, variant_index);
 
-    toggle_line("slowdown_for_curled_perimeters", has_overhang_speed);
+    toggle_line("slowdown_for_curled_perimeters", has_overhang_speed, variant_index);
 
     toggle_line("flush_into_objects", !is_global_config);
 
