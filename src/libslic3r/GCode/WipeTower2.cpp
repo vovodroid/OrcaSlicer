@@ -1264,7 +1264,7 @@ WipeTower2::WipeTower2(const PrintConfig& config, const PrintRegionConfig& defau
     m_gcode_flavor(config.gcode_flavor),
     m_travel_speed(config.travel_speed),
     m_infill_speed(default_region_config.sparse_infill_speed),
-    m_perimeter_speed(default_region_config.inner_wall_speed),
+    m_perimeter_speed(default_region_config.inner_wall_speed.get_at(get_extruder_index(config, (unsigned int)initial_tool))),
     m_current_tool(initial_tool),
     wipe_volumes(wiping_matrix), m_wipe_tower_max_purge_speed(float(config.wipe_tower_max_purge_speed)),
     m_enable_arc_fitting(config.enable_arc_fitting), 

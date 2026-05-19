@@ -1886,6 +1886,39 @@ t_config_option_keys DynamicConfig::equal(const DynamicConfig &other) const
     return equal;
 }
 
+double& DynamicConfig::opt_float(const t_config_option_key &opt_key, unsigned int idx)
+{
+    if (ConfigOptionFloats *opt_floats = dynamic_cast<ConfigOptionFloats *>(this->option(opt_key))) {
+        return opt_floats->get_at(idx);
+    } else {
+        ConfigOptionFloatsNullable *opt_floats_nullable = dynamic_cast<ConfigOptionFloatsNullable *>(this->option(opt_key));
+        assert(opt_floats_nullable != nullptr);
+        return opt_floats_nullable->get_at(idx);
+    }
+}
+const double& DynamicConfig::opt_float(const t_config_option_key &opt_key, unsigned int idx) const
+{
+    if (const ConfigOptionFloats *opt_floats = dynamic_cast<const ConfigOptionFloats *>(this->option(opt_key))) {
+        return opt_floats->get_at(idx);
+    } else if (const ConfigOptionFloatsNullable *opt_floats_nullable = dynamic_cast<const ConfigOptionFloatsNullable *>(this->option(opt_key))) {
+        return opt_floats_nullable->get_at(idx);
+    } else {
+        assert(false);
+        return 0;
+    }
+}
+
+bool DynamicConfig::opt_bool(const t_config_option_key &opt_key, unsigned int idx) const {
+    if (const ConfigOptionBools *opts = dynamic_cast<const ConfigOptionBools *>(this->option(opt_key))) {
+        return opts->get_at(idx) != 0;
+    }
+    else {
+        const ConfigOptionBoolsNullable *opt_s = dynamic_cast<const ConfigOptionBoolsNullable *>(this->option(opt_key));
+        assert(opt_s != nullptr);
+        return opt_s->get_at(idx) != 0;
+    }
+}
+
 }
 
 #include <cereal/types/polymorphic.hpp>

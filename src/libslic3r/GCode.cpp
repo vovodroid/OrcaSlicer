@@ -3590,6 +3590,13 @@ void GCode::check_placeholder_parser_failed()
     }
 }
 
+size_t GCode::cur_extruder_index() const
+{
+    //TODO: check if the function is duplicated
+    //just return m_writer.filament()->extruder_id()
+    return get_extruder_id(m_writer.filament()->id());
+}
+
 size_t GCode::get_extruder_id(unsigned int filament_id) const
 {
     if (m_print) {
@@ -6436,14 +6443,14 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
     // set speed
     if (speed == -1) {
         if (path.role() == erPerimeter) {
-            speed = m_config.get_abs_value("inner_wall_speed");
+            speed = m_config.inner_wall_speed.get_at(cur_extruder_index());
             if (sloped) {
-                speed = std::min(speed, m_config.scarf_joint_speed.get_abs_value(m_config.get_abs_value("inner_wall_speed")));
+                speed = std::min(speed, m_config.scarf_joint_speed.get_abs_value(speed));
             }
         } else if (path.role() == erExternalPerimeter) {
             speed = m_config.get_abs_value("outer_wall_speed");
             if (sloped) {
-                speed = std::min(speed, m_config.scarf_joint_speed.get_abs_value(m_config.get_abs_value("outer_wall_speed")));
+                speed = std::min(speed, m_config.scarf_joint_speed.get_abs_value(speed));
             }
         } 
         else if(path.role() == erInternalBridgeInfill) {
@@ -6578,7 +6585,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
     if (m_config.enable_overhang_speed && !this->on_first_layer() && !object_layer_over_raft() &&
         (is_bridge(path.role()) || is_perimeter(path.role()))) {
             bool is_external = is_external_perimeter(path.role());
-            double ref_speed   = is_external ? m_config.get_abs_value("outer_wall_speed") : m_config.get_abs_value("inner_wall_speed");
+            double ref_speed   = is_external ? m_config.get_abs_value("outer_wall_speed") : m_config.inner_wall_speed.get_at(cur_extruder_index());
             if (ref_speed == 0)
                 ref_speed = FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm;
 

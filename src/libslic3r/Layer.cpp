@@ -136,7 +136,7 @@ ExPolygons Layer::merged(float offset_scaled) const
     return out;
 }
 
-bool Layer::is_perimeter_compatible(const PrintRegion& a, const PrintRegion& b)
+bool Layer::is_perimeter_compatible(const Print& print, const PrintRegion& a, const PrintRegion& b)
 {
     const PrintRegionConfig& config       = a.config();
     const PrintRegionConfig& other_config = b.config();
@@ -145,7 +145,7 @@ bool Layer::is_perimeter_compatible(const PrintRegion& a, const PrintRegion& b)
 		&& config.wall_loops                  == other_config.wall_loops
 		&& config.wall_sequence               == other_config.wall_sequence
 		&& config.is_infill_first             == other_config.is_infill_first
-		&& config.inner_wall_speed             == other_config.inner_wall_speed
+		&& config.inner_wall_speed.get_at(print.get_extruder_id(config.wall_filament)) == other_config.inner_wall_speed.get_at(print.get_extruder_id(config.wall_filament))
 		&& config.outer_wall_speed    == other_config.outer_wall_speed
 		&& config.small_perimeter_speed    == other_config.small_perimeter_speed
         && config.gap_infill_speed.value == other_config.gap_infill_speed.value
@@ -208,7 +208,7 @@ void Layer::make_perimeters()
 	            if (! (*it)->slices.empty()) {
 		            LayerRegion* other_layerm = *it;
 		            const PrintRegion &other_region = other_layerm->region();
-                    if (is_perimeter_compatible(this_region, other_region))
+                    if (is_perimeter_compatible(*m_object->print(), this_region, other_region))
 		            {
 			 			other_layerm->perimeters.clear();
 			 			other_layerm->fills.clear();

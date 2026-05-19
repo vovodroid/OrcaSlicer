@@ -1343,8 +1343,8 @@ StringObjectException Print::validate(StringObjectException *warning, Polygons* 
         const auto all_regions = m_objects.front()->all_regions();
         if (all_regions.size() > 1) {
             // Orca: make sure regions are not compatible
-            if (std::any_of(all_regions.begin() + 1, all_regions.end(), [ra = all_regions.front()](const auto rb) {
-                return !Layer::is_perimeter_compatible(ra, rb);
+            if (std::any_of(all_regions.begin() + 1, all_regions.end(), [this, ra = all_regions.front()](const auto rb) {
+                return !Layer::is_perimeter_compatible(*this, ra, rb);
             })) {
                 return {L("The spiral vase mode does not work when an object contains more than one materials."), nullptr, "spiral_mode"};
             }

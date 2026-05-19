@@ -4905,7 +4905,7 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloatOrPercent(0., false));
 
-    def = this->add("inner_wall_speed", coFloat);
+    def = this->add("inner_wall_speed", coFloats);
     def->label = L("Inner wall");
     def->category = L("Speed");
     def->tooltip = L("Speed of inner wall.");
@@ -4913,7 +4913,8 @@ void PrintConfigDef::init_fff_params()
     def->aliases = { "perimeter_feed_rate" };
     def->min = 1;
     def->mode = comAdvanced;
-    def->set_default_value(new ConfigOptionFloat(60));
+    def->nullable = true;
+    def->set_default_value(new ConfigOptionFloatsNullable{60});
 
     def = this->add("wall_loops", coInt);
     def->label = L("Wall loops");
@@ -8157,7 +8158,7 @@ std::set<std::string> print_options_with_variant = {
     //"initial_layer_speed",
     //"initial_layer_infill_speed",
     //"outer_wall_speed",
-    //"inner_wall_speed",
+    "inner_wall_speed",
     //"small_perimeter_speed",  //coFloatsOrPercents
     //"small_perimeter_threshold",
     //"sparse_infill_speed",
