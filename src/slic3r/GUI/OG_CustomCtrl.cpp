@@ -808,7 +808,7 @@ void OG_CustomCtrl::CtrlLine::render(wxDC& dc, wxCoord h_pos, wxCoord v_pos)
         wxCoord icon_pos = h_pos;
         if (is_multi_extruder) {
             static ScalableBitmap multi_extruder(ctrl, "multi_extruder");
-            h_pos = draw_act_bmps(dc, wxPoint(h_pos, v_pos), multi_extruder.bmp(), multi_extruder.bmp(), false).x;
+            h_pos = draw_act_bmps(dc, wxPoint(h_pos, v_pos), multi_extruder.bmp(), multi_extruder.bmp(), false, 0, true).x;
         }
         is_url_string = !suppress_hyperlinks && !og_line.label_path.empty();
         // BBS
@@ -986,12 +986,12 @@ wxPoint OG_CustomCtrl::CtrlLine::draw_blinking_bmp(wxDC& dc, wxPoint pos, bool i
     return wxPoint(h_pos, v_pos);
 }
 
-wxPoint OG_CustomCtrl::CtrlLine::draw_act_bmps(wxDC& dc, wxPoint pos, const wxBitmap& bmp_undo_to_sys, const wxBitmap& bmp_undo, bool is_blinking, size_t rect_id)
+wxPoint OG_CustomCtrl::CtrlLine::draw_act_bmps(wxDC& dc, wxPoint pos, const wxBitmap& bmp_undo_to_sys, const wxBitmap& bmp_undo, bool is_blinking, size_t rect_id, bool is_main)
 {
 #ifndef DISABLE_BLINKING
     pos = draw_blinking_bmp(dc, pos, is_blinking);
 #else
-    if (ctrl->opt_group->split_multi_line) { // BBS
+    if (ctrl->opt_group->split_multi_line && !is_main) { // BBS
         const std::vector<Option> &option_set = og_line.get_options();
         if (option_set.size() > 1)
             pos.y += lround(((height - ctrl->m_v_gap + ctrl->m_v_gap2) / option_set.size() - get_bitmap_size(bmp_undo).GetHeight()) / 2);
