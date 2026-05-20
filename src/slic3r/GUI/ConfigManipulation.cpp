@@ -587,9 +587,10 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, in
 
     bool have_perimeters = config->opt_int("wall_loops") > 0;
     for (auto el : { "extra_perimeters_on_overhangs", "ensure_vertical_shell_thickness", "detect_thin_wall", "detect_overhang_wall",
-        "seam_position", "staggered_inner_seams", "wall_sequence", "outer_wall_line_width",
-        "inner_wall_speed", "outer_wall_speed", "small_perimeter_speed", "small_perimeter_threshold" })
+        "seam_position", "staggered_inner_seams", "wall_sequence", "outer_wall_line_width" })
         toggle_field(el, have_perimeters);
+    for (auto el : { "inner_wall_speed", "outer_wall_speed", "small_perimeter_speed", "small_perimeter_threshold" })
+        toggle_field(el, have_perimeters, variant_index);
 
     bool have_infill = config->option<ConfigOptionPercent>("sparse_infill_density")->value > 0;
     // sparse_infill_filament uses the same logic as in Print::extruders()
@@ -655,25 +656,27 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, in
     toggle_field("bottom_surface_density", has_bottom_shell);
 
     for (auto el : { "infill_direction", "sparse_infill_line_width", "gap_fill_target","filter_out_gap_fill","infill_wall_overlap",
-        "sparse_infill_speed", "bridge_speed", "internal_bridge_speed", "bridge_angle", "internal_bridge_angle",
+        "bridge_angle", "internal_bridge_angle",
         "solid_infill_direction", "solid_infill_rotate_template", "internal_solid_infill_pattern", "solid_infill_filament",
         })
         toggle_field(el, have_infill || has_solid_infill);
+    for (auto el : { "sparse_infill_speed", "bridge_speed", "internal_bridge_speed"})
+        toggle_field(el, have_infill || has_solid_infill, variant_index);
 
     toggle_field("top_shell_thickness", ! has_spiral_vase && has_top_shell);
     toggle_field("bottom_shell_thickness", ! has_spiral_vase && has_bottom_shell);
 
     // Gap fill is newly allowed in between perimeter lines even for empty infill (see GH #1476).
-    toggle_field("gap_infill_speed", have_perimeters);
-
-    for (auto el : { "top_surface_line_width", "top_surface_speed" })
-        toggle_field(el, has_top_shell);
+    toggle_field("gap_infill_speed", have_perimeters, variant_index);
+    
+    toggle_field("top_surface_line_width", has_top_shell);
+    toggle_field("top_surface_speed", has_top_shell, variant_index);
 
     bool have_default_acceleration = config->opt_float_nullable("default_acceleration", variant_index) > 0;
 
     for (auto el : {"outer_wall_acceleration", "inner_wall_acceleration", "initial_layer_acceleration", "initial_layer_travel_acceleration",
         "top_surface_acceleration", "travel_acceleration", "bridge_acceleration", "sparse_infill_acceleration", "internal_solid_infill_acceleration"})
-        toggle_field(el, have_default_acceleration);
+        toggle_field(el, have_default_acceleration, variant_index);
 
     bool machine_supports_junction_deviation = false;
     if (gcflavor == gcfMarlinFirmware) {
@@ -681,15 +684,15 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, in
             machine_supports_junction_deviation = !machine_jd->values.empty() && machine_jd->values.front() > 0.0;
         }
     }
-    toggle_line("default_junction_deviation", gcflavor == gcfMarlinFirmware);
+    toggle_line("default_junction_deviation", gcflavor == gcfMarlinFirmware, variant_index);
     if (machine_supports_junction_deviation) {
         toggle_field("default_junction_deviation", true, variant_index);
         toggle_field("default_jerk", false, variant_index);
         for (auto el : { "outer_wall_jerk", "inner_wall_jerk", "initial_layer_jerk", "initial_layer_travel_jerk", "top_surface_jerk", "travel_jerk", "infill_jerk"})
             toggle_line(el, false, variant_index);
     } else {
-        toggle_field("default_junction_deviation", false);
-        toggle_field("default_jerk", true);
+        toggle_field("default_junction_deviation", false, variant_index);
+        toggle_field("default_jerk", true, variant_index);
         bool have_default_jerk = config->has("default_jerk") && config->opt_float_nullable("default_jerk", variant_index) > 0;
         for (auto el : { "outer_wall_jerk", "inner_wall_jerk", "initial_layer_jerk", "initial_layer_travel_jerk", "top_surface_jerk", "travel_jerk", "infill_jerk"}) {
             toggle_line(el, true, variant_index);

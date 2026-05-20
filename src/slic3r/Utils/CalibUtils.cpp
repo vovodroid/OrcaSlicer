@@ -646,8 +646,8 @@ bool CalibUtils::calib_flowrate(int pass, const CalibInfo &calib_info, wxString 
     int index = get_index_for_extruder_parameter(filament_config, "filament_max_volumetric_speed", calib_info.extruder_id, calib_info.extruder_type, calib_info.nozzle_volume_type);
     double filament_max_volumetric_speed = filament_config.option<ConfigOptionFloats>("filament_max_volumetric_speed")->get_at(index);
     double max_infill_speed              = filament_max_volumetric_speed / (infill_flow.mm3_per_mm() * (pass == 1 ? 1.2 : 1));
-    double internal_solid_speed          = std::floor(std::min(print_config.opt_float("internal_solid_infill_speed"), max_infill_speed));
-    double top_surface_speed             = std::floor(std::min(print_config.opt_float("top_surface_speed"), max_infill_speed));
+    double internal_solid_speed          = std::floor(std::min(print_config.opt_float_nullable("internal_solid_infill_speed", 0), max_infill_speed));
+    double top_surface_speed             = std::floor(std::min(print_config.opt_float_nullable("top_surface_speed", 0), max_infill_speed));
 
     // adjust parameters
     filament_config.set_key_value("curr_bed_type", new ConfigOptionEnum<BedType>(calib_info.bed_type));
@@ -668,8 +668,8 @@ bool CalibUtils::calib_flowrate(int pass, const CalibInfo &calib_info, wxString 
         _obj->config.set_key_value("top_solid_infill_flow_ratio", new ConfigOptionFloat(1.0f));
         _obj->config.set_key_value("infill_direction", new ConfigOptionFloat(45));
         _obj->config.set_key_value("ironing_type", new ConfigOptionEnum<IroningType>(IroningType::NoIroning));
-        _obj->config.set_key_value("internal_solid_infill_speed", new ConfigOptionFloat(internal_solid_speed));
-        _obj->config.set_key_value("top_surface_speed", new ConfigOptionFloat(top_surface_speed));
+        _obj->config.set_key_value("internal_solid_infill_speed", new ConfigOptionFloatsNullable({internal_solid_speed}));
+        _obj->config.set_key_value("top_surface_speed", new ConfigOptionFloatsNullable({top_surface_speed}));
 
         // extract flowrate from name, filename format: flowrate_xxx
         std::string obj_name = _obj->name;
@@ -720,14 +720,14 @@ void CalibUtils::calib_pa_pattern(const CalibInfo &calib_info, Model& model)
 
     float nozzle_diameter = printer_config.option<ConfigOptionFloats>("nozzle_diameter")->get_at(0);
 
-    for (const auto& opt : config_pattern.float_pairs) {
-        print_config.set_key_value(opt.first, new ConfigOptionFloat(opt.second));
+    for (const auto& opt : config_pattern.floats_pairs) {
+        print_config.set_key_value(opt.first, new ConfigOptionFloatsNullable(opt.second));
     }
 
-    print_config.set_key_value("outer_wall_speed",
-        new ConfigOptionFloat(CalibPressureAdvance::find_optimal_PA_speed(
-            full_config, print_config.get_abs_value("line_width"),
-            print_config.get_abs_value("layer_height"), calib_info.extruder_id, 0)));
+    int index = get_index_for_extruder_parameter(print_config, "outer_wall_speed", calib_info.extruder_id, calib_info.extruder_type, calib_info.nozzle_volume_type);
+    float wall_speed = CalibPressureAdvance::find_optimal_PA_speed(full_config, print_config.get_abs_value("line_width"), print_config.get_abs_value("layer_height"), calib_info.extruder_id, 0);
+    ConfigOptionFloatsNullable *wall_speed_speed_opt = print_config.option<ConfigOptionFloatsNullable>("outer_wall_speed");
+    wall_speed_speed_opt->values[index]              = wall_speed;
 
     for (const auto& opt : config_pattern.nozzle_ratio_pairs) {
         print_config.set_key_value(opt.first, new ConfigOptionFloatOrPercent(nozzle_diameter * opt.second / 100, false));
@@ -770,7 +770,7 @@ void CalibUtils::set_for_auto_pa_model_and_config(const std::vector<CalibInfo> &
 
     const auto& config_pattern = SuggestedConfigCalibPAPattern();
 
-    for (const auto& opt : config_pattern.float_pairs) { print_config.set_key_value(opt.first, new ConfigOptionFloat(opt.second)); }
+    for (const auto& opt : config_pattern.floats_pairs) { print_config.set_key_value(opt.first, new ConfigOptionFloatsNullable(opt.second)); }
 
     std::vector<CalibInfo> sorted_calib_infos = calib_infos;
     std::sort(sorted_calib_infos.begin(), sorted_calib_infos.end(), [](const CalibInfo &left_item, const CalibInfo &right_item) {
@@ -778,11 +778,15 @@ void CalibUtils::set_for_auto_pa_model_and_config(const std::vector<CalibInfo> &
     });
 
     for (const CalibInfo &calib_info : calib_infos) {
+        int   index      = get_index_for_extruder_parameter(print_config, "outer_wall_speed", calib_info.extruder_id, calib_info.extruder_type, calib_info.nozzle_volume_type);
+        float wall_speed = CalibPressureAdvance::find_optimal_PA_speed(full_config, print_config.get_abs_value("line_width"), print_config.get_abs_value("layer_height"),
+                                                                       calib_info.extruder_id, 0);
+
+        ConfigOptionFloatsNullable *wall_speed_speed_opt = print_config.option<ConfigOptionFloatsNullable>("outer_wall_speed");
+        std::vector<double> new_speeds = wall_speed_speed_opt->values;
+        new_speeds[index] = wall_speed;
         ModelObject* object = model.objects[calib_info.index];
-        object->config.set_key_value("outer_wall_speed",
-            new ConfigOptionFloat(CalibPressureAdvance::find_optimal_PA_speed(
-                full_config, print_config.get_abs_value("line_width"),
-                print_config.get_abs_value("layer_height"), calib_info.extruder_id, 0)));
+        object->config.set_key_value("outer_wall_speed", new ConfigOptionFloatsNullable(new_speeds));
     }
 
     for (const auto& opt : config_pattern.nozzle_ratio_pairs) {
@@ -1123,7 +1127,7 @@ void CalibUtils::calib_max_vol_speed(const CalibInfo &calib_info, wxString &erro
     filament_config.set_key_value("slow_down_layer_time", new ConfigOptionInts{0});
     filament_config.set_key_value("curr_bed_type", new ConfigOptionEnum<BedType>(calib_info.bed_type));
 
-    print_config.set_key_value("enable_overhang_speed", new ConfigOptionBool{false});
+    print_config.set_key_value("enable_overhang_speed", new ConfigOptionBoolsNullable({false}));
     print_config.set_key_value("timelapse_type", new ConfigOptionEnum<TimelapseType>(tlTraditional));
     print_config.set_key_value("wall_loops", new ConfigOptionInt(1));
     print_config.set_key_value("alternate_extra_wall", new ConfigOptionBool(false));
@@ -1185,7 +1189,7 @@ void CalibUtils::calib_VFA(const CalibInfo &calib_info, wxString &error_message)
     filament_config.set_key_value("filament_max_volumetric_speed", new ConfigOptionFloats{200});
     filament_config.set_key_value("curr_bed_type", new ConfigOptionEnum<BedType>(calib_info.bed_type));
 
-    print_config.set_key_value("enable_overhang_speed", new ConfigOptionBool{false});
+    print_config.set_key_value("enable_overhang_speed", new ConfigOptionBoolsNullable({false}));
     print_config.set_key_value("timelapse_type", new ConfigOptionEnum<TimelapseType>(tlTraditional));
     print_config.set_key_value("wall_loops", new ConfigOptionInt(1));
     print_config.set_key_value("detect_thin_wall", new ConfigOptionBool(false));

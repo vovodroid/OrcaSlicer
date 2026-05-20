@@ -4573,12 +4573,12 @@ LayerResult GCode::process_layer(
         }
         case CalibMode::Calib_VFA_Tower: {
             auto _speed = print.calib_params().start + std::floor(print_z / 5.0) * print.calib_params().step;
-            m_calib_config.set_key_value("outer_wall_speed", new ConfigOptionFloat(std::round(_speed)));
+            m_calib_config.set_key_value("outer_wall_speed", new ConfigOptionFloatsNullable({std::round(_speed)}));
             break;
         }
         case CalibMode::Calib_Vol_speed_Tower: {
             auto _speed = print.calib_params().start + print_z * print.calib_params().step;
-            m_calib_config.set_key_value("outer_wall_speed", new ConfigOptionFloat(std::round(_speed)));
+            m_calib_config.set_key_value("outer_wall_speed", new ConfigOptionFloatsNullable({std::round(_speed)}));
             break;
         }
         case CalibMode::Calib_Retraction_tower: {
