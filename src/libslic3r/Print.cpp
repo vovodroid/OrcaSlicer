@@ -1732,154 +1732,152 @@ StringObjectException Print::validate(StringObjectException *warning, Polygons* 
     // check if print speed/accel/jerk is higher than the maximum speed of the printer
     if (warning) {
         try {
-            /* TODO: Orca: fix it
-            auto check_motion_ability_object_setting = [&](const std::vector<std::string>& keys_to_check, double limit) -> std::string {
-                std::string warning_key;
-                for (const auto& key : keys_to_check) {
-                    if (m_default_object_config.get_abs_value(key) > limit) {
-                        warning_key = key;
-                        break;
-                    }
-                }
-                return warning_key;
-            };
-            auto check_motion_ability_region_setting = [&](const std::vector<std::string>& keys_to_check, double limit) -> std::string {
-                std::string warning_key;
-                for (const auto& key : keys_to_check) {
-                    if (m_default_region_config.get_abs_value(key) > limit) {
-                        warning_key = key;
-                        break;
-                    }
-                }
-                return warning_key;
-            };
-            std::string warning_key;
-
-            const auto max_junction_deviation = m_config.machine_max_junction_deviation.values[0];
-            const bool ignore_jerk_validation = m_config.gcode_flavor == gcfMarlinFirmware && max_junction_deviation > 0;
-
-            // check jerk
-            if (!ignore_jerk_validation) {
-                auto is_jerk_too_low = [](const ConfigOptionFloatsNullable& cfg) {
-                    return std::any_of(cfg.values.begin(), cfg.values.end(), [](const float v) { return v == 1; });
-                };
-                if (is_jerk_too_low(m_default_object_config.default_jerk) || is_jerk_too_low(m_default_object_config.outer_wall_jerk) ||
-                    is_jerk_too_low(m_default_object_config.inner_wall_jerk)) {
-                   warning->string = L("Setting the jerk speed too low could lead to artifacts on curved surfaces");
-                   if (is_jerk_too_low(m_default_object_config.outer_wall_jerk))
-                        warning_key = "outer_wall_jerk";
-                   else if (is_jerk_too_low(m_default_object_config.inner_wall_jerk))
-                        warning_key = "inner_wall_jerk";
-                   else
-                        warning_key = "default_jerk";
-
-                   warning->opt_key = warning_key;
-                }
-
-                if (warning_key.empty() && m_default_object_config.default_jerk > 0) {
-                   std::vector<std::string> jerk_to_check = {"default_jerk",     "outer_wall_jerk",    "inner_wall_jerk", "infill_jerk",
-                                                             "top_surface_jerk", "initial_layer_jerk", "travel_jerk"};
-                   const auto               max_jerk = std::min(m_config.machine_max_jerk_x.values[0], m_config.machine_max_jerk_y.values[0]);
-                   warning_key.clear();
-                   warning_key = check_motion_ability_object_setting(jerk_to_check, max_jerk);
-                   if (!warning_key.empty()) {
-                        warning->string = L(
-                            "The jerk setting exceeds the printer's maximum jerk (machine_max_jerk_x/machine_max_jerk_y).\n"
-                            "Orca will automatically cap the jerk speed to ensure it doesn't surpass the printer's capabilities.\n"
-                            "You can adjust the maximum jerk setting in your printer's configuration to get higher speeds.");
-                        warning->opt_key = warning_key;
-                   }
-                }
-            }
-
-            // Check junction deviation
-            // Orca: Only marlin FW supports max junction deviation. Dont display warning if firmware is not supporting it.
-            const bool support_max_junction_deviation = ( m_config.gcode_flavor == gcfMarlinFirmware);
-            if (warning_key.empty() && m_default_object_config.default_junction_deviation.value > max_junction_deviation && support_max_junction_deviation) {
-                warning->string  = L( "Junction deviation setting exceeds the printer's maximum value (machine_max_junction_deviation).\n"
-                                      "Orca will automatically cap the junction deviation to ensure it doesn't surpass the printer's capabilities.\n"
-                                      "You can adjust the machine_max_junction_deviation value in your printer's configuration to get higher limits.");
-                warning->opt_key = warning_key;
-            }
-            
-            // check acceleration
-            const auto max_accel = m_config.machine_max_acceleration_extruding.values[0];
-            if (warning_key.empty() && m_default_object_config.default_acceleration > 0 && max_accel > 0) {
-               const bool support_travel_acc = (m_config.gcode_flavor == gcfRepetier || m_config.gcode_flavor == gcfMarlinFirmware ||
-                                                m_config.gcode_flavor == gcfRepRapFirmware);
-
-               std::vector<std::string> accel_to_check;
-               if (!support_travel_acc)
-                    accel_to_check = {
-                        "default_acceleration",
-                        "inner_wall_acceleration",
-                        "outer_wall_acceleration",
-                        "bridge_acceleration",
-                        "initial_layer_acceleration",
-                        "sparse_infill_acceleration",
-                        "internal_solid_infill_acceleration",
-                        "top_surface_acceleration",
-                        "travel_acceleration",
-                    };
-               else
-                    accel_to_check = {
-                        "default_acceleration",
-                        "inner_wall_acceleration",
-                        "outer_wall_acceleration",
-                        "bridge_acceleration",
-                        "initial_layer_acceleration",
-                        "sparse_infill_acceleration",
-                        "internal_solid_infill_acceleration",
-                        "top_surface_acceleration",
-                    };
-               warning_key = check_motion_ability_object_setting(accel_to_check, max_accel);
-               if (!warning_key.empty()) {
-                    warning->string  = L("The acceleration setting exceeds the printer's maximum acceleration "
-                                          "(machine_max_acceleration_extruding).\nOrca will "
-                                          "automatically cap the acceleration speed to ensure it doesn't surpass the printer's "
-                                          "capabilities.\nYou can adjust the "
-                                          "machine_max_acceleration_extruding value in your printer's configuration to get higher speeds.");
-                    warning->opt_key = warning_key;
-               }
-               if (support_travel_acc) {
-                    const auto max_travel = m_config.machine_max_acceleration_travel.values[0];
-                    if (max_travel > 0) {
-                        accel_to_check = {
-                            "travel_acceleration",
-                        };
-                        warning_key = check_motion_ability_object_setting(accel_to_check, max_travel);
-                        if (!warning_key.empty()) {
-                            warning->string = L(
-                                "The travel acceleration setting exceeds the printer's maximum travel acceleration "
-                                "(machine_max_acceleration_travel).\nOrca will "
-                                "automatically cap the travel acceleration speed to ensure it doesn't surpass the printer's "
-                                "capabilities.\nYou can adjust the "
-                                "machine_max_acceleration_travel value in your printer's configuration to get higher speeds.");
-                            warning->opt_key = warning_key;
+            auto check_extruder = [&](const int extruder_id) {
+                auto check_motion_ability_object_setting = [&](const std::vector<std::string>& keys_to_check, double limit) -> std::string {
+                    std::string warning_key;
+                    for (const auto& key : keys_to_check) {
+                        if (m_default_object_config.get_abs_value_at(key, extruder_id) > limit) {
+                            warning_key = key;
+                            break;
                         }
                     }
-               }
-            }
-            */
+                    return warning_key;
+                };
+                auto check_motion_ability_region_setting = [&](const std::vector<std::string>& keys_to_check, double limit) -> std::string {
+                    std::string warning_key;
+                    for (const auto& key : keys_to_check) {
+                        if (m_default_region_config.get_abs_value_at(key, extruder_id) > limit) {
+                            warning_key = key;
+                            break;
+                        }
+                    }
+                    return warning_key;
+                };
+                std::string warning_key;
 
-            // check speed
-            // Orca: disable the speed check for now as we don't cap the speed
-            // if (warning_key.empty()) {
-            //    auto       speed_to_check = {"inner_wall_speed",  "outer_wall_speed", "sparse_infill_speed",   "internal_solid_infill_speed",
-            //                                 "top_surface_speed", "bridge_speed",     "internal_bridge_speed", "gap_infill_speed"};
-            //    const auto max_speed      = std::min(m_config.machine_max_speed_x.values[0], m_config.machine_max_speed_y.values[0]);
-            //    warning_key.clear();
-            //    warning_key = check_motion_ability_region_setting(speed_to_check, max_speed);
-            //    if (warning_key.empty() && m_config.travel_speed > max_speed)
-            //         warning_key = "travel_speed";
-            //    if (!warning_key.empty()) {
-            //         warning->string = L(
-            //             "The speed setting exceeds the printer's maximum speed (machine_max_speed_x/machine_max_speed_y).\nOrca will "
-            //             "automatically cap the print speed to ensure it doesn't surpass the printer's capabilities.\nYou can adjust the "
-            //             "maximum speed setting in your printer's configuration to get higher speeds.");
-            //         warning->opt_key = warning_key;
-            //    }
-            // }
+                const auto max_junction_deviation = m_config.machine_max_junction_deviation.values[0]; // TODO: fix this
+                const bool ignore_jerk_validation = m_config.gcode_flavor == gcfMarlinFirmware && max_junction_deviation > 0;
+
+                // check jerk
+                if (!ignore_jerk_validation) {
+                    if (m_default_object_config.default_jerk.get_at(extruder_id) == 1 || m_default_object_config.outer_wall_jerk.get_at(extruder_id) == 1 ||
+                        m_default_object_config.inner_wall_jerk.get_at(extruder_id) == 1) {
+                       warning->string = L("Setting the jerk speed too low could lead to artifacts on curved surfaces");
+                       if (m_default_object_config.outer_wall_jerk.get_at(extruder_id) == 1)
+                            warning_key = "outer_wall_jerk";
+                       else if (m_default_object_config.inner_wall_jerk.get_at(extruder_id) == 1)
+                            warning_key = "inner_wall_jerk";
+                       else
+                            warning_key = "default_jerk";
+
+                       warning->opt_key = warning_key;
+                    }
+
+                    if (warning_key.empty() && m_default_object_config.default_jerk.get_at(extruder_id) > 0) {
+                       std::vector<std::string> jerk_to_check = {"default_jerk",     "outer_wall_jerk",    "inner_wall_jerk", "infill_jerk",
+                                                                 "top_surface_jerk", "initial_layer_jerk", "travel_jerk"};
+                       const auto               max_jerk = std::min(m_config.machine_max_jerk_x.values[0], m_config.machine_max_jerk_y.values[0]);
+                       warning_key.clear();
+                       warning_key = check_motion_ability_object_setting(jerk_to_check, max_jerk);
+                       if (!warning_key.empty()) {
+                            warning->string = L(
+                                "The jerk setting exceeds the printer's maximum jerk (machine_max_jerk_x/machine_max_jerk_y).\n"
+                                "Orca will automatically cap the jerk speed to ensure it doesn't surpass the printer's capabilities.\n"
+                                "You can adjust the maximum jerk setting in your printer's configuration to get higher speeds.");
+                            warning->opt_key = warning_key;
+                       }
+                    }
+                }
+
+                // Check junction deviation
+                // Orca: Only marlin FW supports max junction deviation. Dont display warning if firmware is not supporting it.
+                const bool support_max_junction_deviation = ( m_config.gcode_flavor == gcfMarlinFirmware);
+                if (warning_key.empty() && m_default_object_config.default_junction_deviation.get_at(extruder_id) > max_junction_deviation && support_max_junction_deviation) {
+                    warning->string  = L( "Junction deviation setting exceeds the printer's maximum value (machine_max_junction_deviation).\n"
+                                          "Orca will automatically cap the junction deviation to ensure it doesn't surpass the printer's capabilities.\n"
+                                          "You can adjust the machine_max_junction_deviation value in your printer's configuration to get higher limits.");
+                    warning->opt_key = warning_key;
+                }
+                
+                // check acceleration
+                const auto max_accel = m_config.machine_max_acceleration_extruding.values[0];
+                if (warning_key.empty() && m_default_object_config.default_acceleration.get_at(extruder_id) > 0 && max_accel > 0) {
+                   const bool support_travel_acc = (m_config.gcode_flavor == gcfRepetier || m_config.gcode_flavor == gcfMarlinFirmware ||
+                                                    m_config.gcode_flavor == gcfRepRapFirmware);
+
+                   std::vector<std::string> accel_to_check;
+                   if (!support_travel_acc)
+                        accel_to_check = {
+                            "default_acceleration",
+                            "inner_wall_acceleration",
+                            "outer_wall_acceleration",
+                            "bridge_acceleration",
+                            "initial_layer_acceleration",
+                            "sparse_infill_acceleration",
+                            "internal_solid_infill_acceleration",
+                            "top_surface_acceleration",
+                            "travel_acceleration",
+                        };
+                   else
+                        accel_to_check = {
+                            "default_acceleration",
+                            "inner_wall_acceleration",
+                            "outer_wall_acceleration",
+                            "bridge_acceleration",
+                            "initial_layer_acceleration",
+                            "sparse_infill_acceleration",
+                            "internal_solid_infill_acceleration",
+                            "top_surface_acceleration",
+                        };
+                   warning_key = check_motion_ability_object_setting(accel_to_check, max_accel);
+                   if (!warning_key.empty()) {
+                        warning->string  = L("The acceleration setting exceeds the printer's maximum acceleration "
+                                              "(machine_max_acceleration_extruding).\nOrca will "
+                                              "automatically cap the acceleration speed to ensure it doesn't surpass the printer's "
+                                              "capabilities.\nYou can adjust the "
+                                              "machine_max_acceleration_extruding value in your printer's configuration to get higher speeds.");
+                        warning->opt_key = warning_key;
+                   }
+                   if (support_travel_acc) {
+                        const auto max_travel = m_config.machine_max_acceleration_travel.values[0];
+                        if (max_travel > 0) {
+                            accel_to_check = {
+                                "travel_acceleration",
+                            };
+                            warning_key = check_motion_ability_object_setting(accel_to_check, max_travel);
+                            if (!warning_key.empty()) {
+                                warning->string = L(
+                                    "The travel acceleration setting exceeds the printer's maximum travel acceleration "
+                                    "(machine_max_acceleration_travel).\nOrca will "
+                                    "automatically cap the travel acceleration speed to ensure it doesn't surpass the printer's "
+                                    "capabilities.\nYou can adjust the "
+                                    "machine_max_acceleration_travel value in your printer's configuration to get higher speeds.");
+                                warning->opt_key = warning_key;
+                            }
+                        }
+                   }
+                }
+
+                // check speed
+                // Orca: disable the speed check for now as we don't cap the speed
+                // if (warning_key.empty()) {
+                //    auto       speed_to_check = {"inner_wall_speed",  "outer_wall_speed", "sparse_infill_speed",   "internal_solid_infill_speed",
+                //                                 "top_surface_speed", "bridge_speed",     "internal_bridge_speed", "gap_infill_speed"};
+                //    const auto max_speed      = std::min(m_config.machine_max_speed_x.values[0], m_config.machine_max_speed_y.values[0]);
+                //    warning_key.clear();
+                //    warning_key = check_motion_ability_region_setting(speed_to_check, max_speed);
+                //    if (warning_key.empty() && m_config.travel_speed > max_speed)
+                //         warning_key = "travel_speed";
+                //    if (!warning_key.empty()) {
+                //         warning->string = L(
+                //             "The speed setting exceeds the printer's maximum speed (machine_max_speed_x/machine_max_speed_y).\nOrca will "
+                //             "automatically cap the print speed to ensure it doesn't surpass the printer's capabilities.\nYou can adjust the "
+                //             "maximum speed setting in your printer's configuration to get higher speeds.");
+                //         warning->opt_key = warning_key;
+                //    }
+                // }
+            };
+            check_extruder(0); // TODO: check used extruder variants
 
             // check wall sequence and precise outer wall
             if (m_default_region_config.precise_outer_wall && m_default_region_config.wall_sequence != WallSequence::InnerOuter) {
