@@ -337,7 +337,7 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
         if(retraction_length_remaining <=EPSILON) return {retractionBeforeWipe,0.f};
         
         // Calculate wipe speed
-        double wipe_speed = config.role_based_wipe_speed ? writer.get_current_speed() / 60.0 : config.get_abs_value("wipe_speed");
+        double wipe_speed = config.role_based_wipe_speed ? writer.get_current_speed() / 60.0 : config.get_abs_value("wipe_speed", gcodegen.config().travel_speed.get_at(gcodegen.cur_extruder_index()));
         wipe_speed = std::max(wipe_speed, 10.0);
 
         // Process wipe path & calculate wipe path length
@@ -429,7 +429,7 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
 
         /*  Reduce feedrate a bit; travel speed is often too high to move on existing material.
             Too fast = ripping of existing material; too slow = short wipe path, thus more blob.  */
-        double _wipe_speed = gcodegen.config().get_abs_value("wipe_speed");// gcodegen.writer().config.travel_speed.value * 0.8;
+        double _wipe_speed = gcodegen.config().get_abs_value("wipe_speed", gcodegen.config().travel_speed.get_at(gcodegen.cur_extruder_index()));// gcodegen.writer().config.travel_speed.value * 0.8;
         if(gcodegen.config().role_based_wipe_speed)
             _wipe_speed = gcodegen.writer().get_current_speed() / 60.0;
         if(_wipe_speed < 10)
