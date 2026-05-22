@@ -13447,18 +13447,18 @@ void Plater::calib_input_shaping_freq(const Calib_Params& params)
 
     if (has_junction_deviation(printer_config)) {
         printer_config->set_key_value("machine_max_junction_deviation", new ConfigOptionFloats {(std::max(printer_config->option<ConfigOptionFloats>("machine_max_junction_deviation")->values.front(), 0.25))});
-        print_config->set_key_value("default_junction_deviation", new ConfigOptionFloatsNullable({0}));
+        set_config_values<double, ConfigOptionFloatsNullable>(print_config, "default_junction_deviation", 0);
     } else {
         const double jerk_value = (gcode_flavor_option && gcode_flavor_option->value == GCodeFlavor::gcfKlipper) ? 5.0 : 10.0;
         printer_config->set_key_value("machine_max_jerk_x", new ConfigOptionFloats{std::max(printer_config->option<ConfigOptionFloats>("machine_max_jerk_x")->values.front(), jerk_value)});
         printer_config->set_key_value("machine_max_jerk_y", new ConfigOptionFloats{std::max(printer_config->option<ConfigOptionFloats>("machine_max_jerk_y")->values.front(), jerk_value)});
-        print_config->set_key_value("default_jerk", new ConfigOptionFloatsNullable({0}));
+        set_config_values<double, ConfigOptionFloatsNullable>(print_config, "default_jerk", 0);
     }
 
     if (!filament_config->option<ConfigOptionBools>("enable_pressure_advance")->get_at(0)) {
-        filament_config->set_key_value("enable_pressure_advance", new ConfigOptionBools {true});
-        filament_config->set_key_value("pressure_advance", new ConfigOptionFloats { 0.0 });
-        filament_config->set_key_value("adaptive_pressure_advance", new ConfigOptionBools{false});
+        set_config_values<bool, ConfigOptionBools>(filament_config, "enable_pressure_advance", true);
+        set_config_values<double, ConfigOptionFloatsNullable>(filament_config, "pressure_advance", 0.0);
+        set_config_values<bool, ConfigOptionBools>(filament_config, "adaptive_pressure_advance", false);
     }
 
     printer_config->set_key_value("resonance_avoidance", new ConfigOptionBool{false});
@@ -13467,7 +13467,7 @@ void Plater::calib_input_shaping_freq(const Calib_Params& params)
     filament_config->set_key_value("slow_down_min_speed", new ConfigOptionFloats { 0.0 });
     filament_config->set_key_value("slow_down_for_layer_cooling", new ConfigOptionBools{false});
     print_config->set_key_value("layer_height", new ConfigOptionFloat(0.2));
-    print_config->set_key_value("enable_overhang_speed", new ConfigOptionBoolsNullable({false}));
+    set_config_values<bool, ConfigOptionBools>(print_config, "enable_overhang_speed", false);
     print_config->set_key_value("timelapse_type", new ConfigOptionEnum<TimelapseType>(tlTraditional));
     print_config->set_key_value("wall_loops", new ConfigOptionInt(1));
     print_config->set_key_value("top_shell_layers", new ConfigOptionInt(0));
@@ -13477,9 +13477,9 @@ void Plater::calib_input_shaping_freq(const Calib_Params& params)
     print_config->set_key_value("spiral_mode", new ConfigOptionBool(true));
     print_config->set_key_value("spiral_mode_smooth", new ConfigOptionBool(false));
     print_config->set_key_value("bottom_surface_pattern", new ConfigOptionEnum<InfillPattern>(ipRectilinear));
-    print_config->set_key_value("outer_wall_speed", new ConfigOptionFloatsNullable({200}));
-    print_config->set_key_value("default_acceleration", new ConfigOptionFloatsNullable({20000}));
-    print_config->set_key_value("outer_wall_acceleration", new ConfigOptionFloatsNullable({20000}));
+    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "outer_wall_speed", 200.);
+    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "default_acceleration", 20000.);
+    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "outer_wall_acceleration", 20000.);
     print_config->set_key_value("precise_z_height", new ConfigOptionBool(false));
     model().objects[0]->config.set_key_value("brim_type", new ConfigOptionEnum<BrimType>(btOuterOnly));
     model().objects[0]->config.set_key_value("brim_width", new ConfigOptionFloat(3.0));
@@ -13510,18 +13510,18 @@ void Plater::calib_input_shaping_damp(const Calib_Params& params)
 
     if (has_junction_deviation(printer_config)) {
         printer_config->set_key_value("machine_max_junction_deviation", new ConfigOptionFloats {(std::max(printer_config->option<ConfigOptionFloats>("machine_max_junction_deviation")->values.front(), 0.25))});
-        print_config->set_key_value("default_junction_deviation", new ConfigOptionFloatsNullable({0}));
+        set_config_values<double, ConfigOptionFloatsNullable>(print_config, "default_junction_deviation", 0);
     } else {
         const double jerk_value = (gcode_flavor_option && gcode_flavor_option->value == GCodeFlavor::gcfKlipper) ? 5.0 : 10.0;
         printer_config->set_key_value("machine_max_jerk_x", new ConfigOptionFloats{std::max(printer_config->option<ConfigOptionFloats>("machine_max_jerk_x")->values.front(), jerk_value)});
         printer_config->set_key_value("machine_max_jerk_y", new ConfigOptionFloats{std::max(printer_config->option<ConfigOptionFloats>("machine_max_jerk_y")->values.front(), jerk_value)});
-        print_config->set_key_value("default_jerk", new ConfigOptionFloatsNullable({0}));
+        set_config_values<double, ConfigOptionFloatsNullable>(print_config, "default_jerk", 0);
     }
 
     if (!filament_config->option<ConfigOptionBools>("enable_pressure_advance")->get_at(0)) {
-        filament_config->set_key_value("enable_pressure_advance", new ConfigOptionBools {true});
-        filament_config->set_key_value("pressure_advance", new ConfigOptionFloats { 0.0 });
-        filament_config->set_key_value("adaptive_pressure_advance", new ConfigOptionBools{false});
+        set_config_values<bool, ConfigOptionBools>(filament_config, "enable_pressure_advance", true);
+        set_config_values<double, ConfigOptionFloatsNullable>(filament_config, "pressure_advance", 0.0);
+        set_config_values<bool, ConfigOptionBools>(filament_config, "adaptive_pressure_advance", false);
     }
 
     printer_config->set_key_value("resonance_avoidance", new ConfigOptionBool{false});
@@ -13529,7 +13529,7 @@ void Plater::calib_input_shaping_damp(const Calib_Params& params)
     filament_config->set_key_value("slow_down_layer_time", new ConfigOptionFloats { 0.0 });
     filament_config->set_key_value("slow_down_min_speed", new ConfigOptionFloats { 0.0 });
     filament_config->set_key_value("slow_down_for_layer_cooling", new ConfigOptionBools{false});
-    print_config->set_key_value("enable_overhang_speed", new ConfigOptionBoolsNullable({false}));
+    set_config_values<bool, ConfigOptionBools>(print_config, "enable_overhang_speed", false);
     print_config->set_key_value("timelapse_type", new ConfigOptionEnum<TimelapseType>(tlTraditional));
     print_config->set_key_value("wall_loops", new ConfigOptionInt(1));
     print_config->set_key_value("top_shell_layers", new ConfigOptionInt(0));
@@ -13539,9 +13539,9 @@ void Plater::calib_input_shaping_damp(const Calib_Params& params)
     print_config->set_key_value("spiral_mode", new ConfigOptionBool(true));
     print_config->set_key_value("spiral_mode_smooth", new ConfigOptionBool(false));
     print_config->set_key_value("bottom_surface_pattern", new ConfigOptionEnum<InfillPattern>(ipRectilinear));
-    print_config->set_key_value("outer_wall_speed", new ConfigOptionFloatsNullable({200}));
-    print_config->set_key_value("default_acceleration", new ConfigOptionFloatsNullable({20000}));
-    print_config->set_key_value("outer_wall_acceleration", new ConfigOptionFloatsNullable({20000}));
+    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "outer_wall_speed", 200.);
+    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "default_acceleration", 20000.);
+    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "outer_wall_acceleration", 20000.);
     print_config->set_key_value("precise_z_height", new ConfigOptionBool(false));
     model().objects[0]->config.set_key_value("brim_type", new ConfigOptionEnum<BrimType>(btOuterOnly));
     model().objects[0]->config.set_key_value("brim_width", new ConfigOptionFloat(3.0));
@@ -13574,17 +13574,17 @@ void Plater::Calib_Cornering(const Calib_Params& params)
 
     if (has_junction_deviation(printer_config)) {
         printer_config->set_key_value("machine_max_junction_deviation", new ConfigOptionFloats{params.end});
-        print_config->set_key_value("default_junction_deviation", new ConfigOptionFloatsNullable({0.0}));
+        set_config_values<double, ConfigOptionFloatsNullable>(print_config, "default_junction_deviation", 0);
     } else {
         printer_config->set_key_value("machine_max_jerk_x", new ConfigOptionFloats{params.end});
         printer_config->set_key_value("machine_max_jerk_y", new ConfigOptionFloats{params.end});
-        print_config->set_key_value("default_jerk", new ConfigOptionFloatsNullable({0}));
+        set_config_values<double, ConfigOptionFloatsNullable>(print_config, "default_jerk", 0);
     }
 
     if (!filament_config->option<ConfigOptionBools>("enable_pressure_advance")->get_at(0)) {
-        filament_config->set_key_value("enable_pressure_advance", new ConfigOptionBools {true});
-        filament_config->set_key_value("pressure_advance", new ConfigOptionFloats { 0.0 });
-        filament_config->set_key_value("adaptive_pressure_advance", new ConfigOptionBools{false});
+        set_config_values<bool, ConfigOptionBools>(filament_config, "enable_pressure_advance", true);
+        set_config_values<double, ConfigOptionFloatsNullable>(filament_config, "pressure_advance", 0.0);
+        set_config_values<bool, ConfigOptionBools>(filament_config, "adaptive_pressure_advance", false);
     }
 
     printer_config->set_key_value("resonance_avoidance", new ConfigOptionBool{false});
@@ -13594,7 +13594,7 @@ void Plater::Calib_Cornering(const Calib_Params& params)
     filament_config->set_key_value("slow_down_min_speed", new ConfigOptionFloats { 0.0 });
     filament_config->set_key_value("slow_down_for_layer_cooling", new ConfigOptionBools{false});
     filament_config->set_key_value("filament_max_volumetric_speed", new ConfigOptionFloats{200});
-    print_config->set_key_value("enable_overhang_speed", new ConfigOptionBoolsNullable({false}));
+    set_config_values<bool, ConfigOptionBools>(print_config, "enable_overhang_speed", false);
     print_config->set_key_value("timelapse_type", new ConfigOptionEnum<TimelapseType>(tlTraditional));
     print_config->set_key_value("wall_loops", new ConfigOptionInt(1));
     print_config->set_key_value("top_shell_layers", new ConfigOptionInt(0));
@@ -13604,9 +13604,9 @@ void Plater::Calib_Cornering(const Calib_Params& params)
     print_config->set_key_value("spiral_mode", new ConfigOptionBool(true));
     print_config->set_key_value("spiral_mode_smooth", new ConfigOptionBool(false));
     print_config->set_key_value("bottom_surface_pattern", new ConfigOptionEnum<InfillPattern>(ipRectilinear));
-    print_config->set_key_value("outer_wall_speed", new ConfigOptionFloatsNullable({200}));
-    print_config->set_key_value("default_acceleration", new ConfigOptionFloatsNullable({2000}));
-    print_config->set_key_value("outer_wall_acceleration", new ConfigOptionFloatsNullable({2000}));
+    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "outer_wall_speed", 200.);
+    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "default_acceleration", 20000.);
+    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "outer_wall_acceleration", 20000.);
     print_config->set_key_value("precise_z_height", new ConfigOptionBool(false));
     model().objects[0]->config.set_key_value("brim_type", new ConfigOptionEnum<BrimType>(btOuterOnly));
     model().objects[0]->config.set_key_value("brim_width", new ConfigOptionFloat(3.0));
