@@ -8257,7 +8257,7 @@ std::set<std::string> filament_options_with_variant = {
     "filament_deretraction_speed",
     "filament_retraction_minimum_travel",
     "filament_retract_when_changing_layer",
-     "filament_wipe",
+    "filament_wipe",
     //BBS
     "filament_wipe_distance",
     "filament_retract_before_wipe",

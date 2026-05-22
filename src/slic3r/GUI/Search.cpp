@@ -346,14 +346,15 @@ const Option &OptionsSearcher::get_option(const std::string &opt_key, Preset::Ty
     if (it->opt_key() == opt_key2) {
         variant_index = -1;
     } else {
-        it = std::lower_bound(it, options.end(), Option({boost::nowide::widen(get_key(opt_key2 + "#", type))}));
-        if (it == options.end() || it->opt_key().compare(0, opt_key2.length(), opt_key2) != 0) {
+        const std::string opt_key3 = opt_key2 + "#";
+        it = std::lower_bound(it, options.end(), Option({boost::nowide::widen(get_key(opt_key3, type))}));
+        if (it == options.end() || it->opt_key().compare(0, opt_key3.length(), opt_key3) != 0) {
             variant_index = -2; // Not found
             return options[0];
         }
         auto it2 = it;
         ++it2;
-        if (it2 != options.end() && it2->opt_key().compare(0, opt_key2.length(), opt_key2) == 0
+        if (it2 != options.end() && it2->opt_key().compare(0, opt_key3.length(), opt_key3) == 0
                 && printer_options_with_variant_1.find(opt_key2) == printer_options_with_variant_1.end())
             variant_index = -2;
     }
