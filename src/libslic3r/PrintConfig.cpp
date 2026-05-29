@@ -7684,7 +7684,7 @@ void PrintConfigDef::init_fff_params()
     def->set_default_value(new ConfigOptionInts{0});
 
     def = this->add("xy_hole_compensation", coBool);
-    def->label = L("X-Y hole compensation");
+    def->label = L("X-Y hole diameter compensation");
     def->category = L("Quality");
     def->tooltip = L("Holes in objects will expand or contract in the XY plane by the set value. Positive values make holes bigger and negative values make holes smaller. This function is used to adjust sizes slightly when objects have assembly issues.");
     def->mode = comAdvanced;
