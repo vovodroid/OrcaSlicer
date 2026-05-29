@@ -47,7 +47,7 @@ double XYCompensator::modify_hole(const double dia)
     if (interpolatorModel == nullptr)
         return 0.0;
 
-    return interpolatorModel->interpolate(dia);
+    return interpolatorModel->interpolate(dia) / 2.0;
 }
 
 } // namespace Slic3r
