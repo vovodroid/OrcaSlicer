@@ -141,14 +141,15 @@ bool Layer::is_perimeter_compatible(const Print& print, const PrintRegion& a, co
     const PrintRegionConfig& config       = a.config();
     const PrintRegionConfig& other_config = b.config();
 
-    return config.wall_filament             == other_config.wall_filament
+        return config.outer_wall_filament_id       == other_config.outer_wall_filament_id
+		&& config.inner_wall_filament_id       == other_config.inner_wall_filament_id
 		&& config.wall_loops                  == other_config.wall_loops
 		&& config.wall_sequence               == other_config.wall_sequence
 		&& config.is_infill_first             == other_config.is_infill_first
-		&& config.inner_wall_speed.get_at(print.get_extruder_id(config.wall_filament)) == other_config.inner_wall_speed.get_at(print.get_extruder_id(config.wall_filament))
-		&& config.outer_wall_speed.get_at(print.get_extruder_id(config.wall_filament)) == other_config.outer_wall_speed.get_at(print.get_extruder_id(config.wall_filament))
-		&& config.small_perimeter_speed.get_at(print.get_extruder_id(config.wall_filament)) == other_config.small_perimeter_speed.get_at(print.get_extruder_id(config.wall_filament))
-        && config.gap_infill_speed.get_at(print.get_extruder_id(config.wall_filament)) == other_config.gap_infill_speed.get_at(print.get_extruder_id(config.wall_filament))
+		&& config.inner_wall_speed.get_at(print.get_extruder_id(config.outer_wall_filament_id)) == other_config.inner_wall_speed.get_at(print.get_extruder_id(config.outer_wall_filament_id))
+		&& config.outer_wall_speed.get_at(print.get_extruder_id(config.outer_wall_filament_id)) == other_config.outer_wall_speed.get_at(print.get_extruder_id(config.outer_wall_filament_id))
+		&& config.small_perimeter_speed.get_at(print.get_extruder_id(config.outer_wall_filament_id)) == other_config.small_perimeter_speed.get_at(print.get_extruder_id(config.outer_wall_filament_id))
+        && config.gap_infill_speed.get_at(print.get_extruder_id(config.outer_wall_filament_id)) == other_config.gap_infill_speed.get_at(print.get_extruder_id(config.outer_wall_filament_id))
         && config.filter_out_gap_fill.value == other_config.filter_out_gap_fill.value
 		&& config.detect_overhang_wall                   == other_config.detect_overhang_wall
 		&& config.overhang_reverse                       == other_config.overhang_reverse
