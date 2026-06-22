@@ -12893,9 +12893,9 @@ void Plater::_calib_pa_pattern(const Calib_Params& params)
 
         auto &obj_config = obj->config;
         if (speeds.size() > 1)
-            set_config_values<double, ConfigOptionFloatsNullable>(obj_config, "outer_wall_speed", tspd);
+            obj_config.set_key_value("outer_wall_speed", new ConfigOptionFloatsNullable(1, tspd));
         if (accels.size() > 1)
-            set_config_values<double, ConfigOptionFloatsNullable>(obj_config, "outer_wall_acceleration", tacc);
+            obj_config.set_key_value("outer_wall_acceleration", new ConfigOptionFloatsNullable(1, tacc));
 
         auto cur_plate = get_partplate_list().get_plate(plate_idx);
         if (!cur_plate) {
@@ -13636,8 +13636,8 @@ void Plater::Calib_Cornering(const Calib_Params& params)
     print_config->set_key_value("spiral_mode_smooth", new ConfigOptionBool(false));
     print_config->set_key_value("bottom_surface_pattern", new ConfigOptionEnum<InfillPattern>(ipRectilinear));
     set_config_values<double, ConfigOptionFloatsNullable>(print_config, "outer_wall_speed", 200.);
-    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "default_acceleration", 20000.);
-    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "outer_wall_acceleration", 20000.);
+    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "default_acceleration", 2000.);
+    set_config_values<double, ConfigOptionFloatsNullable>(print_config, "outer_wall_acceleration", 2000.);
     print_config->set_key_value("precise_z_height", new ConfigOptionBool(false));
     model().objects[0]->config.set_key_value("brim_type", new ConfigOptionEnum<BrimType>(btOuterOnly));
     model().objects[0]->config.set_key_value("brim_width", new ConfigOptionFloat(3.0));
