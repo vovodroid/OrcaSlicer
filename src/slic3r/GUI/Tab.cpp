@@ -1211,7 +1211,13 @@ void Tab::check_extruder_options_status(int index, bool &sys_extruder, bool &mod
                 if (m_type == Preset::TYPE_FILAMENT && kvp.second.second == -1) {
                     continue;
                 }
-                std::string target_opt_key = base_opt_key + "#" + std::to_string(config_index);
+
+                unsigned int stride = 1;
+                if (printer_options_with_variant_2.count(base_opt_key) > 0) {
+                    stride = 2;
+                }
+
+                std::string target_opt_key = base_opt_key + "#" + std::to_string(config_index * stride);
 
                 auto status_iter = m_all_extruder_options_status.find(target_opt_key);
                 if (status_iter != m_all_extruder_options_status.end()) {
