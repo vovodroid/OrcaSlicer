@@ -1117,7 +1117,7 @@ public:
     // Returns scaling for each axis representing shrinkage compensations in each axis.
      Vec3d shrinkage_compensation() const;
 
-    float object_skirt_offset() const;
+    float object_skirt_offset(const Polygon* hull = nullptr) const;
 
 protected:
     // Invalidates the step, and its depending steps in Print.
@@ -1198,6 +1198,7 @@ private:
     // Allow PrintObject to access m_mutex and m_cancel_callback.
     friend class PrintObject;
 
+    int object_skirt_loops(const Polygon* hull) const;
 public:
     //BBS: this was a print config and now seems to be useless so we move it to here
     // ORCA: parameter below is now back to being a user option (min_skirt_length)
