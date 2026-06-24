@@ -3941,51 +3941,75 @@ void GCode::print_machine_envelope(GCodeOutputStream &file, Print &print)
     const auto flavor = print.config().gcode_flavor.value;
     if ((flavor == gcfMarlinLegacy || flavor == gcfMarlinFirmware || flavor == gcfRepRapFirmware) &&
         print.config().emit_machine_limits_to_gcode.value == true) {
+
+        // Get all physical tool ids current print will use
+        std::unordered_set<unsigned int> used_extruders;
+        for (const auto& extruder : m_writer.extruders()) {
+            used_extruders.insert(extruder.extruder_id());
+        }
+
+        // Get the max limit value among used extruders
+        auto get_max_value = [&used_extruders](const std::string key, const ConfigOptionFloats& v) { 
+            unsigned int stride = 1;
+            if (printer_options_with_variant_2.count(key) > 0) {
+                stride = 2;
+            }
+
+            double value = std::numeric_limits<double>::lowest();
+            for (unsigned int extruder : used_extruders) {
+                value = std::max(value, v.values[extruder * stride]);
+            }
+
+            assert(value > std::numeric_limits<double>::lowest());
+            return value;
+        };
+#define MAX_LIMIT(OPT) get_max_value(#OPT, print.config().OPT)
+
         int factor = flavor == gcfRepRapFirmware ? 60 : 1; // RRF M203 and M566 are in mm/min
         file.write_format("M201 X%d Y%d Z%d E%d\n",
-            int(print.config().machine_max_acceleration_x.values.front() + 0.5),
-            int(print.config().machine_max_acceleration_y.values.front() + 0.5),
-            int(print.config().machine_max_acceleration_z.values.front() + 0.5),
-            int(print.config().machine_max_acceleration_e.values.front() + 0.5));
+            int(MAX_LIMIT(machine_max_acceleration_x) + 0.5),
+            int(MAX_LIMIT(machine_max_acceleration_y) + 0.5),
+            int(MAX_LIMIT(machine_max_acceleration_z) + 0.5),
+            int(MAX_LIMIT(machine_max_acceleration_e) + 0.5));
         file.write_format("M203 X%d Y%d Z%d E%d\n",
-            int(print.config().machine_max_speed_x.values.front() * factor + 0.5),
-            int(print.config().machine_max_speed_y.values.front() * factor + 0.5),
-            int(print.config().machine_max_speed_z.values.front() * factor + 0.5),
-            int(print.config().machine_max_speed_e.values.front() * factor + 0.5));
+            int(MAX_LIMIT(machine_max_speed_x) * factor + 0.5),
+            int(MAX_LIMIT(machine_max_speed_y) * factor + 0.5),
+            int(MAX_LIMIT(machine_max_speed_z) * factor + 0.5),
+            int(MAX_LIMIT(machine_max_speed_e) * factor + 0.5));
 
         // Now M204 - acceleration. This one is quite hairy thanks to how Marlin guys care about
         // Legacy Marlin should export travel acceleration the same as printing acceleration.
         // MarlinFirmware has the two separated.
         int travel_acc = flavor == gcfMarlinLegacy
-                       ? int(print.config().machine_max_acceleration_extruding.values.front() + 0.5)
-                       : int(print.config().machine_max_acceleration_travel.values.front() + 0.5);
+                       ? int(MAX_LIMIT(machine_max_acceleration_extruding) + 0.5)
+                       : int(MAX_LIMIT(machine_max_acceleration_travel) + 0.5);
         if (flavor == gcfRepRapFirmware)
             file.write_format("M204 P%d T%d ; sets acceleration (P, T), mm/sec^2\n",
-                int(print.config().machine_max_acceleration_extruding.values.front() + 0.5),
+                int(MAX_LIMIT(machine_max_acceleration_extruding) + 0.5),
                 travel_acc);
         else if (flavor == gcfMarlinFirmware)
             // New Marlin uses M204 P[print] R[retract] T[travel]
             file.write_format("M204 P%d R%d T%d ; sets acceleration (P, T) and retract acceleration (R), mm/sec^2\n",
-                int(print.config().machine_max_acceleration_extruding.values.front() + 0.5),
-                int(print.config().machine_max_acceleration_retracting.values.front() + 0.5),
-                int(print.config().machine_max_acceleration_travel.values.front() + 0.5));
+                int(MAX_LIMIT(machine_max_acceleration_extruding) + 0.5),
+                int(MAX_LIMIT(machine_max_acceleration_retracting) + 0.5),
+                int(MAX_LIMIT(machine_max_acceleration_travel) + 0.5));
         else
             file.write_format("M204 P%d R%d T%d\n",
-                int(print.config().machine_max_acceleration_extruding.values.front() + 0.5),
-                int(print.config().machine_max_acceleration_retracting.values.front() + 0.5),
+                int(MAX_LIMIT(machine_max_acceleration_extruding) + 0.5),
+                int(MAX_LIMIT(machine_max_acceleration_retracting) + 0.5),
                 travel_acc);
 
         assert(is_decimal_separator_point());
         file.write_format(flavor == gcfRepRapFirmware
             ? "M566 X%.2lf Y%.2lf Z%.2lf E%.2lf ; sets the jerk limits, mm/min\n"
             : "M205 X%.2lf Y%.2lf Z%.2lf E%.2lf ; sets the jerk limits, mm/sec\n",
-            print.config().machine_max_jerk_x.values.front() * factor,
-            print.config().machine_max_jerk_y.values.front() * factor,
-            print.config().machine_max_jerk_z.values.front() * factor,
-            print.config().machine_max_jerk_e.values.front() * factor);
+            MAX_LIMIT(machine_max_jerk_x) * factor,
+            MAX_LIMIT(machine_max_jerk_y) * factor,
+            MAX_LIMIT(machine_max_jerk_z) * factor,
+            MAX_LIMIT(machine_max_jerk_e) * factor);
 
         // New Marlin uses M205 J[mm] for junction deviation (only apply if it is > 0)
-        file.write_format(writer().set_junction_deviation(config().machine_max_junction_deviation.values.front()).c_str());
+        file.write_format(writer().set_junction_deviation(MAX_LIMIT(machine_max_junction_deviation)).c_str());
 
         // Orca: Override input shaping values
         if (print.config().input_shaping_emit.value && flavor != gcfMarlinLegacy) {
@@ -3998,6 +4022,7 @@ void GCode::print_machine_envelope(GCodeOutputStream &file, Print &print)
             }
         }
     }
+#undef MAX_LIMIT
 }
 
 // BBS
