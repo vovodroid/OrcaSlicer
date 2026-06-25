@@ -493,10 +493,8 @@ TEST_CASE("Machine envelope emits max limit among used extruders", "[PrintGCode]
         THEN("M205 contains max jerk values") {
             REQUIRE(gcode.find("M205 X12.00 Y13.00 Z0.60 E10.00") != std::string::npos);
         }
-        THEN("M205 J is clamped to m_max_junction_deviation (values.front())") {
-            // MAX_LIMIT returns 0.05, but set_junction_deviation clamps to
-            // m_max_junction_deviation which is set from values.front() (0.02).
-            REQUIRE(gcode.find("M205 J0.020") != std::string::npos);
+        THEN("M205 contains max m_max_junction_deviation ") {
+            REQUIRE(gcode.find("M205 J0.050") != std::string::npos);
         }
     }
 }

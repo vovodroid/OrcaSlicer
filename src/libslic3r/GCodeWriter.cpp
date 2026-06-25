@@ -256,7 +256,9 @@ std::string GCodeWriter::set_chamber_temperature(int temperature, bool wait)
     return gcode.str();
 }
 
-#define EXTRUDER_LIMIT(OPT) (OPT.size() <= filament()->extruder_id() ? 0 : OPT[filament()->extruder_id()])
+#define EXTRUDER_LIMIT(OPT) \
+    (filament() ? ((OPT).size() <= filament()->extruder_id() ? 0 : (OPT)[filament()->extruder_id()]) : \
+                  ((OPT).empty() ? 0 : *std::max_element((OPT).cbegin(), (OPT).cend())))
 
 // copied from PrusaSlicer
 std::string GCodeWriter::set_acceleration_internal(Acceleration type, unsigned int acceleration)
