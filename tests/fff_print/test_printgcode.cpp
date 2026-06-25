@@ -498,3 +498,135 @@ TEST_CASE("Machine envelope emits max limit among used extruders", "[PrintGCode]
         }
     }
 }
+
+// Verify that the EXTRUDER_LIMIT macro (GCodeWriter.cpp) correctly:
+//  1) Uses the active extruder's specific limit when filament() is known.
+//  2) Falls back to the maximum of all extruder limits when filament() is nullptr.
+//
+// These two behaviours were introduced in:
+//  - "Use per-extruder motion limit" (1ab34a7454)
+//  - "Use max limit when current extruder is unknown" (b7240ab1c6)
+TEST_CASE("EXTRUDER_LIMIT per-extruder clamping and max fallback", "[PrintGCode][MachineEnvelope]")
+{
+    // --- Build config with 2 extruders that have different machine limits ---
+    // Extruder 0: low limits
+    // Extruder 1: high limits
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+
+    config.set_key_value("emit_machine_limits_to_gcode", new ConfigOptionBool(true));
+    config.set_key_value("gcode_flavor",                 new ConfigOptionEnum<GCodeFlavor>(gcfMarlinFirmware));
+    config.set_key_value("gcode_comments",               new ConfigOptionBool(true));
+    config.set_key_value("machine_start_gcode",          new ConfigOptionString(""));
+    config.set_key_value("layer_height",                 new ConfigOptionFloat(0.2));
+    config.set_key_value("initial_layer_print_height",   new ConfigOptionFloat(0.2));
+    config.set_key_value("initial_layer_line_width",     new ConfigOptionFloatOrPercent(0, false));
+    config.set_key_value("z_hop",                        new ConfigOptionFloats({0}));
+    config.set_key_value("print_sequence",               new ConfigOptionEnum<PrintSequence>(PrintSequence::ByObject));
+
+    // 2 extruders, 2 filaments
+    config.set_key_value("nozzle_diameter",          new ConfigOptionFloats({0.4, 0.4}));
+    config.set_key_value("printer_extruder_id",      new ConfigOptionInts({1, 2}));
+    config.set_key_value("printer_extruder_variant", new ConfigOptionStrings({"Direct Drive Standard", "Direct Drive Standard"}));
+    config.set_key_value("filament_diameter",        new ConfigOptionFloats({1.75, 1.75}));
+    config.set_key_value("filament_colour",          new ConfigOptionStrings({"#FF0000", "#00FF00"}));
+    config.set_key_value("filament_type",            new ConfigOptionStrings({"PLA", "PLA"}));
+    config.option<ConfigOptionEnum<FilamentMapMode>>("filament_map_mode", true)->value = fmmManual;
+    config.set_key_value("filament_map",             new ConfigOptionInts({1, 2}));
+    config.set_key_value("default_filament_colour",  new ConfigOptionStrings({"#FF0000", "#00FF00"}));
+    config.set_key_value("nozzle_temperature",       new ConfigOptionInts({210, 210}));
+    config.set_key_value("nozzle_temperature_range_low",  new ConfigOptionInts({190, 190}));
+    config.set_key_value("nozzle_temperature_range_high", new ConfigOptionInts({240, 240}));
+    config.set_key_value("flush_multiplier",     new ConfigOptionFloats({1}));
+    config.set_key_value("flush_volumes_matrix", new ConfigOptionFloats({0, 0, 0, 0}));
+
+    // --- Machine limits (stride-2: e0_n, e0_s, e1_n, e1_s) ---
+    // Extruder 0 has LOW limits, Extruder 1 has HIGH limits.
+    config.set_key_value("machine_max_acceleration_x",          new ConfigOptionFloats({500, 0, 1000, 0}));
+    config.set_key_value("machine_max_acceleration_y",          new ConfigOptionFloats({500, 0, 1000, 0}));
+    config.set_key_value("machine_max_acceleration_z",          new ConfigOptionFloats({100, 0, 200, 0}));
+    config.set_key_value("machine_max_acceleration_e",          new ConfigOptionFloats({5000, 0, 5000, 0}));
+    config.set_key_value("machine_max_acceleration_extruding",  new ConfigOptionFloats({500, 0, 2000, 0}));
+    config.set_key_value("machine_max_acceleration_retracting", new ConfigOptionFloats({600, 0, 2000, 0}));
+    config.set_key_value("machine_max_acceleration_travel",     new ConfigOptionFloats({700, 0, 2500, 0}));
+    config.set_key_value("machine_max_speed_x",  new ConfigOptionFloats({100, 0, 200, 0}));
+    config.set_key_value("machine_max_speed_y",  new ConfigOptionFloats({110, 0, 210, 0}));
+    config.set_key_value("machine_max_speed_z",  new ConfigOptionFloats({10, 0, 30, 0}));
+    config.set_key_value("machine_max_speed_e",  new ConfigOptionFloats({50, 0, 80, 0}));
+    config.set_key_value("machine_max_jerk_x",   new ConfigOptionFloats({5, 0, 15, 0}));
+    config.set_key_value("machine_max_jerk_y",   new ConfigOptionFloats({6, 0, 16, 0}));
+    config.set_key_value("machine_max_jerk_z",   new ConfigOptionFloats({0.4, 0, 0.8, 0}));
+    config.set_key_value("machine_max_jerk_e",   new ConfigOptionFloats({3, 0, 8, 0}));
+    config.set_key_value("machine_max_junction_deviation", new ConfigOptionFloats({0.02, 0, 0.08, 0}));
+
+    // --- Print acceleration: 1500 mm/s² ---
+    // Exceeds extruder 0's limit (500) → should be clamped to 500.
+    // Does NOT exceed extruder 1's limit (2000) → passes through as 1500.
+    config.set_key_value("default_acceleration",        new ConfigOptionFloats({1500, 1500}));
+    config.set_key_value("outer_wall_acceleration",     new ConfigOptionFloats({1500, 1500}));
+    config.set_key_value("inner_wall_acceleration",     new ConfigOptionFloats({1500, 1500}));
+    config.set_key_value("top_surface_acceleration",    new ConfigOptionFloats({1500, 1500}));
+    config.set_key_value("initial_layer_acceleration",  new ConfigOptionFloats({1500, 1500}));
+    config.set_key_value("travel_acceleration",         new ConfigOptionFloats({1500, 1500}));
+
+    // Model: two objects assigned to different extruders
+    Model model;
+    auto* obj1 = model.add_object();
+    obj1->add_volume(mesh(TestMesh::cube_20x20x20));
+    obj1->add_instance();
+
+    auto* obj2 = model.add_object();
+    obj2->add_volume(mesh(TestMesh::cube_20x20x20));
+    obj2->add_instance();
+    obj2->config.set_key_value("extruder", new ConfigOptionInt(2)); // 0-based index 1
+
+    Print print;
+    arrange_objects(model, InfiniteBed{}, ArrangeParams{scaled(min_object_distance(config))});
+    for (auto* mo : model.objects) {
+        mo->ensure_on_bed();
+        print.auto_assign_extruders(mo);
+    }
+
+    print.apply(model, config);
+    print.validate();
+    print.set_status_silent();
+    print.process();
+
+    std::string gcode = Slic3r::Test::gcode(print);
+
+    SECTION("Preamble: max limit among used extruders") {
+        THEN("M201 uses max (extruder 1's) acceleration values") {
+            REQUIRE(gcode.find("M201 X1000 Y1000 Z200 E5000") != std::string::npos);
+        }
+        THEN("M204 uses max extruding/retracting/travel") {
+            REQUIRE(gcode.find("M204 P2000 R2000 T2500") != std::string::npos);
+        }
+        THEN("M205 uses max jerk values") {
+            REQUIRE(gcode.find("M205 X15.00 Y16.00 Z0.80 E8.00") != std::string::npos);
+        }
+    }
+
+    SECTION("Preamble: EXTRUDER_LIMIT falls back to max when no filament is active") {
+        // set_junction_deviation() is called during preamble with no active filament.
+        // EXTRUDER_LIMIT(m_max_junction_deviation) → filament() == nullptr → max of all (0.08).
+        THEN("M205 J uses max junction deviation") {
+            REQUIRE(gcode.find("M205 J0.080") != std::string::npos);
+        }
+    }
+
+    SECTION("Print: extruder 0 acceleration clamped to its specific limit") {
+        // Extruder 0 machine limit = 500. Print accel = 1500 > 500 → clamped to 500.
+        THEN("M204 P500 appears (extruder 0 clamped)") {
+            REQUIRE(gcode.find("M204 P500") != std::string::npos);
+        }
+        THEN("M204 T700 appears (extruder 0 travel clamped)") {
+            REQUIRE(gcode.find("M204 T700") != std::string::npos);
+        }
+    }
+
+    SECTION("Print: extruder 1 acceleration NOT clamped to extruder 0's limit") {
+        // Extruder 1 machine limit = 2000. Print accel = 1500 < 2000 → not clamped.
+        THEN("M204 P1500 appears (extruder 1 not clamped to 500)") {
+            REQUIRE(gcode.find("M204 P1500") != std::string::npos);
+        }
+    }
+}
