@@ -4461,6 +4461,13 @@ float Print::object_skirt_offset(const Polygon* hull) const
     float skirt_border        = config().skirt_distance + object_skirt_witdh;
     float object_skirt_offset = 0;
 
+    // first_layer_at_once
+    if (config().first_layer_at_once && config().draft_shield == dsDisabled && config().skirt_height == 1 &&
+        skirt_border <= config().extruder_clearance_radius / 2) {
+        return 0;
+    }
+    // first_layer_at_once
+
     if (is_all_objects_are_short())
         object_skirt_offset = skirt_border * 2;
     else if (config().draft_shield == dsEnabled || config().skirt_height * max_layer_height > config().nozzle_height)
