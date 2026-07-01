@@ -5290,9 +5290,9 @@ void PresetBundle::normalize_compatible_presets()
         }
     };
     normalize(this->prints,        this->printers, nullptr);
-    // normalize(this->sla_prints,    this->printers, nullptr);
     normalize(this->filaments,     this->printers, &this->prints);
-    // normalize(this->sla_materials, this->printers, &this->sla_prints);
+    normalize(this->sla_prints,    this->printers, nullptr);
+    normalize(this->sla_materials, this->printers, &this->sla_prints);
 }
 
 void PresetBundle::update_compatible(PresetSelectCompatibleType select_other_print_if_incompatible, PresetSelectCompatibleType select_other_filament_if_incompatible)
