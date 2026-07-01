@@ -800,6 +800,10 @@ bool is_compatible_with_parent_printer(const PresetWithVendorProfile& preset, co
 {
     auto *compatible_printers     = dynamic_cast<const ConfigOptionStrings*>(preset.preset.config.option("compatible_printers"));
     bool  has_compatible_printers = compatible_printers != nullptr && ! compatible_printers->values.empty();
+    auto contains_printer_name = [compatible_printers](const std::string &printer_name) {
+        return std::find(compatible_printers->values.begin(), compatible_printers->values.end(), printer_name) !=
+               compatible_printers->values.end();
+    };
     //BBS: FIXME only check the parent now, but should check grand-parent as well.
     return has_compatible_printers &&
            (contains_printer_name(active_printer.preset.inherits()) ||
