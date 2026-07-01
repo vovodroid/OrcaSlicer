@@ -355,6 +355,40 @@ TEST_CASE("Renamed printer/process names are normalized into compatible lists on
     CHECK(compatible_list(bundle.prints, "My Process", "compatible_printers") == std::vector<std::string>{ "New Printer" });
 }
 
+TEST_CASE("Renamed names are normalized into a SYSTEM preset's compatible lists", "[Preset][Rename]")
+{
+    PresetBundle bundle;
+
+    // Current printer + process, each renamed from an older name.
+    add_inmemory_preset(bundle.printers, "New Printer");
+    set_renamed_from(bundle.printers, "New Printer", { "Old Printer" });
+    add_inmemory_preset(bundle.prints, "New Process");
+    set_renamed_from(bundle.prints, "New Process", { "Old Process" });
+
+    // A *system* (vendor) filament whose own compatible lists still reference the OLD names. A vendor
+    // profile can point at a sibling preset that was later renamed, so system presets must be
+    // normalized too (they are skipped by neither collection walk).
+    add_inmemory_preset(bundle.filaments, "System Filament").is_system = true;
+    compatible_list(bundle.filaments, "System Filament", "compatible_printers") = { "Old Printer" };
+    compatible_list(bundle.filaments, "System Filament", "compatible_prints")   = { "Old Process" };
+
+    AppConfig app_config;
+    bundle.load_installed_printers(app_config); // build the rename maps
+    bundle.normalize_compatible_presets();
+
+    // The stale references in the system preset are rewritten to the current names.
+    CHECK(compatible_list(bundle.filaments, "System Filament", "compatible_printers") ==
+          std::vector<std::string>{ "New Printer" });
+    CHECK(compatible_list(bundle.filaments, "System Filament", "compatible_prints") ==
+          std::vector<std::string>{ "New Process" });
+
+    // The rewrite does not flag the system preset dirty, and is idempotent.
+    CHECK_FALSE(bundle.filaments.find_preset("System Filament", false, true)->is_dirty);
+    bundle.normalize_compatible_presets();
+    CHECK(compatible_list(bundle.filaments, "System Filament", "compatible_printers") ==
+          std::vector<std::string>{ "New Printer" });
+}
+
 TEST_CASE("compatible_prints on SLA materials resolves against sla_prints, not prints", "[Preset][Rename]")
 {
     PresetBundle bundle;
@@ -375,5 +409,58 @@ TEST_CASE("compatible_prints on SLA materials resolves against sla_prints, not p
 
     CHECK(compatible_list(bundle.sla_materials, "My SLA Material", "compatible_prints") ==
           std::vector<std::string>{ "New SLA Process" });
+}
+
+TEST_CASE("Profile validator flags dangling and renamed preset references", "[Preset][Validate]")
+{
+    PresetBundle bundle;
+
+    // Current printers: a real one, and a renamed one (its old name resolves via renamed_from).
+    add_inmemory_preset(bundle.printers, "Real Printer");
+    add_inmemory_preset(bundle.printers, "New Printer");
+    set_renamed_from(bundle.printers, "New Printer", { "Old Printer" });
+
+    // A real process, referenced from a filament's compatible_prints.
+    add_inmemory_preset(bundle.prints, "Real Process").is_system = true;
+
+    // A fully valid system filament: references only current names.
+    add_inmemory_preset(bundle.filaments, "Good Filament").is_system = true;
+    compatible_list(bundle.filaments, "Good Filament", "compatible_printers") = { "Real Printer" };
+    compatible_list(bundle.filaments, "Good Filament", "compatible_prints")   = { "Real Process" };
+
+    AppConfig app_config;
+    bundle.load_installed_printers(app_config); // build the rename maps
+
+    // With only valid references, the validator is clean.
+    CHECK_FALSE(bundle.check_preset_references());
+
+    SECTION("deleted compatible_printers is flagged") {
+        add_inmemory_preset(bundle.filaments, "Ghost Ref Filament").is_system = true;
+        compatible_list(bundle.filaments, "Ghost Ref Filament", "compatible_printers") = { "Ghost Printer" };
+        CHECK(bundle.check_preset_references());
+    }
+
+    SECTION("renamed compatible_printers (old name) is flagged") {
+        add_inmemory_preset(bundle.filaments, "Old Ref Filament").is_system = true;
+        compatible_list(bundle.filaments, "Old Ref Filament", "compatible_printers") = { "Old Printer" };
+        CHECK(bundle.check_preset_references());
+    }
+
+    SECTION("deleted compatible_prints is flagged") {
+        add_inmemory_preset(bundle.filaments, "Bad Process Ref").is_system = true;
+        compatible_list(bundle.filaments, "Bad Process Ref", "compatible_prints") = { "Ghost Process" };
+        CHECK(bundle.check_preset_references());
+    }
+
+    SECTION("deleted inherits parent is flagged") {
+        add_inmemory_preset(bundle.filaments, "Orphan Filament", "Ghost Parent").is_system = true;
+        CHECK(bundle.check_preset_references());
+    }
+
+    SECTION("non-system preset with a dangling reference is ignored") {
+        add_inmemory_preset(bundle.filaments, "User Filament"); // is_system stays false
+        compatible_list(bundle.filaments, "User Filament", "compatible_printers") = { "Ghost Printer" };
+        CHECK_FALSE(bundle.check_preset_references());
+    }
 }
 
