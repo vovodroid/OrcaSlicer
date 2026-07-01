@@ -802,8 +802,8 @@ bool is_compatible_with_parent_printer(const PresetWithVendorProfile& preset, co
     bool  has_compatible_printers = compatible_printers != nullptr && ! compatible_printers->values.empty();
     //BBS: FIXME only check the parent now, but should check grand-parent as well.
     return has_compatible_printers &&
-           std::find(compatible_printers->values.begin(), compatible_printers->values.end(), active_printer.preset.inherits()) !=
-               compatible_printers->values.end();
+           (contains_printer_name(active_printer.preset.inherits()) ||
+            std::any_of(active_printer.preset.renamed_from.begin(), active_printer.preset.renamed_from.end(), contains_printer_name));
 }
 
 bool is_compatible_with_printer(const PresetWithVendorProfile &preset, const PresetWithVendorProfile &active_printer, const DynamicPrintConfig *extra_config)
@@ -834,9 +834,13 @@ bool is_compatible_with_printer(const PresetWithVendorProfile &preset, const Pre
             return true;
         }
     }
+    auto contains_printer_name = [compatible_printers](const std::string &printer_name) {
+        return std::find(compatible_printers->values.begin(), compatible_printers->values.end(), printer_name) !=
+               compatible_printers->values.end();
+    };
     return preset.preset.is_default || active_printer.preset.name.empty() || !has_compatible_printers ||
-           std::find(compatible_printers->values.begin(), compatible_printers->values.end(), active_printer.preset.name) !=
-               compatible_printers->values.end() ||
+           contains_printer_name(active_printer.preset.name) ||
+           std::any_of(active_printer.preset.renamed_from.begin(), active_printer.preset.renamed_from.end(), contains_printer_name) ||
            (!active_printer.preset.is_system && is_compatible_with_parent_printer(preset, active_printer));
 }
 
