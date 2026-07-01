@@ -532,6 +532,9 @@ PresetsConfigSubstitutions PresetBundle::load_presets(AppConfig &config, Forward
         load_user_presets(dir_user_presets, substitution_rule);
     }
 
+    // Rewrite renamed compatible_printers / compatible_prints references before selection.
+    this->normalize_compatible_presets();
+
     this->update_multi_material_filament_presets();
     this->update_compatible(PresetSelectCompatibleType::Never);
 
@@ -752,6 +755,8 @@ PresetsConfigSubstitutions PresetBundle::load_project_embedded_presets(std::vect
 
     //this->update_multi_material_filament_presets();
     //this->update_compatible(PresetSelectCompatibleType::Never);
+    // Rewrite renamed compatible references before the caller (Plater) selects the project presets.
+    this->normalize_compatible_presets();
     if (! errors_cummulative.empty())
         throw Slic3r::RuntimeError(errors_cummulative);
 
@@ -1121,6 +1126,9 @@ PresetsConfigSubstitutions PresetBundle::load_user_presets(AppConfig &          
     if (machine_added) {
         this->printers.update_after_user_presets_loaded();
     }*/
+
+    // Rewrite renamed compatible references in synced user presets before compatibility is evaluated.
+    this->normalize_compatible_presets();
 
     this->update_multi_material_filament_presets();
     this->update_compatible(PresetSelectCompatibleType::Never);
@@ -1806,6 +1814,9 @@ PresetsConfigSubstitutions PresetBundle::update_subscribed_presets(
     } else {                                                                                                                                                                                                                                                              
         BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << " failed to save bundle metadata to: " << metadata_save_path.string();
     }
+
+    // Rewrite renamed compatible references in synced user presets before compatibility is evaluated.
+    this->normalize_compatible_presets();
 
     this->update_multi_material_filament_presets();
     this->update_compatible(PresetSelectCompatibleType::Never);
@@ -5238,6 +5249,50 @@ void PresetBundle::update_multi_material_filament_presets(size_t to_delete_filam
             }
         this->project_config.option<ConfigOptionFloats>("flush_volumes_matrix")->values = new_matrix;
     }
+}
+
+// Rewrite a preset-name-list field (compatible_printers / compatible_prints) so references to a
+// renamed system preset point at the current name. Sibling-collection analog of
+// Preset::normalize_inherits: target.find_preset(name, false) resolves "renamed_from" recursively
+// and returns nullptr for unknown names, so we rewrite only on a positive, changed match and leave
+// user/deleted names untouched.
+static void normalize_compatible_field(Preset &preset, const char *field_key, PresetCollection &target)
+{
+    auto *opt = preset.config.option<ConfigOptionStrings>(field_key);
+    if (opt == nullptr)
+        return;
+    for (std::string &name : opt->values) {
+        if (name.empty())
+            continue;
+        if (const Preset *resolved = target.find_preset(name, false); resolved != nullptr && resolved->name != name)
+            name = resolved->name;
+    }
+}
+
+// Resolve compatible_printers / compatible_prints references that point at a renamed system preset
+// to the current name, mirroring Preset::normalize_inherits for the "inherits" field. Because these
+// fields reference presets in sibling collections (printers / prints / sla_prints), the resolution
+// cannot happen inside a single collection's load_presets() and runs here, after update_system_maps()
+// has built every collection's rename map. Must be called before selection so the rewritten stored
+// preset is copied into the edited preset by select_preset (no spurious "modified" flag).
+void PresetBundle::normalize_compatible_presets()
+{
+    // compatible_printers references a printer preset; compatible_prints (filaments / SLA materials)
+    // references a process preset. Skip system presets: they are the targets of renames, not holders
+    // of stale references, and their vendor data must not be mutated. (begin()/end() skip defaults.)
+    auto normalize = [](PresetCollection &holders, PresetCollection &printers, PresetCollection *processes) {
+        for (Preset &p : holders) {
+            if (p.is_system)
+                continue;
+            normalize_compatible_field(p, "compatible_printers", printers);
+            if (processes != nullptr)
+                normalize_compatible_field(p, "compatible_prints", *processes);
+        }
+    };
+    normalize(this->prints,        this->printers, nullptr);
+    // normalize(this->sla_prints,    this->printers, nullptr);
+    normalize(this->filaments,     this->printers, &this->prints);
+    // normalize(this->sla_materials, this->printers, &this->sla_prints);
 }
 
 void PresetBundle::update_compatible(PresetSelectCompatibleType select_other_print_if_incompatible, PresetSelectCompatibleType select_other_filament_if_incompatible)
