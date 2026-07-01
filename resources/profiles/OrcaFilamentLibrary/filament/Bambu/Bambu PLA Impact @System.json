@@ -1,6 +1,7 @@
 {
 	"type": "filament",
 	"name": "Bambu PLA Impact @System",
+	"renamed_from": "Bambu PLA Impact @BBL X1C",
 	"inherits": "Bambu PLA Impact @base",
 	"from": "system",
 	"setting_id": "1qdr65SvIErZzxN3",
