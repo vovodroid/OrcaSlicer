@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Plugins</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" type="text/css" href="../../include/global.css" />
+  <link rel="stylesheet" type="text/css" href="../css/common.css" />
+  <link rel="stylesheet" type="text/css" href="../css/dark.css" />
+  <script type="text/javascript" src="../js/jquery-3.6.0.min.js"></script>
+  <script type="text/javascript" src="../js/json2.js"></script>
+  <script type="text/javascript" src="../../data/text.js"></script>
+  <script type="text/javascript" src="../js/globalapi.js"></script>
+  <script type="text/javascript" src="../js/common.js"></script>
+  <script src="./index.js"></script>
+</head>
+<body onLoad="OnInit()">
+  <div class="app">
+    <div class="toolbar">
+      <button id="refresh_btn" class="ButtonStyleRegular ButtonTypeChoice">
+        Refresh
+      </button>
+      <div id="exploreDropdown" class="explore-dropdown">
+        <button id="explore_menu_btn" class="ButtonStyleConfirm ButtonTypeChoice explore-menu-btn" type="button"
+          aria-haspopup="true" aria-expanded="false" aria-controls="exploreMenu" title="More plugin install options">
+          <span class="explore-menu-icon" aria-hidden="true"></span>
+        </button>
+        <button id="explore_btn" class="ButtonStyleConfirm ButtonTypeChoice explore-main-btn" type="button">
+          Browse plugins
+        </button>
+        <div id="exploreMenu" class="explore-menu" role="menu" hidden>
+          <button type="button" class="explore-menu-item" role="menuitem" data-install-action="explore">Browse plugins</button>
+          <button type="button" class="explore-menu-item" role="menuitem" data-install-action="install-local">Install local plugin</button>
+        </div>
+      </div>
+    </div>
+
+    <main class="content">
+      <section class="pane plugin-list-pane">
+        <div class="hdr plugin-cols">
+          <span>Activate</span>
+          <span>Name</span>
+          <span>Plugin Version</span>
+          <span>Status</span>
+        </div>
+        <div id="pluginList" class="body thin-scroll"></div>
+      </section>
+
+      <section class="pane details-pane">
+        <div class="detail-tabs" role="tablist" aria-label="Plugin details">
+          <button id="pluginInfoTab" class="detail-tab active" type="button" role="tab"
+            aria-selected="true" aria-controls="pluginInfoPanel" data-tab="plugin-info">Plugin Info</button>
+          <button id="descriptionTab" class="detail-tab" type="button" role="tab" tabindex="-1"
+            aria-selected="false" aria-controls="descriptionPanel" data-tab="description">Description</button>
+          <button id="changelogTab" class="detail-tab" type="button" role="tab" tabindex="-1"
+            aria-selected="false" aria-controls="changelogPanel" data-tab="changelog">Changelog</button>
+          <button id="diagnosticsTab" class="detail-tab" type="button" role="tab" tabindex="-1"
+            aria-selected="false" aria-controls="diagnosticsPanel" data-tab="diagnostics">Diagnostics</button>
+        </div>
+
+        <div class="detail-tab-panels">
+          <section id="pluginInfoPanel" class="detail-tab-panel" role="tabpanel"
+            aria-labelledby="pluginInfoTab" data-panel="plugin-info">
+            <div class="plugin-info-layout">
+              <div class="plugin-thumbnail">
+                <img id="detailThumbnail" alt="" hidden />
+              </div>
+              <div class="detail-fields">
+                <div class="detail-field-row">
+                  <div class="detail-label">Source</div>
+                  <div id="detailSource" class="detail-value">-</div>
+                </div>
+                <div class="detail-field-row">
+                  <div class="detail-label">Types</div>
+                  <div id="detailTypes" class="detail-value">-</div>
+                </div>
+                <div class="detail-field-row">
+                  <div class="detail-label">Author</div>
+                  <div id="detailAuthor" class="detail-value">-</div>
+                </div>
+                <div class="detail-field-row">
+                  <div class="detail-label">Installed Version</div>
+                  <div class="detail-value">
+                    <span id="detailInstalledVersion">-</span>
+                  </div>
+                </div>
+                <div class="detail-field-row">
+                  <div class="detail-label">Latest Version</div>
+                  <div class="detail-value detail-version-row">
+                    <span id="detailLatestVersion">-</span>
+                    <span id="detailUpdateBadge" class="version-update-badge" hidden
+                      aria-label="Update available" title="Update available"></span>
+                    <button id="detailUpdateBtn" type="button" class="plugin-update-btn" hidden
+                      title="Update to the latest version">Update</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="descriptionPanel" class="detail-tab-panel thin-scroll" role="tabpanel" tabindex="0"
+            aria-labelledby="descriptionTab" data-panel="description" hidden>
+            <h2 class="detail-section-title">Description</h2>
+            <div id="detailDescription" class="detail-description">No description available</div>
+          </section>
+
+          <section id="changelogPanel" class="detail-tab-panel thin-scroll" role="tabpanel" tabindex="0"
+            aria-labelledby="changelogTab" data-panel="changelog" hidden>
+            <table id="changelogTable" class="detail-table changelog-table" aria-label="Plugin changelog">
+              <thead>
+                <tr>
+                  <th scope="col">Version</th>
+                  <th scope="col">Date</th>
+                  <th scope="col">Changes</th>
+                </tr>
+              </thead>
+              <tbody id="changelogBody"></tbody>
+            </table>
+            <div id="changelogEmpty" class="detail-empty" hidden>No changelog available</div>
+          </section>
+
+          <section id="diagnosticsPanel" class="detail-tab-panel thin-scroll" role="tabpanel" tabindex="0"
+            aria-labelledby="diagnosticsTab" data-panel="diagnostics" hidden>
+            <div id="detailStatusBody" class="detail-status-body">No issues detected</div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="AcceptArea">
+    <button id="open_terminal" class="ButtonStyleRegular ButtonTypeChoice left-btn">
+      Open Terminal
+    </button>
+    <div id="close_btn" class="ButtonStyleRegular ButtonTypeChoice">Close</div>
+  </div>
+
+  <div id="ctxMenu" class="ctx" hidden></div>
+</body>
+</html>

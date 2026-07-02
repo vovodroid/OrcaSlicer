@@ -1,0 +1,119 @@
+#ifndef slic3r_PythonPluginInterface_hpp_
+#define slic3r_PythonPluginInterface_hpp_
+
+#include <cctype>
+#include <string>
+#include <string_view>
+#include <utility>
+
+#include <pybind11/embed.h>
+
+namespace Slic3r {
+
+enum class PluginCapabilityType { PostProcessing = 0, PrinterConnection, Automation, Analysis, Importer, Exporter, Visualization, Script, Unknown };
+
+inline std::string plugin_capability_type_to_string(PluginCapabilityType type)
+{
+    switch (type) {
+    case PluginCapabilityType::PostProcessing: return "post-processing";
+    case PluginCapabilityType::PrinterConnection: return "printer-connection";
+    case PluginCapabilityType::Automation: return "automation";
+    case PluginCapabilityType::Analysis: return "analysis";
+    case PluginCapabilityType::Importer: return "importer";
+    case PluginCapabilityType::Exporter: return "exporter";
+    case PluginCapabilityType::Visualization: return "visualization";
+    case PluginCapabilityType::Script: return "script";
+    default: return "unknown";
+    }
+}
+
+inline std::string plugin_capability_type_display_name(PluginCapabilityType type)
+{
+    switch (type) {
+    case PluginCapabilityType::PostProcessing: return "Post-processing";
+    case PluginCapabilityType::PrinterConnection: return "Printer connection";
+    case PluginCapabilityType::Automation: return "Automation";
+    case PluginCapabilityType::Analysis: return "Analysis";
+    case PluginCapabilityType::Importer: return "Importer";
+    case PluginCapabilityType::Exporter: return "Exporter";
+    case PluginCapabilityType::Visualization: return "Visualization";
+    case PluginCapabilityType::Script: return "Script";
+    default: return "Unknown";
+    }
+}
+
+inline PluginCapabilityType plugin_capability_type_from_string(std::string_view value)
+{
+    auto to_lower = [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); };
+    std::string lowered;
+    lowered.reserve(value.size());
+    for (unsigned char ch : value) {
+        lowered.push_back(to_lower(ch));
+    }
+
+    if (lowered == "post-processing")
+        return PluginCapabilityType::PostProcessing;
+    if (lowered == "printer-connection")
+        return PluginCapabilityType::PrinterConnection;
+    if (lowered == "automation")
+        return PluginCapabilityType::Automation;
+    if (lowered == "analysis")
+        return PluginCapabilityType::Analysis;
+    if (lowered == "importer")
+        return PluginCapabilityType::Importer;
+    if (lowered == "exporter")
+        return PluginCapabilityType::Exporter;
+    if (lowered == "visualization")
+        return PluginCapabilityType::Visualization;
+    if (lowered == "script")
+        return PluginCapabilityType::Script;
+    return PluginCapabilityType::Unknown;
+}
+
+struct PluginContext
+{ std::string orca_version; };
+
+enum class PluginResult { Success, Skipped, RecoverableError, FatalError };
+
+struct ExecutionResult
+{
+    PluginResult status = PluginResult::Success;
+    std::string message;
+    std::string data;
+
+    static ExecutionResult success(std::string message = {}, std::string data = {})
+    { return {PluginResult::Success, std::move(message), std::move(data)}; }
+
+    static ExecutionResult skipped(std::string message = {})
+    {
+        return {PluginResult::Skipped, std::move(message), {}};
+    }
+
+    static ExecutionResult failure(PluginResult status, std::string message, std::string data = {})
+    { return {status, std::move(message), std::move(data)}; }
+};
+
+class PluginCapabilityInterface
+{
+public:
+    virtual ~PluginCapabilityInterface() = default;
+
+    virtual std::string get_name() const = 0;                                                    // required — overridden in Python
+    virtual PluginCapabilityType get_type() const { return PluginCapabilityType::Unknown; }      // optional — typed bases override
+
+    virtual void on_load() {}
+    virtual void on_unload() {}
+
+    // C++-only audit identity (never exposed to Python). Set by PluginLoader after
+    // plugin capture so trampoline calls can scope filesystem enforcement to this
+    // plugin. This is PluginDescriptor::plugin_key, the canonical runtime id.
+    void set_audit_plugin_key(std::string key) { m_audit_plugin_key = std::move(key); }
+    const std::string& audit_plugin_key() const { return m_audit_plugin_key; }
+
+private:
+    std::string m_audit_plugin_key;
+};
+
+} // namespace Slic3r
+
+#endif /* slic3r_PythonPluginInterface_hpp_ */

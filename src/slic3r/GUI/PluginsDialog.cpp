@@ -1,0 +1,1226 @@
+#include "PluginsDialog.hpp"
+
+#include "GUI.hpp"
+#include "GUI_App.hpp"
+#include "I18N.hpp"
+#include "OrcaCloudServiceAgent.hpp"
+#include "slic3r/plugin/PluginFsUtils.hpp"
+#include "slic3r/plugin/PluginManager.hpp"
+#include "slic3r/plugin/PythonInterpreter.hpp"
+#include "slic3r/plugin/pluginTypes/script/ScriptPluginCapability.hpp"
+
+#include <libslic3r/Utils.hpp>
+
+#include <slic3r/GUI/NotificationManager.hpp>
+#include <slic3r/GUI/Plater.hpp>
+#include <slic3r/GUI/format.hpp>
+
+#include <slic3r/plugin/PluginDescriptor.hpp>
+#include <slic3r/plugin/PythonPluginInterface.hpp>
+#include <slic3r/plugin/PluginLoader.hpp>
+
+#include <pybind11/embed.h>
+
+#include <boost/filesystem.hpp>
+#include <boost/log/trivial.hpp>
+
+#include <algorithm>
+#include <cctype>
+#include <memory>
+#include <mutex>
+#include <vector>
+
+#include <wx/dialog.h>
+#include <wx/event.h>
+#include <wx/filedlg.h>
+#include <wx/msgdlg.h>
+#include <wx/progdlg.h>
+#include <wx/timer.h>
+#include <wx/utils.h>
+
+namespace Slic3r { namespace GUI {
+namespace {
+
+const wxString kDeletePluginTitle    = _L("Delete Plugin");
+const wxString kUnsubscribeTitle     = _L("Unsubscribe");
+const wxString kOverwritePluginTitle = _L("Overwrite Plugin");
+std::string s_selected_plugin_install_action = "explore";
+
+struct PluginContextAction
+{
+    std::string id;
+    std::string label;
+    bool enabled = true;
+    bool danger  = false;
+};
+
+struct PluginAvailableActions
+{
+    bool can_toggle                   = false;
+    bool toggle_installs_cloud_plugin = false;
+    std::vector<PluginContextAction> context_actions;
+};
+
+struct PluginCapabilityView
+{
+    std::string name;
+    std::string type_label;
+    std::string type_key;
+    bool enabled    = false;
+    bool can_toggle = false;
+    bool can_run    = false;
+};
+
+struct PluginChangelogView
+{
+    std::string version;
+    std::string changelog;
+    long long created_time = 0;
+};
+
+// View-model for one plugin row in the dialog
+struct PluginDialogItem
+{
+    // Identity and display text
+    std::string plugin_key;
+    std::string plugin_id;
+    std::string display_name;
+    std::string description;
+    std::string author;
+    std::string version;
+    std::string installed_version;
+    std::string latest_version;
+    std::string type_label;
+    std::string type_key;
+    std::string sharing_token;
+    std::string thumbnail_url;
+    std::vector<std::string> type_labels;
+    std::vector<PluginChangelogView> changelog;
+
+    // Derived UI state
+    PluginSource source              = PluginSource::Local;
+    PluginStatus status              = PluginStatus::Inactive;
+    PluginUpdateStatus update_status = PluginUpdateStatus::Normal;
+    std::string error_text;
+    bool has_error = false;
+    bool loaded    = false;
+    bool loading   = false;
+
+    // Installation and capability flags
+    bool is_cloud_plugin       = false;
+    bool has_local_package     = false;
+    bool unauthorized          = false;
+    bool has_script_capability = false;
+    bool can_run_script        = false;
+
+    // Runtime capabilities in registration order, or descriptor-only type rows when unloaded.
+    std::vector<PluginCapabilityView> capabilities;
+
+    // Row-level actions
+    PluginAvailableActions available_actions;
+};
+
+constexpr bool kFetchCloudCatalog      = true;
+constexpr bool kUseCurrentCloudCatalog = false;
+
+std::vector<PluginDescriptor> current_cloud_catalog_snapshot()
+{
+    const auto& catalog = PluginManager::instance().get_catalog();
+
+    std::vector<PluginDescriptor> cloud_entries;
+    auto append_cloud_entries = [&cloud_entries](const std::vector<PluginDescriptor>& entries) {
+        for (const PluginDescriptor& entry : entries)
+            if (entry.is_cloud_plugin())
+                cloud_entries.push_back(entry);
+    };
+
+    append_cloud_entries(catalog.get_all_plugin_descriptors());
+    append_cloud_entries(catalog.get_invalid_plugins());
+    return cloud_entries;
+}
+
+PluginDescriptor as_cloud_only_descriptor(PluginDescriptor descriptor)
+{
+    descriptor.plugin_root.clear();
+    descriptor.entry_path.clear();
+    descriptor.installed_version.clear();
+    if (descriptor.cloud.has_value()) {
+        descriptor.cloud->installed        = false;
+        descriptor.cloud->update_available = false;
+    }
+    return descriptor;
+}
+
+// rescan_plugins() clears the whole catalog and rediscovers only local packages. When
+// callers do not need fresh cloud data, reuse the current cloud rows after the local
+// rescan so cloud-only rows and cloud-derived UI state do not disappear.
+void refresh_plugin_catalog_blocking(bool fetch_cloud)
+{
+    PluginManager& manager = PluginManager::instance();
+
+    std::vector<std::string> not_found, unauthorized;
+    const std::vector<PluginDescriptor> current_cloud_catalog = fetch_cloud ? std::vector<PluginDescriptor>{} :
+                                                                             current_cloud_catalog_snapshot();
+
+    manager.rescan_plugins();
+
+    if (!fetch_cloud) {
+        manager.get_catalog().update_cloud_catalog(current_cloud_catalog);
+        return;
+    }
+
+    manager.fetch_plugins_from_cloud(&not_found, &unauthorized);
+
+    auto plater = wxGetApp().plater();
+
+    if (plater) {
+        for (const auto& uuid : not_found) {
+            plater->get_notification_manager()->push_notification(NotificationType::CustomNotification,
+                                                                  NotificationManager::NotificationLevel::RegularNotificationLevel,
+                                                                  format(_L("Plugin %s is no longer available."), uuid));
+        }
+        for (const auto& uuid : unauthorized) {
+            plater->get_notification_manager()->push_notification(NotificationType::CustomNotification,
+                                                                  NotificationManager::NotificationLevel::RegularNotificationLevel,
+                                                                  format(_L("Plugin %s access is unauthorized."), uuid));
+        }
+    }
+}
+
+std::string to_string(PluginSource source)
+{
+    switch (source) {
+    case PluginSource::Local: return "local";
+    case PluginSource::Mine: return "mine";
+    case PluginSource::Subscribed: return "subscribed";
+    }
+
+    return "local";
+}
+
+std::string to_string(PluginStatus status)
+{
+    switch (status) {
+    case PluginStatus::Inactive: return "Inactive";
+    case PluginStatus::Error: return "Error";
+    case PluginStatus::Loading: return "Loading";
+    case PluginStatus::Activated: return "Activated";
+    }
+
+    return "Inactive";
+}
+
+std::string to_string(PluginUpdateStatus status)
+{
+    switch (status) {
+    case PluginUpdateStatus::Normal: return "normal";
+    case PluginUpdateStatus::UpdateAvailable: return "update_available";
+    case PluginUpdateStatus::Unauthorized: return "unauthorized";
+    }
+
+    return "normal";
+}
+
+PluginSource derive_plugin_source(const PluginDescriptor& descriptor)
+{
+    const bool has_cloud_meta = descriptor.cloud.has_value();
+    const bool is_cloud       = descriptor.is_cloud_plugin();
+    const bool is_mine        = is_cloud && has_cloud_meta && descriptor.cloud->is_mine;
+
+    // Source is ownership/locality only; issue states never replace this badge.
+    if (is_mine)
+        return PluginSource::Mine;
+    if (is_cloud)
+        return PluginSource::Subscribed;
+    return PluginSource::Local;
+}
+
+PluginAvailableActions evaluate_action_policy(const PluginDialogItem& item)
+{
+    PluginAvailableActions available_actions;
+    const bool is_loading             = item.status == PluginStatus::Loading;
+    const bool is_cloud               = item.is_cloud_plugin;
+    const bool is_mine                = item.source == PluginSource::Mine;
+    const bool has_local              = item.has_local_package;
+    const bool authorized_for_install = !item.unauthorized;
+
+    available_actions.toggle_installs_cloud_plugin = is_cloud && !has_local && authorized_for_install;
+    available_actions.can_toggle                   = !is_loading && (has_local || available_actions.toggle_installs_cloud_plugin);
+
+    auto add_action = [&available_actions](const char* id, const char* label, bool enabled = true, bool danger = false) {
+        available_actions.context_actions.push_back(PluginContextAction{id, label, enabled, danger});
+    };
+
+    if (is_cloud) {
+        if (is_mine)
+            add_action("delete_mine_plugin", "Delete", true, true);
+        else
+            add_action("unsubscribe_plugin", "Unsubscribe", true, true);
+    } else if (has_local) {
+        add_action("delete_plugin", "Delete", true, true);
+    }
+
+    add_action("open_folder", "Show in folder", has_local);
+
+    add_action("reinstall_plugin", "Reinstall");
+
+    return available_actions;
+}
+
+PluginDialogItem build_plugin_dialog_item(const PluginDescriptor& descriptor)
+{
+    PluginDialogItem item;
+    const auto& loader = PluginManager::instance().get_loader();
+
+    item.plugin_key        = descriptor.plugin_key;
+    item.display_name      = descriptor.name;
+    item.description       = !descriptor.is_metadata_valid() && descriptor.has_error() ?
+                                 descriptor.normalized_error() :
+                                 (descriptor.description.empty() ? "No description." : descriptor.description);
+    item.author            = descriptor.author;
+    item.version           = descriptor.version;
+    // Installed version: the cloud merge overwrites `version` with the latest cloud version, so prefer
+    // the preserved local version, falling back to `version` for local-only / pre-merge descriptors.
+    item.installed_version = descriptor.has_local_package() ?
+                                 (descriptor.installed_version.empty() ? descriptor.version : descriptor.installed_version) :
+                                 std::string{};
+    item.latest_version    = descriptor.latest_available_version();
+    item.type_label        = descriptor.type_label();
+    item.type_key          = plugin_capability_type_to_string(descriptor.primary_capability_type());
+    // "types" is the display-only compatibility list. Cloud plugins show the raw labels the
+    // service returned (which may not map to real capability types); local plugins derive them
+    // from the capabilities actually discovered/loaded.
+    if (descriptor.is_cloud_plugin() && !descriptor.display_types.empty()) {
+        for (const std::string& label : descriptor.display_types)
+            if (std::find(item.type_labels.begin(), item.type_labels.end(), label) == item.type_labels.end())
+                item.type_labels.push_back(label);
+    } else {
+        for (PluginCapabilityType type : descriptor.capability_types) {
+            const std::string label = plugin_capability_type_display_name(type);
+            if (std::find(item.type_labels.begin(), item.type_labels.end(), label) == item.type_labels.end())
+                item.type_labels.push_back(label);
+        }
+    }
+    for (const PluginChangelog& entry : descriptor.changelog)
+        item.changelog.push_back({entry.version, entry.changelog, entry.created_time});
+    item.source                = derive_plugin_source(descriptor);
+    item.update_status         = descriptor.get_update_status();
+    item.error_text            = descriptor.normalized_error();
+    item.has_error             = descriptor.has_error();
+    item.is_cloud_plugin       = descriptor.is_cloud_plugin();
+    item.has_local_package     = descriptor.has_local_package();
+    item.unauthorized          = descriptor.is_unauthorized();
+    item.has_script_capability = descriptor.has_capability_type(Slic3r::PluginCapabilityType::Script);
+    item.loaded                = loader.is_plugin_loaded(descriptor.plugin_key);
+    item.loading               = loader.is_plugin_load_in_progress(descriptor.plugin_key);
+    if (item.loaded) {
+        for (const auto& cap : loader.get_loaded_plugin_capabilities(descriptor.plugin_key)) {
+            if (cap) {
+                item.capabilities.push_back({cap->name, plugin_capability_type_display_name(cap->type),
+                                             plugin_capability_type_to_string(cap->type), cap->enabled, true, false});
+                if (cap->type == PluginCapabilityType::Script)
+                    item.has_script_capability = true;
+            }
+        }
+    }
+    if (item.capabilities.empty()) {
+        for (PluginCapabilityType type : descriptor.capability_types) {
+            const std::string type_key = plugin_capability_type_to_string(type);
+            const auto existing        = std::find_if(item.capabilities.begin(), item.capabilities.end(),
+                                                      [&type_key](const PluginCapabilityView& capability) {
+                                                   return capability.type_key == type_key;
+                                               });
+            if (existing != item.capabilities.end())
+                continue;
+            item.capabilities.push_back({std::string{}, plugin_capability_type_display_name(type), type_key, false, false, false});
+        }
+    }
+    item.sharing_token = descriptor.sharing_token;
+    item.thumbnail_url = descriptor.thumbnail_url;
+
+    if (item.loading)
+        item.status = PluginStatus::Loading;
+    else if (item.has_error)
+        item.status = PluginStatus::Error;
+    else if (item.loaded)
+        item.status = PluginStatus::Activated;
+    else
+        item.status = PluginStatus::Inactive;
+
+    item.available_actions        = evaluate_action_policy(item);
+    const bool has_enabled_script = std::any_of(item.capabilities.begin(), item.capabilities.end(),
+                                                [](const PluginCapabilityView& capability) {
+                                                    return capability.type_key == "script" && capability.enabled;
+                                                });
+    item.can_run_script = descriptor.is_metadata_valid() && !descriptor.has_error() && item.has_script_capability && item.loaded &&
+                          !item.loading && has_enabled_script;
+    for (PluginCapabilityView& capability : item.capabilities) {
+        capability.can_run = item.can_run_script && capability.type_key == "script" && capability.enabled;
+    }
+    return item;
+}
+
+const PluginContextAction* find_context_action(const PluginAvailableActions& available_actions, const std::string& action_id)
+{
+    const auto it = std::find_if(available_actions.context_actions.begin(), available_actions.context_actions.end(),
+                                 [&action_id](const PluginContextAction& action) { return action.id == action_id; });
+    return it != available_actions.context_actions.end() ? &(*it) : nullptr;
+}
+
+nlohmann::json build_context_actions_payload(const PluginAvailableActions& available_actions)
+{
+    nlohmann::json payload = nlohmann::json::array();
+
+    for (const PluginContextAction& action : available_actions.context_actions) {
+        nlohmann::json item;
+        item["id"]      = action.id;
+        item["label"]   = action.label;
+        item["enabled"] = action.enabled;
+        item["danger"]  = action.danger;
+        payload.push_back(std::move(item));
+    }
+
+    return payload;
+}
+
+struct PluginOperationState
+{
+    std::mutex mutex;
+    bool succeeded = false;
+    std::string error;
+};
+
+void store_plugin_operation_result(const std::shared_ptr<PluginOperationState>& state, bool succeeded, std::string error)
+{
+    std::lock_guard<std::mutex> lock(state->mutex);
+    state->succeeded = succeeded;
+    state->error     = std::move(error);
+}
+
+bool take_plugin_operation_result(const std::shared_ptr<PluginOperationState>& state, std::string& error)
+{
+    std::lock_guard<std::mutex> lock(state->mutex);
+    error = std::move(state->error);
+    return state->succeeded;
+}
+} // namespace
+
+PluginsDialog::PluginsDialog(wxWindow* parent, wxWindowID id, const wxString&, const wxPoint& pos, const wxSize& size, long style)
+    : WebViewHostDialog(parent, id, _L("Plugins"), pos, size, style)
+{ create_webview("web/dialog/PluginsDialog/index.html", _L("Plugins"), wxSize(900, 820), wxSize(760, 715)); }
+
+PluginsDialog::~PluginsDialog() = default;
+
+void PluginsDialog::set_open_terminal_dlg_fn()
+{
+    m_open_terminal_dlg_fn = [] { wxGetApp().open_terminal_dialog(); };
+}
+
+void PluginsDialog::update_plugin_dialog_ui()
+{
+    // Called after the shared catalog is already updated, for example from the
+    // cloud-plugin state callback. Do not fetch here or the callback can re-enter.
+    send_plugins();
+}
+
+void PluginsDialog::on_script_message(const nlohmann::json& payload)
+{
+    if (handle_common_script_command(payload))
+        return;
+
+    const std::string command = payload.value("command", "");
+    if (command == "request_plugins") {
+        // The web page finished loading and is asking for the current catalog. Plugin
+        // discovery already runs at startup and on login, so the shared catalog is up to
+        // date by the time the dialog opens. Just render it here - no blocking fetch on
+        // open. The Refresh button (refresh_plugins) is what triggers a fresh discovery.
+        send_plugins();
+    } else if (command == "refresh_plugins") {
+        refresh_plugins();
+    } else if (command == "toggle_plugin") {
+        toggle_plugin(payload.value("plugin_key", ""), payload.value("enabled", false));
+    } else if (command == "toggle_plugin_capability") {
+        toggle_plugin_capability(payload.value("plugin_key", ""), plugin_capability_type_from_string(payload.value("capability_type", "")),
+                                 payload.value("capability_name", ""), payload.value("enabled", false));
+    } else if (command == "install_local_plugin") {
+        install_plugin_from_file();
+    } else if (command == "plugin_menu_action") {
+        handle_plugin_menu_action(payload.value("plugin_key", ""), payload.value("action", ""));
+    } else if (command == "run_script_plugin") {
+        run_script_plugin(payload.value("plugin_key", ""), payload.value("capability_name", ""));
+    } else if (command == "open_terminal") {
+        m_open_terminal_dlg_fn();
+    } else if (command == "update_plugin") {
+        update_plugin(payload.value("plugin_key", ""));
+    } else if (command == "open_plugin_on_cloud") {
+        open_plugin_on_cloud(payload.value("sharing_token", ""));
+    } else if (command == "open_plugin_hub") {
+        open_plugin_hub();
+    } else if (command == "set_plugin_install_action") {
+        const std::string action = payload.value("action", "");
+        if (action == "explore" || action == "install-local")
+            s_selected_plugin_install_action = action;
+    }
+}
+
+void PluginsDialog::send_plugins() { call_web_handler(build_plugins_payload()); }
+
+nlohmann::json PluginsDialog::build_plugins_payload() const
+{
+    nlohmann::json response;
+    response["command"]        = "list_plugins";
+    response["install_action"] = s_selected_plugin_install_action;
+    response["data"]           = nlohmann::json::array();
+
+    auto append_plugin = [&response](const PluginDescriptor& row) {
+        const PluginDialogItem dialog_item = build_plugin_dialog_item(row);
+
+        nlohmann::json payload_item;
+        payload_item["plugin_key"]  = dialog_item.plugin_key;
+        payload_item["plugin_id"]   = dialog_item.plugin_id;
+        payload_item["name"]        = row.name;
+        payload_item["description"] = dialog_item.description;
+        payload_item["author"]      = dialog_item.author;
+        payload_item["version"]     = dialog_item.version;
+        payload_item["installed_version"] = dialog_item.installed_version;
+        payload_item["latest_version"]    = dialog_item.latest_version;
+        payload_item["installed"]         = dialog_item.has_local_package;
+        payload_item["type"]        = dialog_item.type_label;
+        payload_item["type_key"]    = dialog_item.type_key;
+        payload_item["types"]       = dialog_item.type_labels;
+        nlohmann::json caps         = nlohmann::json::array();
+        for (const PluginCapabilityView& capability : dialog_item.capabilities) {
+            nlohmann::json c;
+            c["name"]       = capability.name;
+            c["type"]       = capability.type_label;
+            c["type_key"]   = capability.type_key;
+            c["enabled"]    = capability.enabled;
+            c["can_toggle"] = capability.can_toggle;
+            c["can_run"]    = capability.can_run;
+            caps.push_back(std::move(c));
+        }
+        payload_item["capabilities"] = std::move(caps);
+        nlohmann::json changelog     = nlohmann::json::array();
+        for (const PluginChangelogView& entry : dialog_item.changelog) {
+            nlohmann::json c;
+            c["version"]      = entry.version;
+            c["changelog"]    = entry.changelog;
+            c["created_time"] = entry.created_time;
+            changelog.push_back(std::move(c));
+        }
+        payload_item["changelog"]             = std::move(changelog);
+        payload_item["label"]                 = dialog_item.display_name;
+        payload_item["source"]                = to_string(dialog_item.source);
+        payload_item["status"]                = to_string(dialog_item.status);
+        payload_item["error"]                 = dialog_item.error_text;
+        payload_item["update_status"]         = to_string(dialog_item.update_status);
+        payload_item["unauthorized"]          = dialog_item.unauthorized;
+        payload_item["context_actions"]       = build_context_actions_payload(dialog_item.available_actions);
+        payload_item["update_available"]      = dialog_item.update_status == PluginUpdateStatus::UpdateAvailable;
+        payload_item["can_toggle"]            = dialog_item.available_actions.can_toggle;
+        payload_item["has_script_capability"] = dialog_item.has_script_capability;
+        payload_item["can_run_script"]        = dialog_item.can_run_script;
+        payload_item["sharing_token"]         = dialog_item.sharing_token;
+        payload_item["thumbnail_url"]         = dialog_item.thumbnail_url;
+        response["data"].push_back(std::move(payload_item));
+    };
+
+    const auto& catalog = PluginManager::instance().get_catalog();
+    const auto valid    = catalog.get_all_plugin_descriptors();
+    const auto invalid  = catalog.get_invalid_plugins();
+    BOOST_LOG_TRIVIAL(info) << "Prepared " << valid.size() + invalid.size() << " plugin rows for Plugins dialog";
+
+    for (const PluginDescriptor& row : valid)
+        append_plugin(row);
+
+    for (const PluginDescriptor& row : invalid)
+        append_plugin(row);
+
+    auto sort_value = [](const nlohmann::json& payload_item, const char* key) { return payload_item.value(key, std::string{}); };
+
+    std::sort(response["data"].begin(), response["data"].end(), [&sort_value](const nlohmann::json& lhs, const nlohmann::json& rhs) {
+        const std::string lhs_source = sort_value(lhs, "source");
+        const std::string rhs_source = sort_value(rhs, "source");
+        if (lhs_source != rhs_source)
+            return lhs_source < rhs_source;
+
+        const std::string lhs_type = sort_value(lhs, "type_key");
+        const std::string rhs_type = sort_value(rhs, "type_key");
+        if (lhs_type != rhs_type)
+            return lhs_type < rhs_type;
+
+        return sort_value(lhs, "name") < sort_value(rhs, "name");
+    });
+
+    return response;
+}
+
+bool PluginsDialog::get_descriptor(const std::string& plugin_key, PluginDescriptor& descriptor) const
+{
+    const auto& catalog = PluginManager::instance().get_catalog();
+    if (const PluginDescriptor* valid_descriptor = catalog.find_valid_plugin_descriptor(plugin_key)) {
+        descriptor = *valid_descriptor;
+        return true;
+    }
+    return catalog.try_get_invalid_plugin_descriptor(plugin_key, descriptor);
+}
+
+std::shared_ptr<LoadedPluginCapability> PluginsDialog::get_capability(const std::string& plugin_key,
+                                                                      PluginCapabilityType type,
+                                                                      const std::string& capability_name) const
+{
+    return PluginManager::instance().get_loader().get_plugin_capability_by_name(plugin_key, type, capability_name);
+}
+
+void PluginsDialog::refresh_plugin_catalog_async(const wxString& title, const wxString& message, bool fetch_cloud)
+{
+    run_with_dialog([fetch_cloud]() { refresh_plugin_catalog_blocking(fetch_cloud); }, [this]() { send_plugins(); }, title, message);
+}
+
+void PluginsDialog::refresh_plugins()
+{
+    BOOST_LOG_TRIVIAL(info) << "Refreshing plugins from Plugins dialog";
+
+    refresh_plugin_catalog_async(_L("Refreshing"), _L("Refreshing plugins data"), kFetchCloudCatalog);
+}
+
+void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
+{
+    if (plugin_key.empty())
+        return;
+
+    BOOST_LOG_TRIVIAL(info) << "Toggle plugin request. plugin_key=" << plugin_key << " enabled=" << enabled;
+
+    PluginDescriptor row_data;
+    if (!get_descriptor(plugin_key, row_data)) {
+        // The row no longer maps to a catalog entry (the catalog changed under the UI).
+        // Toggling is a local action, so just re-render from the current catalog; a cloud
+        // fetch (or clearing rescan) adds nothing here.
+        send_plugins();
+        return;
+    }
+
+    PluginDialogItem dialog_item             = build_plugin_dialog_item(row_data);
+    PluginAvailableActions available_actions = dialog_item.available_actions;
+
+    PluginManager& manager = PluginManager::instance();
+    if (!enabled) {
+        if (!manager.get_loader().unload_plugin(plugin_key)) {
+            BOOST_LOG_TRIVIAL(error) << "Failed to unload plugin from Plugins dialog: " << plugin_key;
+            wxMessageBox(_L("Failed to unload plugin."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+            send_plugins();
+            return;
+        }
+
+        BOOST_LOG_TRIVIAL(info) << "Plugin unloaded from Plugins dialog: " << plugin_key;
+        send_plugins();
+        return;
+    }
+
+    // Check for capabilities that are currently in use
+    auto loaded_capabilities = manager.get_loader().get_loaded_plugin_capabilities(plugin_key);
+
+    if (!available_actions.can_toggle) {
+        if (dialog_item.unauthorized && available_actions.toggle_installs_cloud_plugin == false && row_data.has_local_package() == false) {
+            const std::string install_error = "Unauthorized cloud plugins cannot be installed.";
+            manager.set_plugin_error(plugin_key, install_error);
+            wxMessageBox(from_u8(install_error), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        }
+        send_plugins();
+        return;
+    }
+
+    if (available_actions.toggle_installs_cloud_plugin) {
+        if (!install_cloud_plugin(row_data.plugin_key, row_data.version, from_u8(row_data.name))) {
+            BOOST_LOG_TRIVIAL(warning) << "Cloud plugin install was not completed for " << plugin_key;
+            send_plugins();
+            return;
+        }
+
+        BOOST_LOG_TRIVIAL(info) << "Cloud plugin installed locally from Plugins dialog: " << plugin_key;
+        // download_and_install_cloud_plugin updates the descriptor with the installed
+        // local package state, so no rescan or cloud fetch is needed before loading.
+        if (!get_descriptor(plugin_key, row_data)) {
+            send_plugins();
+            return;
+        }
+        dialog_item = build_plugin_dialog_item(row_data);
+        if (dialog_item.has_error) {
+            send_plugins();
+            return;
+        }
+    }
+
+    if (manager.get_loader().is_plugin_loaded(plugin_key)) {
+        send_plugins();
+        return;
+    }
+
+    const PluginDescriptor* descriptor_ptr = manager.get_catalog().find_valid_plugin_descriptor(plugin_key);
+    if (!descriptor_ptr) {
+        wxMessageBox(_L("Plugin manifest was not found."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        send_plugins();
+        return;
+    }
+
+    if (manager.get_loader().is_plugin_load_in_progress(plugin_key)) {
+        send_plugins();
+        return;
+    }
+
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Starting plugin load from web dialog: " << plugin_key;
+    manager.get_loader().load_plugin(manager.get_catalog(), plugin_key);
+    send_plugins();
+}
+
+void PluginsDialog::toggle_plugin_capability(const std::string& plugin_key, PluginCapabilityType type,
+                                             const std::string& capability_name, bool enabled)
+{
+    if (plugin_key.empty() || capability_name.empty() || type == PluginCapabilityType::Unknown)
+        return;
+
+    PluginDescriptor row_data;
+    if (!get_descriptor(plugin_key, row_data)) {
+        // The row no longer maps to a catalog entry (the catalog changed under the UI).
+        // Toggling is a local action, so just re-render from the current catalog; a cloud
+        // fetch (or clearing rescan) adds nothing here.
+        send_plugins();
+        return;
+    }
+
+    if (!get_capability(plugin_key, type, capability_name)) {
+        BOOST_LOG_TRIVIAL(warning) << "Cannot toggle missing plugin capability: " << plugin_key << " | " << capability_name;
+        send_plugins();
+        return;
+    }
+
+    PluginLoader& loader = PluginManager::instance().get_loader();
+    if (enabled) {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Enabling plugin capability: " << plugin_key << " | " << capability_name;
+        loader.enable_capability(plugin_key, capability_name, type);
+    } else {
+        // check if the capability is currently in use here.
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Disabling plugin capability: " << plugin_key << " | " << capability_name;
+        loader.disable_capability(plugin_key, capability_name, type);
+    }
+
+    send_plugins();
+}
+
+void PluginsDialog::handle_plugin_menu_action(const std::string& plugin_key, const std::string& action)
+{
+    PluginDescriptor row_data;
+    if (!get_descriptor(plugin_key, row_data))
+        return;
+
+    const PluginDialogItem dialog_item = build_plugin_dialog_item(row_data);
+
+    const PluginContextAction* context_action = find_context_action(dialog_item.available_actions, action);
+    if (!context_action || !context_action->enabled)
+        return;
+
+    if (action == "open_folder") {
+        open_plugin_folder(row_data);
+    } else if (action == "delete_plugin") {
+        delete_local_plugin(row_data);
+    } else if (action == "unsubscribe_plugin") {
+        unsubscribe_cloud_plugin(row_data);
+    } else if (action == "delete_mine_plugin") {
+        delete_mine_local_and_cloud_plugin(plugin_key);
+    } else if (action == "reinstall_plugin") {
+        if (row_data.is_cloud_plugin())
+            reinstall_cloud_plugin(row_data);
+        else
+            reinstall_local_plugin(plugin_key);
+    }
+}
+
+void PluginsDialog::install_plugin_from_file()
+{
+    wxFileDialog dialog(this, _L("Select plugin package"), wxEmptyString, wxEmptyString, _L("Plugin files (*.py;*.whl)|*.py;*.whl"),
+                        wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+
+    if (dialog.ShowModal() != wxID_OK)
+        return;
+
+    if (!install_plugin_package(dialog.GetPath().ToUTF8().data())) {
+        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": Failed to install plugin package.";
+    }
+}
+
+bool PluginsDialog::install_plugin_package(const std::string& package_path)
+{
+    if (package_path.empty())
+        return false;
+    BOOST_LOG_TRIVIAL(info) << "Installing local plugin package from path: " << package_path;
+    std::string error;
+    const boost::filesystem::path package_file(package_path);
+    const wxString package_name = from_u8(package_file.filename().string());
+
+    std::string extension = package_file.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (extension != ".py" && extension != ".whl") {
+        wxMessageBox(_L("Select a .py or .whl plugin package."), _L("Plugins"), wxOK | wxICON_INFORMATION, this);
+        return false;
+    }
+
+    PluginDescriptor plugin_descriptor;
+    bool existing_installation     = false;
+    auto report_inspection_failure = [&]() {
+        BOOST_LOG_TRIVIAL(error) << "Plugin package inspection failed for " << package_path << " error=" << error;
+        wxMessageBox(_L("Failed to install plugin package. See the log for details."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        send_plugins();
+        return false;
+    };
+
+    try {
+        if (!PluginManager::instance().get_loader().inspect_local_plugin_package(package_file, plugin_descriptor, existing_installation,
+                                                                                 error))
+            return report_inspection_failure();
+    } catch (const std::exception& ex) {
+        error = ex.what();
+        return report_inspection_failure();
+    } catch (...) {
+        error = "Unknown error";
+        return report_inspection_failure();
+    }
+
+    if (existing_installation) {
+        const wxString plugin_name = from_u8(plugin_descriptor.name.empty() ? package_file.filename().string() : plugin_descriptor.name);
+        wxMessageDialog dialog(
+            this,
+            wxString::Format(_L("Plugin \"%s\" is already installed.\n\nInstalling this package will overwrite the existing plugin."),
+                             plugin_name),
+            kOverwritePluginTitle, wxOK | wxCANCEL | wxCANCEL_DEFAULT | wxICON_WARNING);
+        dialog.SetOKCancelLabels(_L("Overwrite"), _L("Cancel"));
+        if (dialog.ShowModal() != wxID_OK) {
+            BOOST_LOG_TRIVIAL(info) << "Plugin package installation cancelled before overwrite. package=" << package_path
+                                    << " plugin=" << plugin_descriptor.name;
+            return false;
+        }
+    }
+
+    bool installed = false;
+    try {
+        installed = run_with_dialog_wait([package_file, &error]() { return PluginManager::instance().install_plugin(package_file, error); },
+                                         _L("Installing plugin"), _L("Installing plugin") + ": " + package_name, 100,
+                                         wxPD_APP_MODAL | wxPD_AUTO_HIDE | wxPD_ELAPSED_TIME);
+    } catch (const std::exception& ex) {
+        error = ex.what();
+    } catch (...) {
+        error = "Unknown error";
+    }
+
+    if (!installed) {
+        BOOST_LOG_TRIVIAL(error) << "Plugin package installation failed for " << package_path << " error=" << error;
+        wxMessageBox(_L("Failed to install plugin package. See the log for details."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        send_plugins();
+        return false;
+    }
+
+    BOOST_LOG_TRIVIAL(info) << "Plugin package installed successfully from " << package_path;
+    refresh_plugin_catalog_async(_L("Refreshing"), _L("Refreshing plugins data"), kUseCurrentCloudCatalog);
+    return true;
+}
+
+bool PluginsDialog::install_cloud_plugin(const std::string& plugin_key, const std::string& version, const wxString& name)
+{
+    if (plugin_key.empty())
+        return false;
+
+    BOOST_LOG_TRIVIAL(info) << "Downloading cloud plugin. plugin_key=" << plugin_key << " name=" << into_u8(name);
+
+    std::string error;
+
+    bool downloaded = false;
+    try {
+        downloaded = run_with_dialog_wait(
+            [plugin_key, &error, version]() {
+                return PluginManager::instance().download_and_install_cloud_plugin(plugin_key, version, error);
+            },
+            _L("Downloading plugin"), _L("Downloading") + ": " + name);
+    } catch (const std::exception& ex) {
+        error = ex.what();
+    } catch (...) {
+        error = "Unknown error";
+    }
+
+    if (!downloaded) {
+        BOOST_LOG_TRIVIAL(error) << "Cloud plugin download failed. plugin_key=" << plugin_key << " error=" << error;
+        PluginManager::instance().set_plugin_error(plugin_key, error);
+        wxMessageBox(from_u8(error), _L("Plugin Download Failed"), wxOK | wxICON_ERROR, this);
+        return false;
+    }
+
+    BOOST_LOG_TRIVIAL(info) << "Cloud plugin downloaded successfully. plugin_key=" << plugin_key;
+    return true;
+}
+
+void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::string& capability_name)
+{
+    if (plugin_key.empty() || capability_name.empty()) {
+        BOOST_LOG_TRIVIAL(warning) << "Ignoring run_script_plugin with an empty plugin key or capability name";
+        send_plugins();
+        return;
+    }
+
+    PluginManager& manager = PluginManager::instance();
+    auto cap = manager.get_loader().get_plugin_capability_by_name(
+        plugin_key, Slic3r::PluginCapabilityType::Script, capability_name);
+    if (!cap) {
+        BOOST_LOG_TRIVIAL(warning) << "Ignoring stale run request for missing script capability. plugin_key=" << plugin_key
+                                   << " capability_name=" << capability_name;
+        send_plugins();
+        return;
+    }
+    if (!cap->enabled) {
+        BOOST_LOG_TRIVIAL(warning) << "Ignoring stale run request for disabled script capability. plugin_key=" << plugin_key
+                                   << " capability_name=" << capability_name;
+        send_plugins();
+        return;
+    }
+
+    // A plugin's modal orca.host.ui dialog or the result message box pumps a nested event
+    // loop; the WebView could re-dispatch this command mid-run. Refuse the overlapping run.
+    if (m_script_running) {
+        BOOST_LOG_TRIVIAL(info) << "Ignoring run_script_plugin; a plugin is already running. plugin_key=" << plugin_key;
+        return;
+    }
+    m_script_running = true;
+    ScopeGuard running_guard([this]() { m_script_running = false; });
+
+    BOOST_LOG_TRIVIAL(info) << "Run script plugin requested from Plugins dialog. plugin_key=" << plugin_key
+                            << " capability_name=" << capability_name;
+
+    auto complete_with_error = [this, &manager, &plugin_key](const std::string& plugin_error, const wxString& dialog_message,
+                                                             const wxString& dialog_title, long dialog_style) {
+        const std::string normalized_error = plugin_error.empty() ? "Script plugin failed." : plugin_error;
+        if (!manager.get_catalog().set_plugin_error(plugin_key, normalized_error))
+            BOOST_LOG_TRIVIAL(warning) << "Failed to record plugin error. plugin_key=" << plugin_key;
+
+        if (!manager.get_loader().unload_plugin(plugin_key))
+            BOOST_LOG_TRIVIAL(error) << "Failed to unload plugin after script error. plugin_key=" << plugin_key;
+
+        send_plugins();
+
+        const wxString message = dialog_message.empty() ? from_u8(normalized_error) : dialog_message;
+        wxMessageBox(message, dialog_title, dialog_style, this);
+    };
+
+    PluginDescriptor descriptor;
+    if (!get_descriptor(plugin_key, descriptor)) {
+        BOOST_LOG_TRIVIAL(error) << "Cannot run script plugin because manifest was not found. plugin_key=" << plugin_key;
+        complete_with_error("Plugin manifest was not found.", _L("Plugin manifest was not found."), _L("Plugins"), wxOK | wxICON_WARNING);
+        return;
+    }
+
+    if (descriptor.has_error()) {
+        complete_with_error(descriptor.normalized_error(), wxString(), _L("Plugins"), wxOK | wxICON_WARNING);
+        return;
+    }
+
+    // Should not reach here, handle for extra safety
+    if (!descriptor.is_metadata_valid()) {
+        std::string plugin_type_str    = plugin_capability_type_to_string(descriptor.primary_capability_type());
+        std::string metadata_valid     = descriptor.is_metadata_valid() ? "true" : "false";
+        const std::string plugin_error = "Cannot run plugin because its metadata is invalid:\n\tplugin type: " + plugin_type_str +
+                                         "\n\tmetadata_valid: " + metadata_valid;
+        BOOST_LOG_TRIVIAL(error) << "Cannot run plugin because its metadata is invalid. plugin_key=" << plugin_key
+                                 << " is_metadata_valid=" << descriptor.is_metadata_valid()
+                                 << " type=" << plugin_capability_type_to_string(descriptor.primary_capability_type());
+        complete_with_error(plugin_error, _L("Only plugins with valid metadata can be run from this dialog."), _L("Plugins"),
+                            wxOK | wxICON_WARNING);
+        return;
+    }
+
+    // Should not reach here as non-loaded plugins have disabled run buttons, handle for extra safety
+    if (!manager.get_loader().is_plugin_loaded(plugin_key)) {
+        BOOST_LOG_TRIVIAL(warning) << "Cannot run script plugin because it is not loaded. plugin_key=" << plugin_key;
+        complete_with_error("Load the script plugin before running it: Cannot run script plugin because it is not loaded.",
+                            _L("Load the script plugin before running it."), _L("Plugins"), wxOK | wxICON_INFORMATION);
+        return;
+    }
+
+    auto plugin = std::dynamic_pointer_cast<Slic3r::ScriptPluginCapability>(cap->instance);
+    if (!plugin) {
+        BOOST_LOG_TRIVIAL(error) << "Loaded plugin does not implement ScriptPluginCapability. plugin_key=" << plugin_key;
+        complete_with_error("The selected plugin is not a runnable script plugin: Loaded plugin does not implement ScriptPluginCapability.",
+                            _L("The selected plugin is not a runnable script plugin."), _L("Plugins"), wxOK | wxICON_WARNING);
+        return;
+    }
+
+    std::string error;
+    ExecutionResult result;
+
+    // Script plugins run on the main/UI thread (not a worker). They hold live, non-owning
+    // ModelObject*/ModelVolume*/ModelInstance* aliases into host data and can mint ObjectIDs,
+    // which libslic3r requires on the main thread (ObjectID.hpp's non-atomic s_last_id). Running
+    // here makes those reads/instantiations legal and means nothing mutates the model underneath
+    // a run. The trade-off is that a slow execute() freezes the UI: the contract (see
+    // plugin_development.md) is to keep execute() quick and offload heavy work to the plugin's own
+    // threading.Thread. orca.host.ui calls already no-op their main-thread marshaling here.
+    {
+        wxBusyCursor busy;
+        try {
+            PythonGILState gil;
+            result = plugin->execute();
+        } catch (const std::exception& ex) {
+            error = ex.what();
+            BOOST_LOG_TRIVIAL(error) << "Script plugin execution threw exception. plugin_key=" << plugin_key << " error=" << error;
+        } catch (...) {
+            error = "Unknown error";
+            BOOST_LOG_TRIVIAL(error) << "Script plugin execution threw unknown exception. plugin_key=" << plugin_key;
+        }
+    }
+
+    if (!error.empty()) {
+        plugin.reset();
+        cap.reset();
+        complete_with_error(error, wxString(), _L("Script Plugin Failed"), wxOK | wxICON_ERROR);
+        return;
+    }
+
+    BOOST_LOG_TRIVIAL(info) << "Script plugin execution completed. plugin_key=" << plugin_key
+                            << " status=" << static_cast<int>(result.status) << " message=" << result.message << " data=" << result.data;
+
+    const bool failed                  = result.status == PluginResult::RecoverableError || result.status == PluginResult::FatalError;
+    const std::string fallback_message = failed                                 ? "Script plugin failed." :
+                                         result.status == PluginResult::Skipped ? "Script plugin skipped." :
+                                                                                  "Script plugin finished.";
+    if (failed) {
+        plugin.reset();
+        cap.reset();
+        complete_with_error(result.message.empty() ? fallback_message : result.message, wxString(), _L("Script Plugin"),
+                            wxOK | wxICON_ERROR);
+        return;
+    }
+
+    manager.clear_plugin_error(plugin_key);
+    send_plugins();
+    const wxString message = from_u8(result.message.empty() ? fallback_message : result.message);
+    wxMessageBox(message, _L("Script Plugin"), wxOK | wxICON_INFORMATION, this);
+}
+
+void PluginsDialog::update_plugin(const std::string& plugin_key)
+{
+    if (plugin_key.empty())
+        return;
+
+    BOOST_LOG_TRIVIAL(info) << "Updating cloud plugin. plugin_key=" << plugin_key;
+
+    PluginDescriptor descriptor;
+    const wxString name = get_descriptor(plugin_key, descriptor) ? from_u8(descriptor.name) : from_u8(plugin_key);
+
+    // update_cloud_plugin unloads the old plugin, deletes its local package, then downloads and
+    // reinstalls the latest version. Each of those steps already runs off the main thread in the
+    // delete/install paths, so run the whole operation on the worker and pump a progress dialog.
+    std::string error;
+    bool updated = false;
+    try {
+        updated = run_with_dialog_wait(
+            [plugin_key, &error]() { return PluginManager::instance().update_cloud_plugin(plugin_key, error); },
+            _L("Updating plugin"), _L("Updating") + ": " + name);
+    } catch (const std::exception& ex) {
+        error = ex.what();
+    } catch (...) {
+        error = "Unknown error";
+    }
+
+    if (!updated) {
+        BOOST_LOG_TRIVIAL(error) << "Cloud plugin update failed. plugin_key=" << plugin_key << " error=" << error;
+        wxMessageBox(from_u8(error), _L("Failed to update plugin"), wxOK | wxICON_ERROR, this);
+        send_plugins();
+        return;
+    }
+
+    // update_cloud_plugin installs the package and updates the in-memory descriptor
+    // (installed=true, update_available=false) on success.
+    send_plugins();
+}
+
+void PluginsDialog::open_plugin_folder(const PluginDescriptor& plugin)
+{
+    const boost::filesystem::path plugin_folder = resolve_plugin_root_from_descriptor(plugin);
+
+    if (plugin_folder.empty()) {
+        wxMessageBox(_L("Plugin folder could not be determined."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        return;
+    }
+
+    desktop_open_any_folder(plugin_folder.string());
+}
+
+void PluginsDialog::open_plugin_on_cloud(const std::string& sharing_token)
+{
+    if (sharing_token.empty())
+        return;
+
+    if (!wxGetApp().getAgent())
+        return;
+
+    auto orca_agent = std::dynamic_pointer_cast<OrcaCloudServiceAgent>(wxGetApp().getAgent()->get_cloud_agent());
+    if (!orca_agent)
+        return;
+
+    wxLaunchDefaultBrowser(wxString::FromUTF8(orca_agent->get_cloud_base_url() + "/p/" + sharing_token));
+}
+
+void PluginsDialog::open_plugin_hub()
+{
+    std::string cloud_base_url = "https://cloud.orcaslicer.com";
+
+    if (wxGetApp().getAgent()) {
+        auto orca_agent = std::dynamic_pointer_cast<OrcaCloudServiceAgent>(wxGetApp().getAgent()->get_cloud_agent());
+        if (orca_agent && !orca_agent->get_cloud_base_url().empty())
+            cloud_base_url = orca_agent->get_cloud_base_url();
+    }
+
+    while (!cloud_base_url.empty() && cloud_base_url.back() == '/')
+        cloud_base_url.pop_back();
+    if (cloud_base_url.empty())
+        cloud_base_url = "https://cloud.orcaslicer.com";
+
+    wxLaunchDefaultBrowser(wxString::FromUTF8(cloud_base_url + "/app/plugins/plugin-hub"));
+}
+
+void PluginsDialog::delete_local_plugin(const PluginDescriptor& plugin)
+{
+    const wxString plugin_name = from_u8(plugin.name);
+    const int rc = wxMessageBox(wxString::Format(_L("Delete plugin \"%s\"?\n\nThis permanently removes the plugin folder."), plugin_name),
+                                kDeletePluginTitle, wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this);
+    if (rc != wxYES)
+        return;
+
+    auto state = std::make_shared<PluginOperationState>();
+    run_with_dialog(
+        [plugin_key = plugin.plugin_key, refresh_catalog = plugin.is_cloud_plugin(), state]() {
+            std::string error;
+            const bool succeeded = PluginManager::instance().delete_plugin(plugin_key, error);
+            if (succeeded && refresh_catalog)
+                refresh_plugin_catalog_blocking(kFetchCloudCatalog);
+            store_plugin_operation_result(state, succeeded, std::move(error));
+        },
+        [this, state]() {
+            std::string error;
+            if (!take_plugin_operation_result(state, error)) {
+                wxMessageBox(error.empty() ? _L("Failed to delete plugin.") : from_u8(error), _L("Plugins"), wxOK | wxICON_ERROR, this);
+                return;
+            }
+
+            send_plugins();
+        },
+        _L("Deleting plugin"), _L("Deleting plugin..."));
+}
+
+void PluginsDialog::unsubscribe_cloud_plugin(const PluginDescriptor& plugin)
+{
+    const wxString plugin_name = from_u8(plugin.name);
+    const int rc               = wxMessageBox(
+        wxString::Format(_L("Unsubscribe plugin \"%s\"?\n\nThis will stop tracking the plugin and delete any local plugin files."),
+                         plugin_name),
+        kUnsubscribeTitle, wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this);
+    if (rc != wxYES)
+        return;
+
+    auto state = std::make_shared<PluginOperationState>();
+    run_with_dialog(
+        [plugin_key = plugin.plugin_key, state]() {
+            std::string error;
+            const bool succeeded = PluginManager::instance().delete_and_unsubscribe_cloud_plugin(plugin_key, error);
+            store_plugin_operation_result(state, succeeded, std::move(error));
+        },
+        [this, state]() {
+            std::string error;
+            if (!take_plugin_operation_result(state, error)) {
+                wxMessageBox(error.empty() ? _L("Failed to unsubscribe plugin.") : from_u8(error), _L("Plugins"), wxOK | wxICON_ERROR, this);
+                return;
+            }
+
+            send_plugins();
+        },
+        _L("Unsubscribing plugin"), _L("Deleting local files and unsubscribing plugin..."));
+}
+
+void PluginsDialog::reinstall_local_plugin(const std::string& plugin_key)
+{
+    if (plugin_key.empty())
+        return;
+
+    PluginManager& manager = PluginManager::instance();
+    const bool was_loaded  = manager.get_loader().is_plugin_loaded(plugin_key);
+    if (!manager.get_loader().unload_plugin(plugin_key)) {
+        wxMessageBox(_L("Failed to unload plugin."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        send_plugins();
+        return;
+    }
+
+    manager.get_loader().load_plugin(manager.get_catalog(), plugin_key, false);
+
+    if (!was_loaded && !manager.get_loader().unload_plugin(plugin_key)) {
+        wxMessageBox(_L("Plugin reloaded, but failed to restore the inactive state."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+    }
+
+    send_plugins();
+}
+
+void PluginsDialog::reinstall_cloud_plugin(const PluginDescriptor& plugin)
+{
+    const std::string plugin_key = plugin.plugin_key;
+    if (plugin_key.empty())
+        return;
+
+    PluginManager& manager = PluginManager::instance();
+    const bool was_loaded  = manager.get_loader().is_plugin_loaded(plugin_key);
+
+    std::string error;
+    if (plugin.has_local_package()) {
+        if (!manager.delete_plugin(plugin_key, error)) {
+            wxMessageBox(from_u8(error.empty() ? "Failed to delete plugin." : error), _L("Plugins"), wxOK | wxICON_ERROR, this);
+            send_plugins();
+            return;
+        }
+
+        manager.get_catalog().update_cloud_catalog(std::vector<PluginDescriptor>{as_cloud_only_descriptor(plugin)});
+    }
+
+    if (!install_cloud_plugin(plugin_key, plugin.version, from_u8(plugin.name))) {
+        send_plugins();
+        return;
+    }
+
+    if (was_loaded) {
+        manager.get_loader().load_plugin(manager.get_catalog(), plugin_key);
+    }
+
+    send_plugins();
+}
+
+void PluginsDialog::delete_mine_local_and_cloud_plugin(const std::string& plugin_key)
+{
+    PluginDescriptor descriptor;
+    const std::string display  = get_descriptor(plugin_key, descriptor) ? descriptor.name : std::string{};
+    const wxString plugin_name = from_u8(display.empty() ? plugin_key : display);
+    const int rc               = wxMessageBox(
+        wxString::Format(_L("Delete plugin \"%s\" from local and cloud?\n\nThis permanently removes the local plugin files and "
+                            "deletes the plugin from the cloud. This action cannot be undone."),
+                         plugin_name),
+        kDeletePluginTitle, wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this);
+    if (rc != wxYES)
+        return;
+
+    std::string error;
+    if (!PluginManager::instance().delete_mine_local_and_cloud_plugin(plugin_key, error)) {
+        wxMessageBox(error.empty() ? _L("Failed to delete plugin from local and cloud.") : from_u8(error), _L("Plugins"),
+                     wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    // delete_mine_local_and_cloud_plugin already updated the in-memory catalog
+    // (finalize_cloud_plugin_removal removes the row and, when a local package existed,
+    // re-syncs the cloud list itself), so a UI refresh is sufficient here — an extra
+    // clearing rescan + cloud fetch would be redundant.
+    send_plugins();
+}
+
+}} // namespace Slic3r::GUI

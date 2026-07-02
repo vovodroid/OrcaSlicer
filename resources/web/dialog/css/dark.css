@@ -7,9 +7,27 @@
   --col-sep: #3a424d;
 
   --text: #e6ebf0;
+  --muted: #b9c0c8;
   --row-hover: #2b3340;
   --row-selected: #244945;
   --row-selected-outline: #00bfa5;
+
+  --plugin-status-danger: #ff7b72;
+  --plugin-status-ok: #37c871;
+  --plugin-status-warn: #f0b45a;
+  --plugin-status-inactive: #b9c0c8;
+  --plugin-status-danger-bg: rgba(255, 123, 114, 0.16);
+  --plugin-status-ok-bg: rgba(55, 200, 113, 0.16);
+  --plugin-status-warn-bg: rgba(240, 180, 90, 0.18);
+  --plugin-status-inactive-bg: #36363b;
+  --plugin-status-inactive-text: #c7ccd2;
+  --plugin-source-mine-bg: rgba(0, 150, 136, 0.18);
+  --plugin-source-mine-text: #8de5d6;
+  --plugin-source-neutral-bg: #36363b;
+  --plugin-source-neutral-text: #c7ccd2;
+  --plugin-source-subscribed-bg: rgba(88, 166, 255, 0.18);
+  --plugin-source-subscribed-text: #8fc0f0;
+  --plugin-link-text: #62d8ca;
 
   --footer-bg: #20262d;
   --btn-bg: #2a313a;
@@ -96,5 +114,3 @@ input[type=checkbox]:checked{
 {
 	color: #BEBEC0;
 }
-
-

@@ -10,7 +10,9 @@
 
 #include "libslic3r/PrintConfig.hpp"
 
+#include <algorithm>
 #include <regex>
+#include <utility>
 #include <cstdint>
 #include <wx/numformatter.h>
 #include <wx/tooltip.h>
@@ -31,6 +33,7 @@
 #include "Widgets/TextCtrl.h"
 
 #include "../Utils/ColorSpaceConvert.hpp"
+#include "slic3r/plugin/PluginManager.hpp"
 #ifdef __WXOSX__
 #define wxOSX true
 #else
@@ -484,17 +487,18 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                 }
 
                 const std::string sidetext = m_opt.sidetext.rfind("mm/s") != std::string::npos ? "mm/s" : "mm";
-                const wxString stVal = double_to_string(val, 2);
-                const wxString msg_text = from_u8((boost::format(_utf8(L("Is it %s%% or %s %s?\n"
-                    "YES for %s%%, \n"
-                    "NO for %s %s."))) % stVal % stVal % sidetext % stVal % stVal % sidetext).str());
+                const wxString stVal       = double_to_string(val, 2);
+                const wxString msg_text    = from_u8((boost::format(_utf8(L("Is it %s%% or %s %s?\n"
+                                                                            "YES for %s%%, \n"
+                                                                            "NO for %s %s."))) %
+                                                      stVal % stVal % sidetext % stVal % stVal % sidetext)
+                                                         .str());
                 WarningDialog dialog(m_parent, msg_text, _L("Parameter validation") + ": " + m_opt_id, wxYES | wxNO);
                 if ((val > 100) && dialog.ShowModal() == wxID_YES) {
-                    set_value(from_u8((boost::format("%s%%") % stVal).str()), false/*true*/);
+                    set_value(from_u8((boost::format("%s%%") % stVal).str()), false /*true*/);
                     str += "%%";
-                }
-				else
-					set_value(stVal, false); // it's no needed but can be helpful, when inputted value contained "," instead of "."
+                } else
+                    set_value(stVal, false); // it's no needed but can be helpful, when inputted value contained "," instead of "."
             }
         }
         if (m_opt.opt_key == "thumbnails") {
@@ -1325,6 +1329,39 @@ using choice_ctrl = ::ComboBox; // BBS
 
 static std::map<std::string, DynamicList*> dynamic_lists;
 
+static bool is_plugin_printer_agent_key(const std::string& value)
+{
+    return value.rfind("plugin:", 0) == 0;
+}
+
+static int printer_agent_item_for_enum_index(const choice_ctrl* field, int enum_index)
+{
+    if (!field)
+        return -1;
+
+    const unsigned int count = field->GetCount();
+    for (unsigned int idx = 0; idx < count; ++idx) {
+        if (void* data = field->GetClientData(idx)) {
+            const int stored = static_cast<int>(reinterpret_cast<uintptr_t>(data)) - 1;
+            if (stored == enum_index)
+                return static_cast<int>(idx);
+        }
+    }
+
+    return -1;
+}
+
+static int printer_agent_enum_index_for_item(const choice_ctrl* field, int item_index, int fallback)
+{
+    if (!field || item_index < 0)
+        return fallback;
+
+    if (void* data = field->GetClientData(item_index))
+        return static_cast<int>(reinterpret_cast<uintptr_t>(data)) - 1;
+
+    return fallback;
+}
+
 void Choice::register_dynamic_list(std::string const &optname, DynamicList *list) { dynamic_lists.emplace(optname, list); }
 
 void DynamicList::update()
@@ -1407,7 +1444,33 @@ void Choice::BUILD()
 	window = dynamic_cast<wxWindow*>(temp);
 
 	if (! m_opt.enum_labels.empty() || ! m_opt.enum_values.empty()) {
-		if (m_opt.enum_labels.empty()) {
+	    if (m_opt_id == "printer_agent") {
+	        const bool has_builtin_agents = std::any_of(m_opt.enum_values.begin(), m_opt.enum_values.end(),
+	            [](const std::string& value) { return !is_plugin_printer_agent_key(value); });
+	        const bool has_plugin_agents = std::any_of(m_opt.enum_values.begin(), m_opt.enum_values.end(),
+	            [](const std::string& value) { return is_plugin_printer_agent_key(value); });
+
+	        auto append_agent_rows = [this, temp](bool plugins) {
+	            for (size_t i = 0; i < m_opt.enum_values.size(); ++i) {
+	                const bool is_plugin = is_plugin_printer_agent_key(m_opt.enum_values[i]);
+	                if (is_plugin != plugins)
+	                    continue;
+
+	                const wxString label = i < m_opt.enum_labels.size() ? _(m_opt.enum_labels[i]) : wxString(m_opt.enum_values[i]);
+	                const int item = temp->Append(label);
+	                temp->SetClientData(item, reinterpret_cast<void*>(static_cast<uintptr_t>(i + 1)));
+	            }
+	        };
+
+	        if (has_builtin_agents) {
+	            temp->Append(_L("System agents"), wxNullBitmap, DD_ITEM_STYLE_SPLIT_ITEM | DD_ITEM_STYLE_DISABLED);
+	            append_agent_rows(false);
+	        }
+	        if (has_plugin_agents) {
+	            temp->Append(_L("Plugins"), wxNullBitmap, DD_ITEM_STYLE_SPLIT_ITEM | DD_ITEM_STYLE_DISABLED);
+	            append_agent_rows(true);
+	        }
+	    } else if (m_opt.enum_labels.empty()) {
 			// Append non-localized enum_values
 			for (auto el : m_opt.enum_values)
 				temp->Append(el);
@@ -1510,10 +1573,11 @@ void Choice::set_selection()
 
 	wxString text_value = wxString("");
 
-    choice_ctrl* field = dynamic_cast<choice_ctrl*>(window);
+	choice_ctrl* field = dynamic_cast<choice_ctrl*>(window);
 	switch (m_opt.type) {
 	case coEnum:{
-        field->SetSelection(m_opt.default_value->getInt());
+        const int val = m_opt.default_value->getInt();
+        field->SetSelection(m_opt_id == "printer_agent" ? printer_agent_item_for_enum_index(field, val) : val);
 		break;
 	}
 	case coFloat:
@@ -1562,9 +1626,15 @@ void Choice::set_value(const std::string& value, bool change_event)  //! Redunda
 		++idx;
 	}
 
-    choice_ctrl* field = dynamic_cast<choice_ctrl*>(window);
-	idx == m_opt.enum_values.size() ?
-		field->SetValue(value) :
+	choice_ctrl* field = dynamic_cast<choice_ctrl*>(window);
+	if (m_opt_id == "printer_agent") {
+		const int enum_index = idx == m_opt.enum_values.size() ?
+			(m_opt.default_value ? m_opt.default_value->getInt() : 0) :
+			static_cast<int>(idx);
+		field->SetSelection(printer_agent_item_for_enum_index(field, enum_index));
+	} else if (idx == m_opt.enum_values.size())
+		field->SetValue(value);
+	else
 		field->SetSelection(idx);
 
 	m_disable_change_event = false;
@@ -1628,32 +1698,55 @@ void Choice::set_value(const boost::any& value, bool change_event)
 	case coEnum:
     // BBS
 	case coEnums: {
-		int val = boost::any_cast<int>(value);
-		int selection = val;
+	    auto printer_agent_index_from_key = [this](const std::string& key) {
+	        auto it = std::find(m_opt.enum_values.begin(), m_opt.enum_values.end(), key);
+	        if (it != m_opt.enum_values.end())
+	            return static_cast<int>(it - m_opt.enum_values.begin());
+	        return m_opt.default_value ? m_opt.default_value->getInt() : 0;
+	    };
 
-        if (m_opt_id == "input_shaping_type") {
-            if (field != nullptr) {
-                const unsigned int count = field->GetCount();
-                int match_index = -1;
-                for (unsigned int idx = 0; idx < count; ++idx) {
-                    if (void* data = field->GetClientData(idx)) {
-                        int stored = static_cast<int>(reinterpret_cast<uintptr_t>(data));
-                        if (stored == val) {
-                            match_index = static_cast<int>(idx);
-                            break;
-                        }
-                    }
-                }
-                if (match_index >= 0)
-                    selection = match_index;
-                else if (val >= 0 && val < static_cast<int>(count))
-                    selection = val;
-                else if (count > 0)
-                    selection = 0;
-                else
-                    selection = -1;
-            }
-        } else {
+	    int val = 0;
+	    if (m_opt_id == "printer_agent") {
+	        if (const int* int_value = boost::any_cast<int>(&value))
+	            val = *int_value;
+	        else if (const wxString* wx_value = boost::any_cast<wxString>(&value))
+	            val = printer_agent_index_from_key(into_u8(*wx_value));
+	        else if (const std::string* string_value = boost::any_cast<std::string>(&value))
+	            val = printer_agent_index_from_key(*string_value);
+	        else {
+	            m_disable_change_event = false;
+	            return;
+	        }
+	    } else
+	        val = boost::any_cast<int>(value);
+
+	    int selection = val;
+
+	    if (m_opt_id == "printer_agent") {
+	        selection = printer_agent_item_for_enum_index(field, val);
+	    } else if (m_opt_id == "input_shaping_type") {
+	        if (field != nullptr) {
+	            const unsigned int count = field->GetCount();
+	            int match_index = -1;
+	            for (unsigned int idx = 0; idx < count; ++idx) {
+	                if (void* data = field->GetClientData(idx)) {
+	                    int stored = static_cast<int>(reinterpret_cast<uintptr_t>(data));
+	                    if (stored == val) {
+	                        match_index = static_cast<int>(idx);
+	                        break;
+	                    }
+	                }
+	            }
+	            if (match_index >= 0)
+	                selection = match_index;
+	            else if (val >= 0 && val < static_cast<int>(count))
+	                selection = val;
+	            else if (count > 0)
+	                selection = 0;
+	            else
+	                selection = -1;
+	        }
+	    } else {
             // Support ThirdPartyPrinter
             if (m_opt_id.compare("host_type") == 0 && val != 0 &&
                 m_opt.enum_values.size() > field->GetCount()) // for case, when PrusaLink isn't used as a HostType
@@ -1748,11 +1841,17 @@ boost::any& Choice::get_value()
 		if (m_opt_id == rp_option)
 			return m_value = boost::any(ret_str);
 
-    // BBS
+	// BBS
 	if (m_opt.type == coEnum || m_opt.type == coEnums)
     {
         if (m_opt.nullable && field->GetSelection() == -1)
             m_value = ConfigOptionEnumsGenericNullable::nil_value();
+        else if (m_opt_id == "printer_agent")
+        {
+            const int selection = field->GetSelection();
+            const int fallback = m_opt.default_value ? m_opt.default_value->getInt() : 0;
+            m_value = printer_agent_enum_index_for_item(field, selection, fallback);
+        }
         else if (m_opt_id == "input_shaping_type")
         {
             int selection = field->GetSelection();
@@ -1891,6 +1990,324 @@ void Choice::msw_rescale()
     window->SetMinSize(size);
     dynamic_cast<choice_ctrl*>(window)->Rescale();
 #endif
+}
+
+
+void PluginField::BUILD()
+{
+    // Wrap the dynamic rows in a single container panel so the field is a proper window-field
+    // (getWindow() != null). The panel owns m_main_sizer; all row controls are children of it.
+    auto* panel = new wxPanel(m_parent, wxID_ANY);
+    panel->SetBackgroundStyle(wxBG_STYLE_PAINT);
+    wxGetApp().UpdateDarkUI(panel);
+    window = panel;
+
+    m_main_sizer = new wxBoxSizer(wxVERTICAL);
+    panel->SetSizer(m_main_sizer);
+
+    // Initialize with default values or empty
+    if (m_opt.type == coStrings) {
+        const ConfigOptionStrings* vec = m_opt.get_default_value<ConfigOptionStrings>();
+        if (vec != nullptr && !vec->values.empty()) {
+            m_values = vec->values;
+        }
+    }
+
+    rebuild_ui();
+    m_value = m_values;
+}
+
+void PluginField::set_selector(std::function<std::string()> selector)
+{
+    m_selector = std::move(selector);
+}
+
+static void remove_empty_plugin_values(std::vector<std::string>& values)
+{
+    for (auto it = values.begin(); it != values.end();) {
+        if (it->empty())
+            it = values.erase(it);
+        else
+            ++it;
+    }
+}
+
+void PluginField::rebuild_ui()
+{
+    remove_empty_plugin_values(m_values);
+
+    if (m_main_sizer) {
+        m_main_sizer->Clear(true);
+    }
+    m_rows.clear();
+    m_standalone_add_btn = nullptr;
+
+    if (m_values.empty()) {
+        add_empty_state_row();
+    } else {
+        for (size_t i = 0; i < m_values.size(); ++i)
+            add_plugin_row(display_name_for_value(m_values[i]), i == m_values.size() - 1);
+    }
+
+    if (window) {
+        // Report the stacked rows' size so the option-group / OG_CustomCtrl allocate the right height.
+        window->SetMinSize(m_main_sizer->CalcMin());
+        window->Layout();
+    }
+    if (m_parent)
+        m_parent->Layout();
+}
+
+void PluginField::add_empty_state_row()
+{
+    const auto button_size = wxSize(def_width_thinner() * m_em_unit, -1);
+    auto row_sizer = new wxBoxSizer(wxHORIZONTAL);
+
+    wxTextCtrl* display = new wxTextCtrl(window, wxID_ANY, _L("No plugin selected"),
+        wxDefaultPosition, wxSize(def_width_wider() * m_em_unit, wxDefaultCoord),
+        wxTE_READONLY);
+    display->SetBackgroundStyle(wxBG_STYLE_PAINT);
+    display->SetEditable(false);
+    wxGetApp().UpdateDarkUI(display);
+    display->SetToolTip(_L("No plugin selected"));
+
+    auto add_btn = new ScalableButton(window, wxID_ANY, "param_add", wxEmptyString,
+        button_size, wxDefaultPosition, wxBU_EXACTFIT | wxNO_BORDER, true, 16);
+    wxGetApp().UpdateDarkUI(add_btn);
+    add_btn->SetToolTip(_L("Add plugin"));
+
+    add_btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { on_add_clicked(); });
+
+    row_sizer->Add(display, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+    row_sizer->Add(add_btn, 0, wxALIGN_CENTER_VERTICAL);
+    m_main_sizer->Add(row_sizer, 0, wxEXPAND | wxBOTTOM, 4);
+
+    PluginRow row;
+    row.display = display;
+    row.add_btn = add_btn;
+    row.sizer = row_sizer;
+    m_rows.push_back(row);
+
+    m_standalone_add_btn = add_btn;
+}
+
+void PluginField::add_plugin_row(const wxString& value, bool is_last)
+{
+    const auto button_size = wxSize(def_width_thinner() * m_em_unit, -1);
+    auto row_sizer = new wxBoxSizer(wxHORIZONTAL);
+
+    // Select button with search icon
+    ScalableButton* select_btn = new ScalableButton(window, wxID_ANY, "search", wxEmptyString,
+        button_size, wxDefaultPosition, wxBU_EXACTFIT | wxNO_BORDER, true, 16);
+    wxGetApp().UpdateDarkUI(select_btn);
+    select_btn->SetToolTip(_L("Select plugin"));
+
+    // Display text control
+    wxTextCtrl* display = new wxTextCtrl(window, wxID_ANY, value,
+        wxDefaultPosition, wxSize(def_width_wider() * m_em_unit, wxDefaultCoord),
+        wxTE_READONLY);
+    display->SetBackgroundStyle(wxBG_STYLE_PAINT);
+    display->SetEditable(false);
+    wxGetApp().UpdateDarkUI(display);
+    display->SetToolTip(get_tooltip_text(value));
+
+    ScalableButton* remove_btn = nullptr;
+    if (!m_opt.readonly) {
+        remove_btn = new ScalableButton(window, wxID_ANY, "cross", wxEmptyString,
+            button_size, wxDefaultPosition, wxBU_EXACTFIT | wxNO_BORDER, true, 16);
+        wxGetApp().UpdateDarkUI(remove_btn);
+        remove_btn->SetToolTip(_L("Remove plugin"));
+    }
+
+    // Add button (only on last row)
+    ScalableButton* add_btn = nullptr;
+    if (is_last && !m_opt.readonly) {
+        add_btn = new ScalableButton(window, wxID_ANY, "param_add", wxEmptyString,
+            button_size, wxDefaultPosition, wxBU_EXACTFIT | wxNO_BORDER, true, 16);
+        wxGetApp().UpdateDarkUI(add_btn);
+        add_btn->SetToolTip(_L("Add plugin"));
+        add_btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { on_add_clicked(); });
+    }
+
+    const size_t row_index = m_rows.size();
+    select_btn->Bind(wxEVT_BUTTON, [this, row_index](wxCommandEvent&) { on_select_clicked(row_index); });
+    if (remove_btn)
+        remove_btn->Bind(wxEVT_BUTTON, [this, row_index](wxCommandEvent&) { on_remove_clicked(row_index); });
+
+    row_sizer->Add(select_btn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+    row_sizer->Add(display, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+    if (remove_btn)
+        row_sizer->Add(remove_btn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+    if (add_btn)
+        row_sizer->Add(add_btn, 0, wxALIGN_CENTER_VERTICAL);
+    else if (!m_opt.readonly) {
+        // Reserve space equal to the add button so all rows align.
+        row_sizer->Add(button_size.GetWidth(), button_size.GetHeight(), 0, wxALIGN_CENTER_VERTICAL);
+    }
+
+    m_main_sizer->Add(row_sizer, 0, wxEXPAND | wxBOTTOM, 4);
+
+    PluginRow row;
+    row.select_btn = select_btn;
+    row.display = display;
+    row.remove_btn = remove_btn;
+    row.add_btn = add_btn;
+    row.sizer = row_sizer;
+    m_rows.push_back(row);
+}
+
+wxString PluginField::display_name_for_value(const std::string& value) const
+{
+    if (value.empty())
+        return _L("No plugin selected");
+
+    return from_u8(value);
+}
+
+void PluginField::on_select_clicked(size_t index)
+{
+    if (index >= m_rows.size())
+        return;
+
+    if (!m_selector)
+        return;
+
+    std::string selected = m_selector();
+    if (selected.empty())
+        return;
+
+    if (index >= m_values.size())
+        m_values.resize(index + 1);
+
+    if (m_values[index] == selected)
+        return;
+
+    m_values[index] = selected;
+    set_row_value(index, display_name_for_value(selected));
+    m_value = m_values;
+    on_change_field();
+}
+
+void PluginField::on_add_clicked()
+{
+    if (m_opt.readonly)
+        return;
+
+    if (!m_selector)
+        return;
+
+    std::string selected = m_selector();
+    if (selected.empty())
+        return;
+
+    m_values.push_back(selected);
+    m_value = m_values;
+
+    rebuild_ui();
+
+    on_change_field();
+}
+
+void PluginField::on_remove_clicked(size_t index)
+{
+    if (m_opt.readonly || index >= m_values.size())
+        return;
+
+    m_values.erase(m_values.begin() + index);
+    m_value = m_values;
+
+    rebuild_ui();
+    on_change_field();
+}
+
+wxString PluginField::get_row_value(size_t index) const
+{
+    if (index >= m_rows.size() || !m_rows[index].display)
+        return wxEmptyString;
+    return m_rows[index].display->GetValue();
+}
+
+void PluginField::set_row_value(size_t index, const wxString& value)
+{
+    if (index >= m_rows.size() || !m_rows[index].display)
+        return;
+    m_rows[index].display->ChangeValue(value);
+    m_rows[index].display->SetToolTip(get_tooltip_text(value));
+}
+
+void PluginField::set_value(const boost::any& value, bool change_event)
+{
+    m_disable_change_event = !change_event;
+
+    // Handle different input types
+    if (value.empty()) {
+        m_values.clear();
+    } else if (value.type() == typeid(std::vector<std::string>)) {
+        m_values = boost::any_cast<std::vector<std::string>>(value);
+    } else if (value.type() == typeid(wxString)) {
+        m_values.clear();
+        wxString text = boost::any_cast<wxString>(value);
+        if (!text.IsEmpty())
+            m_values.push_back(into_u8(text));
+    } else if (value.type() == typeid(std::string)) {
+        m_values.clear();
+        std::string text = boost::any_cast<std::string>(value);
+        if (!text.empty())
+            m_values.push_back(text);
+    }
+
+    rebuild_ui();
+
+    m_value = m_values;
+
+    m_disable_change_event = false;
+
+    if (change_event)
+        on_change_field();
+}
+
+boost::any& PluginField::get_value()
+{
+    m_value = m_values;
+    return m_value;
+}
+
+void PluginField::enable()
+{
+    for (auto& row : m_rows) {
+        if (row.select_btn)
+            row.select_btn->Enable();
+        if (row.display)
+            row.display->Enable();
+        if (row.remove_btn)
+            row.remove_btn->Enable();
+        if (row.add_btn)
+            row.add_btn->Enable();
+    }
+    if (m_standalone_add_btn)
+        m_standalone_add_btn->Enable();
+}
+
+void PluginField::disable()
+{
+    for (auto& row : m_rows) {
+        if (row.select_btn)
+            row.select_btn->Disable();
+        if (row.display)
+            row.display->Disable();
+        if (row.remove_btn)
+            row.remove_btn->Disable();
+        if (row.add_btn)
+            row.add_btn->Disable();
+    }
+    if (m_standalone_add_btn)
+        m_standalone_add_btn->Disable();
+}
+
+void PluginField::msw_rescale()
+{
+    Field::msw_rescale();
+    rebuild_ui();
 }
 
 void ColourPicker::BUILD()

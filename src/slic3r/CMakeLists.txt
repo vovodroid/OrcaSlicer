@@ -38,6 +38,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/Auxiliary.hpp
     GUI/BackgroundSlicingProcess.cpp
     GUI/BackgroundSlicingProcess.hpp
+    GUI/PostProcessor.cpp
+    GUI/PostProcessor.hpp
     GUI/BBLStatusBarBind.cpp
     GUI/BBLStatusBarBind.hpp
     GUI/BBLStatusBar.cpp
@@ -107,6 +109,18 @@ set(SLIC3R_GUI_SOURCES
     GUI/Downloader.hpp
     GUI/DownloadProgressDialog.cpp
     GUI/DownloadProgressDialog.hpp
+    GUI/PluginPickerDialog.cpp
+    GUI/PluginPickerDialog.hpp
+    GUI/PluginsDialog.cpp
+    GUI/PluginsDialog.hpp
+    GUI/ProcessRunner.cpp
+    GUI/ProcessRunner.hpp
+    GUI/TerminalDialog.cpp
+    GUI/TerminalDialog.hpp
+    GUI/PluginProgressDialog.cpp
+    GUI/PluginProgressDialog.hpp
+    GUI/PluginWebDialog.cpp
+    GUI/PluginWebDialog.hpp
     GUI/DragCanvas.cpp
     GUI/DragCanvas.hpp
     GUI/EditGCodeDialog.cpp
@@ -564,11 +578,49 @@ set(SLIC3R_GUI_SOURCES
     GUI/Widgets/TempInput.hpp
     GUI/Widgets/TextInput.cpp
     GUI/Widgets/TextInput.hpp
+    GUI/Widgets/WebViewHostDialog.cpp
+    GUI/Widgets/WebViewHostDialog.hpp
     GUI/Widgets/WebView.cpp
     GUI/Widgets/WebView.hpp
     GUI/WipeTowerDialog.cpp
     GUI/wxExtensions.cpp
     GUI/wxExtensions.hpp
+    plugin/PythonInterpreter.cpp
+    plugin/PythonInterpreter.hpp
+    plugin/PythonFileUtils.cpp
+    plugin/PythonFileUtils.hpp
+    plugin/PythonPluginBridge.cpp
+    plugin/PythonPluginBridge.hpp
+    plugin/PythonPluginInterface.hpp
+    plugin/PyPluginPackage.hpp
+    plugin/PluginHostApi.cpp
+    plugin/PluginHostApi.hpp
+    plugin/PluginHostUi.cpp
+    plugin/PluginHostUi.hpp
+    plugin/CloudPluginService.cpp
+    plugin/CloudPluginService.hpp
+    plugin/PluginFsUtils.cpp
+    plugin/PluginFsUtils.hpp
+    plugin/PluginCatalog.cpp
+    plugin/PluginCatalog.hpp
+    plugin/PluginLoader.cpp
+    plugin/PluginLoader.hpp
+    plugin/PluginDescriptor.hpp
+    plugin/PluginManager.cpp
+    plugin/PluginManager.hpp
+    plugin/PluginAuditManager.cpp
+    plugin/PluginAuditManager.hpp
+    plugin/PluginResolver.cpp
+    plugin/PluginResolver.hpp
+    plugin/pluginTypes/gcode/GCodePluginCapability.hpp
+    plugin/pluginTypes/gcode/GCodePluginCapability.cpp
+    plugin/pluginTypes/gcode/GCodePluginCapabilityTrampoline.hpp
+    plugin/pluginTypes/printerAgent/PrinterAgentPluginCapability.hpp
+    plugin/pluginTypes/printerAgent/PrinterAgentPluginCapability.cpp
+    plugin/pluginTypes/printerAgent/PrinterAgentPluginCapabilityTrampoline.hpp
+    plugin/pluginTypes/script/ScriptPluginCapability.hpp
+    plugin/pluginTypes/script/ScriptPluginCapability.cpp
+    plugin/pluginTypes/script/ScriptPluginCapabilityTrampoline.hpp
     pchheader.cpp
     pchheader.hpp
     Utils/ASCIIFolding.cpp
@@ -764,7 +816,7 @@ else()
     set(_opengl_link_lib OpenGL::GL)
 endif()
 
-target_link_libraries(libslic3r_gui libslic3r cereal::cereal imgui imguizmo minilzo libvgcode md4c-html glad ${_opengl_link_lib} hidapi mdns ${wxWidgets_LIBRARIES} glfw libcurl OpenSSL::SSL OpenSSL::Crypto noise::noise)
+target_link_libraries(libslic3r_gui libslic3r cereal::cereal imgui imguizmo minilzo libvgcode md4c-html glad ${_opengl_link_lib} hidapi mdns ${wxWidgets_LIBRARIES} glfw libcurl OpenSSL::SSL OpenSSL::Crypto noise::noise pybind11::embed)
 
 
 if (MSVC)
@@ -843,3 +895,33 @@ endif ()
 
 # Add a definition so that we can tell we are compiling slic3r.
 target_compile_definitions(libslic3r_gui PRIVATE SLIC3R_CURRENTLY_COMPILING_GUI_MODULE)
+
+if(ORCA_BUNDLED_UV_EXECUTABLE_CONFIG)
+    target_compile_definitions(libslic3r_gui PRIVATE "ORCA_BUNDLED_UV_EXECUTABLE=\"${ORCA_BUNDLED_UV_EXECUTABLE_CONFIG}\"")
+endif()
+
+if (ORCA_BUILD_PYTHON_STUBGEN_MODULE)
+    add_library(orca_stubgen MODULE
+        plugin/PythonPluginBridge.cpp
+    )
+
+    target_compile_definitions(orca_stubgen PRIVATE
+        ORCA_PYTHON_STUBGEN_MODULE
+    )
+
+    target_include_directories(orca_stubgen PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}
+        Utils
+    )
+
+    target_link_libraries(orca_stubgen PRIVATE
+        libslic3r_gui
+        pybind11::embed
+    )
+
+    set_target_properties(orca_stubgen PROPERTIES
+        OUTPUT_NAME orca
+        PREFIX ""
+    )
+endif()

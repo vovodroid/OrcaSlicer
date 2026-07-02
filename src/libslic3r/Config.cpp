@@ -4,6 +4,7 @@
 #include "LocalesUtils.hpp"
 #include "Preset.hpp"
 
+#include <algorithm>
 #include <assert.h>
 #include <fstream>
 #include <iostream>
@@ -35,6 +36,8 @@ using namespace nlohmann;
 #include "PrintConfig.hpp"
 
 namespace Slic3r {
+
+std::function<std::string(std::string, std::string)> ConfigBase::resolve_capability_fn = nullptr;
 
 //BBS: add json support
 //static const std::string CONFIG_VERSION_KEY = "version";
@@ -84,12 +87,12 @@ std::string escape_strings_cstyle(const std::vector<std::string> &strs)
             // Separate the strings.
             (*outptr ++) = ';';
         const std::string &str = strs[j];
-        // Is the string simple or complex? Complex string contains spaces, tabs, new lines and other
-        // escapable characters. Empty string shall be quoted as well, if it is the only string in strs.
+        // Is the string simple or complex? Complex string contains spaces, tabs, semicolons, new lines
+        // and other escapable characters. Empty string shall be quoted as well, if it is the only string in strs.
         bool should_quote = strs.size() == 1 && str.empty();
         for (size_t i = 0; i < str.size(); ++ i) {
             char c = str[i];
-            if (c == ' ' || c == '\t' || c == '\\' || c == '"' || c == '\r' || c == '\n') {
+            if (c == ' ' || c == '\t' || c == ';' || c == '\\' || c == '"' || c == '\r' || c == '\n') {
                 should_quote = true;
                 break;
             }
@@ -1486,6 +1489,29 @@ ConfigSubstitutions ConfigBase::load_from_gcode_file(const std::string &file, Fo
     return std::move(substitutions_ctxt.substitutions);
 }
 
+std::optional<PluginCapabilityRef> parse_capability_ref(const std::string& value)
+{
+    // Capability references are stored as "<plugin_name>;<cloud_uuid>;<capability_name>".
+    // The cloud UUID is empty for local plugins (two consecutive semicolons).
+    if (value.empty())
+        return std::nullopt;
+
+    const size_t first = value.find(';');
+    if (first == std::string::npos)
+        return std::nullopt;
+    const size_t second = value.find(';', first + 1);
+    if (second == std::string::npos)
+        return std::nullopt;
+
+    std::string name            = value.substr(0, first);
+    std::string uuid            = value.substr(first + 1, second - first - 1);
+    std::string capability_name = value.substr(second + 1);
+    if (name.empty() || capability_name.empty())
+        return std::nullopt;
+
+    return PluginCapabilityRef{ std::move(name), std::move(capability_name), std::move(uuid) };
+}
+
 //BBS: add json support
 void ConfigBase::save_to_json(const std::string &file, const std::string &name, const std::string &from, const std::string &version) const
 {
@@ -1494,6 +1520,8 @@ void ConfigBase::save_to_json(const std::string &file, const std::string &name, 
     j[BBL_JSON_KEY_VERSION] = version;
     j[BBL_JSON_KEY_NAME] = name;
     j[BBL_JSON_KEY_FROM] = from;
+
+    std::vector<std::string> plugin_refs;
 
     //record all the key-values
     for (const std::string &opt_key : this->keys())
@@ -1520,6 +1548,28 @@ void ConfigBase::save_to_json(const std::string &file, const std::string &name, 
             json j_array(string_values);
             j[opt_key] = j_array;
         }
+
+        this->save_plugin_collection(opt_key, opt, plugin_refs);
+    }
+
+    // Lazily serialize the top-level "plugins" manifest: the individual plugin-backed options keep
+    // bare capability names, and the full "name;uuid;capability" references are derived here from
+    // those options via the registered resolver. Only do this when a resolver is available (GUI);
+    // without one (CLI/headless) leave whatever the "plugins" option already serialized above, so a
+    // round-trip never drops the manifest. De-duplicate while preserving order and skip empties.
+    if (resolve_capability_fn) {
+        std::vector<std::string> unique_refs;
+        unique_refs.reserve(plugin_refs.size());
+        for (std::string& ref : plugin_refs) {
+            if (ref.empty())
+                continue;
+            if (std::find(unique_refs.begin(), unique_refs.end(), ref) == unique_refs.end())
+                unique_refs.emplace_back(std::move(ref));
+        }
+        if (unique_refs.empty())
+            j.erase("plugins");
+        else
+            j["plugins"] = unique_refs;
     }
 
     boost::nowide::ofstream c;
@@ -1551,6 +1601,33 @@ void ConfigBase::null_nullables()
         if (opt->nullable())
         	opt->deserialize("nil", ForwardCompatibilitySubstitutionRule::Disable);
     }
+}
+
+void ConfigBase::save_plugin_collection(const std::string& opt_key, const ConfigOption* opt, std::vector<std::string>& plugin_refs) const {
+    // Full plugin capability references ("name;uuid;capability") can only be derived through the
+    // resolver registered by the GUI once plugins are loaded. In non-GUI/headless contexts (e.g.
+    // the CLI) it stays null, so skip silently rather than calling an empty std::function.
+    if (!resolve_capability_fn)
+        return;
+
+    // Resolve a single bare capability value into its full reference and append it, skipping
+    // unset values and capabilities that could not be resolved (resolver returns "").
+    const auto append_ref = [&plugin_refs](const std::string& capability_value, const std::string& type) {
+        if (capability_value.empty())
+            return;
+        std::string ref = resolve_capability_fn(capability_value, type);
+        if (!ref.empty())
+            plugin_refs.emplace_back(std::move(ref));
+    };
+
+    if (opt_key == "post_process_plugin") {
+        const ConfigOptionVectorBase* vec = static_cast<const ConfigOptionVectorBase*>(opt);
+        for (const std::string& val : vec->vserialize())
+            append_ref(val, "post-processing");
+    } else if (opt_key == "printer_agent") {
+        append_ref((dynamic_cast<const ConfigOptionString *>(opt))->value, "printer-connection");
+    }
+    // Extend for other plugin-backed settings as needed.
 }
 
 DynamicConfig::DynamicConfig(const ConfigBase& rhs, const t_config_option_keys& keys)

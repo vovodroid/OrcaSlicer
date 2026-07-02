@@ -5,9 +5,13 @@
 #include "libslic3r/LocalesUtils.hpp"
 
 #include <cereal/types/polymorphic.hpp>
-#include <cereal/types/string.hpp> 
-#include <cereal/types/vector.hpp> 
+#include <cereal/types/string.hpp>
+#include <cereal/types/vector.hpp>
 #include <cereal/archives/binary.hpp>
+
+#include <boost/filesystem.hpp>
+#include <boost/nowide/fstream.hpp>
+#include <nlohmann/json.hpp>
 
 using namespace Slic3r;
 
@@ -401,3 +405,81 @@ SCENARIO("update_diff_values_to_child_config tolerates legacy machine-limit vect
 //         }
 //     }
 // }
+
+TEST_CASE("save_to_json round-trips plugin capability references as strings", "[Config][plugins]") {
+    namespace fs = boost::filesystem;
+    const fs::path tmp = fs::temp_directory_path() / fs::unique_path("orca_plugins_%%%%-%%%%.json");
+    const std::vector<std::string> refs = {
+        "local_plugin;;post_process",
+        "cloud_plugin;550e8400-e29b-41d4-a716-446655440000;post_process"
+    };
+
+    std::unique_ptr<DynamicPrintConfig> config_ptr(
+        DynamicPrintConfig::new_from_defaults_keys({"post_process_plugin"}));
+    DynamicPrintConfig config = std::move(*config_ptr);
+    config.option<ConfigOptionStrings>("post_process_plugin", true)->values = refs;
+    config.save_to_json(tmp.string(), "test_preset", "User", "1.0.0.0");
+
+    nlohmann::json j;
+    {
+        boost::nowide::ifstream ifs(tmp.string());
+        ifs >> j;
+    }
+    REQUIRE(j["post_process_plugin"] == nlohmann::json(refs));
+    CHECK_FALSE(j.contains("plugins"));
+
+    DynamicPrintConfig reloaded = DynamicPrintConfig::full_print_config();
+    ConfigSubstitutionContext substitutions(ForwardCompatibilitySubstitutionRule::Disable);
+    std::map<std::string, std::string> key_values;
+    std::string reason;
+    REQUIRE(reloaded.load_from_json(tmp.string(), substitutions, true, key_values, reason) == 0);
+    CHECK(reason.empty());
+    CHECK(reloaded.option<ConfigOptionStrings>("post_process_plugin")->values == refs);
+
+    fs::remove(tmp);
+}
+
+TEST_CASE("plugin capability references survive string-map serialization", "[Config][plugins]") {
+    const std::vector<std::string> refs = {
+        "master_plugin;;header-stamp",
+        "Sample Plugin;1f998ea9-0183-4cc5-957f-4eef659ba4e6;G-code Benchmark (.py)"
+    };
+
+    DynamicPrintConfig original = DynamicPrintConfig::full_print_config();
+    original.option<ConfigOptionStrings>("post_process_plugin", true)->values = refs;
+
+    std::map<std::string, std::string> serialized{
+        {"post_process_plugin", original.option<ConfigOptionStrings>("post_process_plugin")->serialize()}
+    };
+    CHECK(serialized["post_process_plugin"].find("\"master_plugin;;header-stamp\"") != std::string::npos);
+
+    DynamicPrintConfig reloaded = DynamicPrintConfig::full_print_config();
+    reloaded.load_string_map(serialized, ForwardCompatibilitySubstitutionRule::Disable);
+
+    CHECK(reloaded.option<ConfigOptionStrings>("post_process_plugin")->values == refs);
+}
+
+TEST_CASE("parse_capability_ref parses local and cloud references", "[Config][plugin]") {
+    const auto local = Slic3r::parse_capability_ref("local_plugin;;post_process");
+    REQUIRE(local.has_value());
+    CHECK(local->name == "local_plugin");
+    CHECK(local->capability_name == "post_process");
+    CHECK(local->uuid.empty());
+
+    const auto cloud = Slic3r::parse_capability_ref(
+        "cloud_plugin;550e8400-e29b-41d4-a716-446655440000;post_process");
+    REQUIRE(cloud.has_value());
+    CHECK(cloud->name == "cloud_plugin");
+    CHECK(cloud->capability_name == "post_process");
+    CHECK(cloud->uuid == "550e8400-e29b-41d4-a716-446655440000");
+}
+
+TEST_CASE("parse_capability_ref rejects malformed input", "[Config][plugin]") {
+    CHECK_FALSE(Slic3r::parse_capability_ref("").has_value());
+    CHECK_FALSE(Slic3r::parse_capability_ref("plugin").has_value());
+    CHECK_FALSE(Slic3r::parse_capability_ref("plugin;uuid").has_value());
+    CHECK_FALSE(Slic3r::parse_capability_ref(";;capability").has_value());
+    CHECK_FALSE(Slic3r::parse_capability_ref(";uuid;capability").has_value());
+    CHECK_FALSE(Slic3r::parse_capability_ref("plugin;;").has_value());
+    CHECK_FALSE(Slic3r::parse_capability_ref("plugin;uuid;").has_value());
+}

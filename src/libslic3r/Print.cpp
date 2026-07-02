@@ -123,6 +123,9 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
         "printing_by_object_gcode",
         "filament_end_gcode",
         "post_process",
+        "post_process_plugin",
+        // "plugins" is the manifest backing post_process_plugin; like it, it only affects G-code export.
+        "plugins",
         "extruder_clearance_height_to_rod",
         "extruder_clearance_height_to_lid",
         "extruder_clearance_radius",

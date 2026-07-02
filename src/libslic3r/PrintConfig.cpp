@@ -828,6 +828,7 @@ void PrintConfigDef::init_common_params()
     def->tooltip = L("Select the network agent implementation for printer communication.");
     def->mode = comAdvanced;
     def->cli = ConfigOptionDef::nocli;
+    def->support_plugin = true;
     def->set_default_value(new ConfigOptionString(""));
 
     def = this->add("print_host", coString);
@@ -5102,7 +5103,25 @@ void PrintConfigDef::init_fff_params()
     def->height = 5;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionString());
-    
+
+    def = this->add("plugins", coStrings);
+    def->label = L("Plugins Used");
+    def->tooltip = L("Plugin capabilities referenced by this preset, stored as name;uuid;capability.");
+    def->mode = comDevelop;
+    def->set_default_value(new ConfigOptionStrings());
+
+    def = this->add("post_process_plugin", coStrings);
+    def->label = L("Post-processing Plugin");
+    def->tooltip = L("Select a Python plugin to process the output G-code. "
+                   "Plugins are loaded from the orca_plugins directory in your data folder. "
+                   "The plugin will receive the G-code file path and can modify it in place.");
+    def->gui_type = ConfigOptionDef::GUIType::plugin_picker;
+    def->plugin_type = "post-processing";
+    def->support_plugin = true;
+    def->full_width = true;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionStrings());
+
     def = this->add("printer_model", coString);
     def->label = L("Printer type");
     def->tooltip = L("Type of the printer.");

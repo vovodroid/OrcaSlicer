@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -2226,6 +2227,7 @@ public:
         legend,
         // Vector value, but edited as a single string.
         one_string,
+        plugin_picker,
     };
 
 	// Identifier of this option. It is stored here so that it is accessible through the by_serialization_key_ordinal map.
@@ -2442,6 +2444,10 @@ public:
     // "serialized" - vector valued option is entered in a single edit field. Values are separated by a semicolon.
     // "show_value" - even if enum_values / enum_labels are set, still display the value, not the enum label.
     std::string                         gui_flags;
+    // Optional plugin type used by GUIType::plugin_picker for filtering plugins.
+    std::string                         plugin_type;
+    // Indicate whether the option support plugin. 
+    bool                                support_plugin { false };
     // Label of the GUI input field.
     // In case the GUI input fields are grouped in some views, the label defines a short label of a grouped value,
     // while full_label contains a label of a stand-alone field.
@@ -2759,10 +2765,13 @@ public:
     void null_nullables();
 
     static size_t load_from_gcode_string_legacy(ConfigBase& config, const char* str, ConfigSubstitutionContext& substitutions);
-
+    static void set_resolve_capability_fn(std::function<std::string(std::string, std::string)> fn) { resolve_capability_fn = fn; }
 private:
     // Set a configuration value from a string.
     bool set_deserialize_raw(const t_config_option_key& opt_key_src, const std::string& value, ConfigSubstitutionContext& substitutions, bool append);
+    void save_plugin_collection(const std::string& opt_key, const ConfigOption* opt, std::vector<std::string>& plugin_refs) const;
+
+    static std::function<std::string(std::string, std::string)> resolve_capability_fn;
 };
 
 // Configuration store with dynamic number of configuration values.
@@ -2998,6 +3007,15 @@ protected:
     /// Set all statically defined config options to their defaults defined by this->def().
     void set_defaults();
 };
+
+struct PluginCapabilityRef
+{
+    std::string name;
+    std::string capability_name;
+    std::string uuid;
+};
+
+std::optional<PluginCapabilityRef> parse_capability_ref(const std::string& value);
 
 }
 

@@ -161,6 +161,12 @@ modules:
       - /include
       - "*.a"
       - "*.la"
+      # CPython headers: useless at runtime (no compiler in the runtime
+      # sandbox, so C-extension source builds can't happen anyway), and a
+      # few MB of bloat. /app/libpython is installed by this module, so the
+      # entry must live in THIS module's cleanup (module-level cleanup only
+      # matches files the module itself installed).
+      - /libpython/include
 
     sources:
       # OrcaSlicer deps/ directory (avoids copying .git from worktree)

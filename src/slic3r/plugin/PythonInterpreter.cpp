@@ -1,0 +1,996 @@
+#include "PythonInterpreter.hpp"
+#include "GeneratedConfig.hpp"
+#include "libslic3r/Utils.hpp"
+#include "PluginAuditManager.hpp"
+#include <boost/filesystem/path.hpp>
+#include <pytypedefs.h>
+#include "PythonFileUtils.hpp"
+
+#include <pybind11/embed.h>
+
+#include <boost/log/trivial.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/dll/runtime_symbol_info.hpp>
+#include <boost/nowide/convert.hpp>
+#include <cstring>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+#include <vector>
+
+namespace Slic3r {
+
+void log_python_exception_keep(pybind11::error_already_set& err)
+{
+    // The GIL may already be released here: the macro's gil_scoped_acquire is a
+    // local destroyed by stack unwinding before this catch runs. Touching Python
+    // state below needs the GIL. PyGILState_Ensure is reentrant — harmless if held.
+    PythonGILState gil;
+
+    // Non-destructive: print the traceback to sys.stderr (tee'd to the session log)
+    // WITHOUT consuming err, so the caller can rethrow it intact. For example, downstream C++
+    // catchers can still read err.what() for the user-facing dialog. We must NOT use
+    // restore()+PyErr_Print() here as those empty err.
+    try {
+        namespace py    = pybind11;
+        py::module_ tb  = py::module_::import("traceback");
+        py::module_ sys = py::module_::import("sys");
+        tb.attr("print_exception")(err.type(), err.value(), err.trace(), py::none(), sys.attr("stderr"));
+    } catch (...) {
+        // Fallback: at least get the formatted message out. err.what() includes the
+        // traceback in recent pybind11 and does not consume err.
+        try {
+            pybind11::module_::import("sys").attr("stderr").attr("write")(std::string(err.what()) + "\n");
+        } catch (...) {
+        }
+    }
+}
+
+namespace {
+
+std::string format_python_error(PyObject* ptype, PyObject* pvalue, PyObject* ptraceback)
+{
+    std::string result;
+
+    if (ptype) {
+        PyObject* type_name = PyObject_GetAttrString(ptype, "__name__");
+        if (type_name) {
+            const char* s = PyUnicode_AsUTF8(type_name);
+            if (s) result += s;
+            Py_DECREF(type_name);
+        }
+    }
+
+    if (pvalue) {
+        if (!result.empty()) result += ": ";
+        PyObject* s = PyObject_Str(pvalue);
+        if (s) {
+            const char* cstr = PyUnicode_AsUTF8(s);
+            if (cstr) result += cstr;
+            Py_DECREF(s);
+        }
+    }
+
+    if (ptraceback) {
+        result += "\nTraceback (most recent call last):";
+        PyTracebackObject* tb = reinterpret_cast<PyTracebackObject*>(ptraceback);
+        while (tb) {
+            PyFrameObject* frame = tb->tb_frame;
+            int line = PyFrame_GetLineNumber(frame);
+            PyCodeObject* code = PyFrame_GetCode(frame); // returns a NEW strong reference; must be released
+            const char* filename = code ? PyUnicode_AsUTF8(code->co_filename) : nullptr;
+            const char* funcname = code ? PyUnicode_AsUTF8(code->co_name) : nullptr;
+            result += "\n  File \"" + std::string(filename ? filename : "?") +
+                      "\", line " + std::to_string(line) +
+                      ", in " + std::string(funcname ? funcname : "?");
+            Py_XDECREF(code);
+            tb = tb->tb_next;
+        }
+    }
+
+    return result;
+}
+
+#ifdef _WIN32
+constexpr const char* PYTHON_DLL       = "python312.dll";
+constexpr const char* PYTHON_DEBUG_DLL = "python312_d.dll";
+#else
+constexpr const char* PYTHON_STDLIB_DIR = "python3.12";
+constexpr const char* PYTHON_EXECUTABLE = "python3.12";
+#endif
+
+std::string executable_name(const char* base)
+{
+#ifdef _WIN32
+    return std::string(base) + ".exe";
+#else
+    return base;
+#endif
+}
+
+bool add_sys_path_entry(const boost::filesystem::path& path, std::string& error)
+{
+    PyObject* sys_path = PySys_GetObject("path");
+    if (!sys_path || !PyList_Check(sys_path)) {
+        error = "Python sys.path is not available";
+        return false;
+    }
+
+    const std::string path_str = path.string();
+    PyObjectPtr py_path(PyUnicode_DecodeFSDefault(path_str.c_str()));
+    if (!py_path) {
+        error = "Failed to decode path for Python sys.path: " + path_str;
+        PyErr_Clear();
+        return false;
+    }
+
+    const int contains = PySequence_Contains(sys_path, py_path.get());
+    if (contains == 1)
+        return true;
+    if (contains < 0)
+        PyErr_Clear();
+
+    if (PyList_Insert(sys_path, 0, py_path.get()) != 0) {
+        error = "Failed to add path to Python sys.path: " + path_str;
+        PyErr_Clear();
+        return false;
+    }
+
+    return true;
+}
+
+void log_python_stream(PyObject* sys, const char* name)
+{
+    PyObject* stream = PyObject_GetAttrString(sys, name);
+    if (!stream) {
+        PyErr_Clear();
+        BOOST_LOG_TRIVIAL(info) << "Python shutdown: sys." << name << " is not set";
+        return;
+    }
+
+    PyObject* original        = nullptr;
+    std::string original_name = std::string("__") + name + "__";
+    original                  = PyObject_GetAttrString(sys, original_name.c_str());
+    if (!original)
+        PyErr_Clear();
+
+    BOOST_LOG_TRIVIAL(info) << "Python shutdown: sys." << name << " type=" << Py_TYPE(stream)->tp_name << " ptr=" << stream
+                            << " original_ptr=" << original << " is_original=" << (stream == original);
+
+    Py_XDECREF(original);
+    Py_DECREF(stream);
+}
+
+void restore_python_stream(PyObject* sys, const char* name)
+{
+    std::string original_name = std::string("__") + name + "__";
+    PyObject* original        = PyObject_GetAttrString(sys, original_name.c_str());
+    if (!original) {
+        PyErr_Clear();
+        original = Py_NewRef(Py_None);
+    }
+
+    if (PyObject_SetAttrString(sys, name, original) < 0) {
+        PyErr_Clear();
+        BOOST_LOG_TRIVIAL(warning) << "Python shutdown: failed to restore sys." << name;
+    } else {
+        BOOST_LOG_TRIVIAL(info) << "Python shutdown: restored sys." << name << " to type=" << Py_TYPE(original)->tp_name
+                                << " ptr=" << original;
+    }
+
+    Py_DECREF(original);
+}
+
+// Tee Python sys.stderr to <data_dir>/log/python_*.log so plugin errors are
+// persisted. Uncaught exceptions in plugin-spawned threads never cross the
+// pybind11 boundary back into C++ — CPython's default threading.excepthook
+// prints them to sys.stderr and lets the thread die — so capturing stderr is
+// the one place all of them can be observed.
+void install_python_stderr_redirect()
+{
+    // Mirror the session filename convention from GUI_App: python_<weekday>_<mon>_<day>_<HH>_<MM>_<SS>_<pid>.log
+    std::time_t t = std::time(nullptr);
+    std::tm* now  = std::localtime(&t);
+    std::ostringstream name;
+    name << std::put_time(now, "python_%a_%b_%d_%H_%M_%S_") << get_current_pid() << ".log";
+    const std::string log_path = (boost::filesystem::path(data_dir()) / "log" / name.str()).generic_string();
+
+    const std::string redirect_script =
+        "import io, os, sys, threading\n"
+        "_ORCA_PYTHON_LOG = \"" + log_path + "\"\n"
+        + std::string(R"REDIRECT_SCRIPT(
+class _OrcaTeeStderr(io.TextIOBase):
+    def __init__(self, original, path):
+        self._original = original
+        self._path = path
+        self._lock = threading.Lock()
+    def writable(self):
+        return True
+    def write(self, s):
+        try:
+            if self._original is not None:
+                self._original.write(s)
+        except Exception:
+            pass
+        try:
+            with self._lock, open(self._path, "a", encoding="utf-8", errors="replace") as f:
+                f.write(s)
+        except Exception:
+            pass
+        return len(s)
+    def flush(self):
+        try:
+            if self._original is not None:
+                self._original.flush()
+        except Exception:
+            pass
+
+os.makedirs(os.path.dirname(_ORCA_PYTHON_LOG), exist_ok=True)
+sys.stderr = _OrcaTeeStderr(sys.__stderr__, _ORCA_PYTHON_LOG)
+del _OrcaTeeStderr
+)REDIRECT_SCRIPT");
+
+    if (PyRun_SimpleString(redirect_script.c_str()) != 0) {
+        PyErr_Clear();
+        BOOST_LOG_TRIVIAL(warning) << "Failed to install Python stderr redirect to " << log_path;
+    } else {
+        BOOST_LOG_TRIVIAL(info) << "Python stderr redirected to " << log_path;
+    }
+}
+
+void log_and_restore_python_stdio()
+{
+    PyObject* sys = PyImport_ImportModule("sys");
+    if (!sys) {
+        PyErr_Clear();
+        BOOST_LOG_TRIVIAL(warning) << "Python shutdown: failed to import sys for stdio diagnostics";
+        return;
+    }
+
+    log_python_stream(sys, "stdout");
+    log_python_stream(sys, "stderr");
+    restore_python_stream(sys, "stdout");
+    restore_python_stream(sys, "stderr");
+
+    Py_DECREF(sys);
+}
+
+bool valid_python_home(const boost::filesystem::path& candidate)
+{
+#ifdef _WIN32
+    return boost::filesystem::exists(candidate / "Lib" / "encodings") &&
+           (boost::filesystem::exists(candidate / PYTHON_DLL) || boost::filesystem::exists(candidate / PYTHON_DEBUG_DLL));
+#else
+    return boost::filesystem::exists(candidate / "lib" / PYTHON_STDLIB_DIR / "encodings");
+#endif
+}
+
+boost::filesystem::path find_bundled_python_home()
+{
+    namespace fs = boost::filesystem;
+
+#ifdef __APPLE__
+    fs::path bundle_python = fs::path(resources_dir()).parent_path() / "MacOS" / "python";
+    if (valid_python_home(bundle_python))
+        return bundle_python;
+#elif defined(_WIN32)
+    fs::path exe_python = boost::dll::program_location().parent_path() / "python";
+    if (valid_python_home(exe_python))
+        return exe_python;
+#else
+    fs::path linux_python = fs::path(resources_dir()).parent_path() / "lib" / "python";
+    if (valid_python_home(linux_python))
+        return linux_python;
+#endif
+
+    fs::path configured_python = ORCA_BUNDLED_PYTHON_ROOT;
+    if (!configured_python.empty() && valid_python_home(configured_python))
+        return configured_python;
+
+    const char* prefix_path = std::getenv("CMAKE_PREFIX_PATH");
+    if (prefix_path && std::strlen(prefix_path) > 0) {
+        fs::path libpython = fs::path(prefix_path) / "libpython";
+        if (valid_python_home(libpython))
+            return libpython;
+    }
+
+    fs::path res_python = fs::path(resources_dir()) / "python";
+    if (valid_python_home(res_python))
+        return res_python;
+
+#ifndef _WIN32
+    fs::path data_python = fs::path(data_dir()) / "python";
+    if (valid_python_home(data_python))
+        return data_python;
+#endif
+
+    return {};
+}
+
+boost::filesystem::path find_python_executable(const boost::filesystem::path& python_home)
+{
+    namespace fs = boost::filesystem;
+
+#ifdef _WIN32
+    const std::vector<fs::path> candidates = {
+        python_home / "python.exe",
+        python_home / "python_d.exe",
+    };
+#else
+    const std::vector<fs::path> candidates = {
+        python_home / "bin" / PYTHON_EXECUTABLE,
+        python_home / "bin" / "python3",
+        python_home / "bin" / "python",
+    };
+#endif
+
+    for (const fs::path& candidate : candidates) {
+        if (fs::exists(candidate) && fs::is_regular_file(candidate))
+            return candidate;
+    }
+
+    return {};
+}
+
+} // namespace
+
+std::string PythonInterpreter::python_abi_tag()
+{
+    return std::string("cp") + std::to_string(PY_MAJOR_VERSION) + std::to_string(PY_MINOR_VERSION);
+}
+
+PythonInterpreter& PythonInterpreter::instance()
+{
+    static PythonInterpreter inst;
+    return inst;
+}
+
+std::string PythonInterpreter::shared_packages_dir()
+{
+    return (boost::filesystem::path(data_dir()) / "python" / "packages" / PythonInterpreter::python_abi_tag()).string();
+}
+
+std::string PythonInterpreter::bundled_python_executable()
+{
+    const boost::filesystem::path python_home = find_bundled_python_home();
+    if (python_home.empty())
+        return {};
+
+    const boost::filesystem::path executable = find_python_executable(python_home);
+    return executable.empty() ? std::string{} : executable.string();
+}
+
+std::string PythonInterpreter::bundled_uv_path()
+{
+    namespace fs = boost::filesystem;
+
+    const fs::path configured_uv = ORCA_BUNDLED_UV_EXECUTABLE;
+    if (!configured_uv.empty() && fs::exists(configured_uv) && fs::is_regular_file(configured_uv))
+        return configured_uv.string();
+
+    // <binary dir>/tools/uv covers the macOS bundle (Contents/MacOS/tools/uv)
+    // and build-tree runs; <resources>/tools/uv covers the install() and
+    // AppImage layouts.
+    const std::string uv_exe               = executable_name("uv");
+    const std::vector<fs::path> candidates = {
+        fs::path(resources_dir()) / "tools" / "uv" / uv_exe,
+        boost::dll::program_location().parent_path() / "tools" / "uv" / uv_exe,
+    };
+
+    for (const fs::path& candidate : candidates) {
+        if (fs::exists(candidate) && fs::is_regular_file(candidate))
+            return candidate.string();
+    }
+
+    return {};
+}
+
+bool PythonInterpreter::initialize()
+{
+    if (m_initialized) {
+        return true;
+    }
+
+    m_last_error.clear();
+
+    try {
+        // Set Python home to the bundled Python installation
+        // This is critical for finding the standard library (encodings module, etc.)
+
+        namespace fs = boost::filesystem;
+        std::string python_home;
+        const auto valid_python_home = [](const fs::path& candidate) {
+#ifdef _WIN32
+            return fs::exists(candidate / "Lib" / "encodings") &&
+                   (fs::exists(candidate / PYTHON_DLL) || fs::exists(candidate / PYTHON_DEBUG_DLL));
+#else
+            return fs::exists(candidate / "lib" / PYTHON_STDLIB_DIR / "encodings");
+#endif
+        };
+
+// Determine Python home based on application structure
+// Python is bundled at different locations depending on platform and build type
+
+// Strategy 1: Platform-specific bundled locations (highest priority)
+#ifdef __APPLE__
+        // macOS app bundle: OrcaSlicer.app/Contents/MacOS/python
+        // (resources_dir is Contents/Resources, so go up and into MacOS)
+        fs::path bundle_python = fs::path(resources_dir()).parent_path() / "MacOS" / "python";
+        if (valid_python_home(bundle_python)) {
+            python_home = bundle_python.string();
+            BOOST_LOG_TRIVIAL(info) << "Found Python in macOS app bundle: " << python_home;
+        }
+#elif defined(_WIN32)
+        fs::path exe_python = boost::dll::program_location().parent_path() / "python";
+        if (valid_python_home(exe_python)) {
+            python_home = exe_python.string();
+            BOOST_LOG_TRIVIAL(info) << "Found Python next to Windows executable: " << python_home;
+        }
+#else
+        // Linux: typically in ../lib or ../share relative to binary
+        fs::path linux_python = fs::path(resources_dir()).parent_path() / "lib" / "python";
+        if (valid_python_home(linux_python)) {
+            python_home = linux_python.string();
+            BOOST_LOG_TRIVIAL(info) << "Found Python in Linux install: " << python_home;
+        }
+#endif
+
+        // Strategy 2: Configured development dependency directory.
+        if (python_home.empty()) {
+            fs::path configured_python = ORCA_BUNDLED_PYTHON_ROOT;
+            if (!configured_python.empty() && valid_python_home(configured_python)) {
+                python_home = configured_python.string();
+                BOOST_LOG_TRIVIAL(info) << "Found Python in configured bundled path: " << python_home;
+            }
+        }
+
+        // Strategy 3: Development build directory from runtime environment.
+        if (python_home.empty()) {
+            const char* prefix_path = std::getenv("CMAKE_PREFIX_PATH");
+            if (prefix_path && std::strlen(prefix_path) > 0) {
+                fs::path libpython = fs::path(prefix_path) / "libpython";
+                if (valid_python_home(libpython)) {
+                    python_home = libpython.string();
+                    BOOST_LOG_TRIVIAL(info) << "Found Python in CMAKE_PREFIX_PATH: " << python_home;
+                }
+            }
+        }
+
+        // Strategy 3: Check resources directory (alternate bundling location)
+        if (python_home.empty()) {
+            fs::path res_python = fs::path(resources_dir()) / "python";
+            if (valid_python_home(res_python)) {
+                python_home = res_python.string();
+                BOOST_LOG_TRIVIAL(info) << "Found Python in resources directory: " << python_home;
+            }
+        }
+
+// Strategy 4: Check data_dir (user configuration directory)
+#ifndef _WIN32
+        if (python_home.empty()) {
+            fs::path data_python = fs::path(data_dir()) / "python";
+            if (valid_python_home(data_python)) {
+                python_home = data_python.string();
+                BOOST_LOG_TRIVIAL(info) << "Found Python in data directory: " << python_home;
+            }
+        }
+#endif
+
+        if (python_home.empty()) {
+            m_last_error = "Could not locate bundled Python installation";
+            BOOST_LOG_TRIVIAL(error) << "Could not locate bundled Python installation";
+            BOOST_LOG_TRIVIAL(error) << "Configured bundled Python root: " << ORCA_BUNDLED_PYTHON_ROOT;
+#ifdef _WIN32
+            BOOST_LOG_TRIVIAL(error) << "Searched next to executable: "
+                                     << (boost::dll::program_location().parent_path() / "python").string();
+#endif
+            BOOST_LOG_TRIVIAL(error) << "Searched in resources_dir: " << resources_dir();
+#ifndef _WIN32
+            BOOST_LOG_TRIVIAL(error) << "Searched in data_dir: " << data_dir();
+#endif
+            BOOST_LOG_TRIVIAL(error) << "CMAKE_PREFIX_PATH: "
+                                     << (std::getenv("CMAKE_PREFIX_PATH") ? std::getenv("CMAKE_PREFIX_PATH") : "not set");
+            return false;
+        }
+
+// Verify Python standard library directory exists
+#ifdef _WIN32
+        fs::path python_lib = fs::path(python_home) / "Lib";
+#else
+        fs::path python_lib = fs::path(python_home) / "lib" / PYTHON_STDLIB_DIR;
+#endif
+        if (!fs::exists(python_lib)) {
+            m_last_error = "Python standard library directory not found at: " + python_lib.string();
+            BOOST_LOG_TRIVIAL(error) << "Python standard library directory not found at: " << python_lib.string();
+            BOOST_LOG_TRIVIAL(error) << "Please build Python dependencies or check installation";
+            return false;
+        }
+
+        BOOST_LOG_TRIVIAL(info) << "Python standard library found at: " << python_lib.string();
+
+#ifdef _WIN32
+        fs::path python_dll = fs::exists(fs::path(python_home) / PYTHON_DLL) ? fs::path(python_home) / PYTHON_DLL :
+                                                                               fs::path(python_home) / PYTHON_DEBUG_DLL;
+        if (!fs::exists(python_dll)) {
+            m_last_error = "Python DLL not found in: " + python_home;
+            BOOST_LOG_TRIVIAL(error) << "Python DLL not found in: " << python_home;
+            return false;
+        }
+        BOOST_LOG_TRIVIAL(info) << "Python DLL found at: " << python_dll.string();
+        if (!fs::exists(fs::path(python_home) / "DLLs")) {
+            BOOST_LOG_TRIVIAL(warning) << "Python DLLs directory not found at: " << (fs::path(python_home) / "DLLs").string();
+        }
+#endif
+
+        // Log the exact paths being used for debugging
+        BOOST_LOG_TRIVIAL(info) << "Setting Python home to: " << python_home;
+        BOOST_LOG_TRIVIAL(info) << "Python 3.12 stdlib path: " << python_lib.string();
+
+        // Verify encodings module exists
+        fs::path encodings_path = python_lib / "encodings";
+        if (fs::exists(encodings_path)) {
+            BOOST_LOG_TRIVIAL(info) << "Encodings module found at: " << encodings_path.string();
+        } else {
+            BOOST_LOG_TRIVIAL(warning) << "Encodings module NOT found at: " << encodings_path.string();
+        }
+
+        BOOST_LOG_TRIVIAL(info) << "Using Python 3.12 PyConfig initialization API";
+
+        // Set Python home - this is the prefix where Python libraries are located
+        PyConfig config;
+        PyConfig_InitPythonConfig(&config);
+
+        BOOST_LOG_TRIVIAL(debug) << "Calling PyConfig_SetBytesString with home=" << python_home;
+        PyStatus status = PyConfig_SetBytesString(&config, &config.home, python_home.c_str());
+        if (PyStatus_Exception(status)) {
+            m_last_error = status.err_msg ? status.err_msg : "Failed to set Python home";
+            BOOST_LOG_TRIVIAL(error) << "Failed to set Python home to: " << python_home << ": " << m_last_error;
+            PyConfig_Clear(&config);
+            return false;
+        }
+        BOOST_LOG_TRIVIAL(debug) << "Python home set successfully";
+
+        // Set program name
+        status = PyConfig_SetBytesString(&config, &config.program_name, "OrcaSlicer");
+        if (PyStatus_Exception(status)) {
+            m_last_error = status.err_msg ? status.err_msg : "Failed to set program name";
+            BOOST_LOG_TRIVIAL(error) << "Failed to set program name: " << m_last_error;
+            PyConfig_Clear(&config);
+            return false;
+        }
+        BOOST_LOG_TRIVIAL(debug) << "Program name set successfully";
+
+        // Use pybind11's scoped_interpreter which properly initializes
+        // pybind11 internals for multi-threaded use — raw Py_InitializeFromConfig
+        // does not set up thread state tracking that pybind11 requires.
+        BOOST_LOG_TRIVIAL(debug) << "Creating py::scoped_interpreter with PyConfig...";
+        try {
+            m_interpreter = std::make_unique<pybind11::scoped_interpreter>(&config);
+        } catch (const std::exception& ex) {
+            m_last_error = std::string("Python initialization failed: ") + ex.what();
+            BOOST_LOG_TRIVIAL(error) << m_last_error;
+            PyConfig_Clear(&config);
+            return false;
+        }
+        // PyConfig is cleared by pybind11's initialize_interpreter() internally.
+        BOOST_LOG_TRIVIAL(debug) << "py::scoped_interpreter initialized successfully";
+
+        if (!Py_IsInitialized()) {
+            m_last_error = "Python interpreter not initialized";
+            BOOST_LOG_TRIVIAL(error) << "Python interpreter not initialized";
+            return false;
+        }
+
+        // Log Python paths for debugging
+        PyObject* sys = PyImport_ImportModule("sys");
+        if (sys) {
+            PyObject* path = PyObject_GetAttrString(sys, "path");
+            if (path) {
+                PyObject* path_str = PyObject_Str(path);
+                if (path_str) {
+                    const char* path_cstr = PyUnicode_AsUTF8(path_str);
+                    if (path_cstr) {
+                        BOOST_LOG_TRIVIAL(debug) << "Python sys.path: " << path_cstr;
+                    }
+                    Py_DECREF(path_str);
+                }
+                Py_DECREF(path);
+            }
+            Py_DECREF(sys);
+        }
+
+        BOOST_LOG_TRIVIAL(info) << "Python " << Py_GetVersion() << " initialized successfully";
+
+        const fs::path shared_packages = shared_packages_dir();
+        boost::system::error_code ec;
+        fs::create_directories(shared_packages, ec);
+        if (ec) {
+            BOOST_LOG_TRIVIAL(warning) << "Failed to create Python shared package directory: " << shared_packages.string() << ": "
+                                       << ec.message();
+        } else {
+            std::string path_error;
+            if (add_sys_path_entry(shared_packages, path_error))
+                BOOST_LOG_TRIVIAL(info) << "Added Python shared package directory to sys.path: " << shared_packages.string();
+            else
+                BOOST_LOG_TRIVIAL(warning) << path_error;
+        }
+
+        const std::string uv_path = bundled_uv_path();
+        if (!uv_path.empty())
+            BOOST_LOG_TRIVIAL(info) << "Bundled uv executable found at: " << uv_path;
+        else
+            BOOST_LOG_TRIVIAL(info) << "Bundled uv executable not found";
+
+        // Install the CPython audit hook for plugin policy enforcement.
+        // This is defense-in-depth: it monitors file/subprocess/socket/ctypes
+        // access from plugin code.  It is NOT a full security sandbox.
+        PluginAuditManager::instance().install_hook();
+
+        // Persist Python stderr (plugin tracebacks, including uncaught
+        // background-thread exceptions) to <data_dir>/log/python_*.log.
+        install_python_stderr_redirect();
+
+        m_initialized = true;
+
+        // Release the GIL so other threads can acquire it via PyGILState_Ensure.
+        // Without this, calls from background threads will block trying to acquire the GIL.
+        m_main_thread_state = PyEval_SaveThread();
+        BOOST_LOG_TRIVIAL(debug) << "Main thread released Python GIL after initialization";
+        return true;
+
+    } catch (const std::exception& ex) {
+        m_last_error = std::string("Exception initializing Python: ") + ex.what();
+        BOOST_LOG_TRIVIAL(error) << "Exception initializing Python: " << ex.what();
+        return false;
+    }
+}
+
+PythonInterpreter::~PythonInterpreter() { shutdown(); }
+
+void PythonInterpreter::shutdown()
+{
+    if (!m_initialized)
+        return;
+
+    BOOST_LOG_TRIVIAL(info) << "Python interpreter shutdown enter";
+
+    // Reacquire the GIL using the saved thread state before finalizing.
+    if (m_main_thread_state) {
+        BOOST_LOG_TRIVIAL(debug) << "Restoring Python main thread state before shutdown";
+        PyEval_RestoreThread(m_main_thread_state);
+        m_main_thread_state = nullptr;
+    }
+
+    log_and_restore_python_stdio();
+
+    BOOST_LOG_TRIVIAL(info) << "Finalizing Python interpreter";
+    m_interpreter.reset();
+    BOOST_LOG_TRIVIAL(info) << "Python interpreter finalized";
+
+    m_initialized = false;
+}
+
+bool PythonInterpreter::add_sys_path(const std::string& path, std::string& error)
+{
+    if (!m_initialized) {
+        error = "Python interpreter not initialized";
+        return false;
+    }
+
+    PythonGILState gil;
+
+    PyObject* sys_path = PySys_GetObject("path");
+    if (!sys_path || !PyList_Check(sys_path)) {
+        error = "Python sys.path is not available";
+        return false;
+    }
+
+    PyObjectPtr py_path(PyUnicode_DecodeFSDefault(path.c_str()));
+    if (!py_path) {
+        error = "Failed to decode path for Python sys.path: " + path;
+        PyErr_Clear();
+        return false;
+    }
+
+    const int contains = PySequence_Contains(sys_path, py_path.get());
+    if (contains == 1)
+        return true;
+    if (contains < 0)
+        PyErr_Clear();
+
+    if (PyList_Insert(sys_path, 0, py_path.get()) != 0) {
+        error = "Failed to append path to Python sys.path: " + path;
+        PyErr_Clear();
+        return false;
+    }
+
+    return true;
+}
+
+bool PythonInterpreter::execute_string(const std::string& code, std::string& error)
+{
+    if (!m_initialized) {
+        error = "Python interpreter not initialized";
+        return false;
+    }
+
+    PythonGILState gil;
+
+    PyObject* main_module = PyImport_AddModule("__main__");
+    if (!main_module) {
+        error = "Failed to get __main__ module";
+        return false;
+    }
+
+    PyObject* global_dict = PyModule_GetDict(main_module);
+    PyObjectPtr result(PyRun_String(code.c_str(), Py_file_input, global_dict, global_dict));
+
+    if (!result) {
+        PyObject *ptype, *pvalue, *ptraceback;
+        PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+        error = format_python_error(ptype, pvalue, ptraceback);
+        Py_XDECREF(ptype);
+        Py_XDECREF(pvalue);
+        Py_XDECREF(ptraceback);
+        return false;
+    }
+
+    return true;
+}
+
+PyObject* PythonInterpreter::load_module_from_file(const std::string& file_path, std::string& error)
+{
+    if (!m_initialized) {
+        error = "Python interpreter not initialized";
+        return nullptr;
+    }
+
+    namespace fs = boost::filesystem;
+    fs::path path(file_path);
+
+    if (!fs::exists(path)) {
+        error = "File does not exist: " + file_path;
+        return nullptr;
+    }
+
+    PythonGILState gil;
+
+    // Add the directory to sys.path
+    fs::path dir_path       = path.parent_path();
+    std::string module_name = path.stem().string();
+
+    PyObjectPtr sys(PyImport_ImportModule("sys"));
+    if (!sys) {
+        error = "Failed to import sys module";
+        return nullptr;
+    }
+
+    PyObject* sys_path = PyObject_GetAttrString(sys.get(), "path");
+    if (!sys_path) {
+        error = "Failed to get sys.path";
+        return nullptr;
+    }
+
+    PyObjectPtr dir_str(PyUnicode_FromString(dir_path.string().c_str()));
+    if (!dir_str) {
+        Py_DECREF(sys_path);
+        error = "Failed to create directory string";
+        return nullptr;
+    }
+
+    if (PyList_Insert(sys_path, 0, dir_str.get()) < 0) {
+        Py_DECREF(sys_path);
+        error = "Failed to add directory to sys.path";
+        return nullptr;
+    }
+
+    Py_DECREF(sys_path);
+
+    // Ensure module is re-imported fresh by removing any cached instance.
+    if (PyObject* modules = PyImport_GetModuleDict()) {
+        if (PyDict_GetItemString(modules, module_name.c_str())) {
+            if (PyDict_DelItemString(modules, module_name.c_str()) != 0) {
+                PyErr_Clear();
+            }
+        }
+    }
+
+    // Import the module
+    PyObject* module = PyImport_ImportModule(module_name.c_str());
+    if (!module) {
+        PyObject *ptype, *pvalue, *ptraceback;
+        PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+        error = "Failed to import module: " + format_python_error(ptype, pvalue, ptraceback);
+        Py_XDECREF(ptype);
+        Py_XDECREF(pvalue);
+        Py_XDECREF(ptraceback);
+        return nullptr;
+    }
+
+    return module;
+}
+
+PyObject* PythonInterpreter::load_module_from_directory(const std::string& dir_path, const std::string& pkg_name, std::string& error)
+{
+    if (!m_initialized) {
+        error = "Python interpreter not initialized";
+        return nullptr;
+    }
+
+    namespace fs = boost::filesystem;
+    fs::path dir(dir_path);
+
+    if (!fs::exists(dir) || !fs::is_directory(dir)) {
+        error = "Directory does not exist: " + dir_path;
+        return nullptr;
+    }
+
+    PythonGILState gil;
+
+    PyObjectPtr sys(PyImport_ImportModule("sys"));
+    if (!sys) {
+        error = "Failed to import sys module";
+        return nullptr;
+    }
+
+    PyObject* sys_path = PyObject_GetAttrString(sys.get(), "path");
+    if (!sys_path) {
+        error = "Failed to get sys.path";
+        return nullptr;
+    }
+
+    PyObjectPtr dir_str(PyUnicode_FromString(dir.string().c_str()));
+    if (!dir_str) {
+        Py_DECREF(sys_path);
+        error = "Failed to create directory string";
+        return nullptr;
+    }
+
+    if (PyList_Insert(sys_path, 0, dir_str.get()) < 0) {
+        Py_DECREF(sys_path);
+        error = "Failed to add directory to sys.path";
+        return nullptr;
+    }
+
+    Py_DECREF(sys_path);
+
+    if (PyObject* modules = PyImport_GetModuleDict()) {
+        if (PyDict_GetItemString(modules, pkg_name.c_str())) {
+            if (PyDict_DelItemString(modules, pkg_name.c_str()) != 0) {
+                PyErr_Clear();
+            }
+        }
+    }
+
+    PyObject* module = PyImport_ImportModule(pkg_name.c_str());
+    if (!module) {
+        PyObject *ptype, *pvalue, *ptraceback;
+        PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+        error = "Failed to import module: " + format_python_error(ptype, pvalue, ptraceback);
+        Py_XDECREF(ptype);
+        Py_XDECREF(pvalue);
+        Py_XDECREF(ptraceback);
+        return nullptr;
+    }
+
+    return module;
+}
+
+PyObject* PythonInterpreter::load_module_from_whl(const std::string& file_path, const std::string& pkg_name, std::string& error)
+{
+    if (!m_initialized) {
+        error = "Python interpreter not initialized";
+        return nullptr;
+    }
+
+    namespace fs = boost::filesystem;
+
+    fs::path whl_path(file_path);
+
+    if (!fs::exists(whl_path)) {
+        error = "File does not exist: " + file_path;
+        return nullptr;
+    }
+
+    fs::path extract_dir = whl_path.parent_path() / "__whl_extracted__" / pkg_name;
+
+    if (!fs::exists(extract_dir)) {
+        if (!extract_zip_to_directory(whl_path, extract_dir, error))
+            return nullptr;
+    }
+
+    return load_module_from_directory(extract_dir.string(), pkg_name, error);
+}
+
+bool PythonInterpreter::call_function(
+    PyObject* module, const std::string& function_name, const std::string& arg, std::string& result, std::string& error)
+{
+    if (!m_initialized || !module) {
+        error = "Python interpreter not initialized or module is null";
+        return false;
+    }
+
+    PythonGILState gil;
+
+    PyObject* func = PyObject_GetAttrString(module, function_name.c_str());
+    if (!func || !PyCallable_Check(func)) {
+        Py_XDECREF(func);
+        error = "Function '" + function_name + "' not found or not callable";
+        return false;
+    }
+
+    PyObjectPtr args(PyTuple_New(1));
+    PyObjectPtr arg_str(PyUnicode_FromString(arg.c_str()));
+    PyTuple_SetItem(args.get(), 0, arg_str.release());
+
+    PyObjectPtr py_result(PyObject_CallObject(func, args.get()));
+    Py_DECREF(func);
+
+    if (!py_result) {
+        PyObject *ptype, *pvalue, *ptraceback;
+        PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+        error = "Function call failed: " + format_python_error(ptype, pvalue, ptraceback);
+        Py_XDECREF(ptype);
+        Py_XDECREF(pvalue);
+        Py_XDECREF(ptraceback);
+        return false;
+    }
+
+    result = py_object_to_string(py_result.get());
+    return true;
+}
+
+bool PythonInterpreter::call_function_no_args(PyObject* module, const std::string& function_name, std::string& result, std::string& error)
+{
+    if (!m_initialized || !module) {
+        error = "Python interpreter not initialized or module is null";
+        return false;
+    }
+
+    PythonGILState gil;
+
+    PyObject* func = PyObject_GetAttrString(module, function_name.c_str());
+    if (!func || !PyCallable_Check(func)) {
+        Py_XDECREF(func);
+        error = "Function '" + function_name + "' not found or not callable";
+        return false;
+    }
+
+    PyObjectPtr py_result(PyObject_CallObject(func, nullptr));
+    Py_DECREF(func);
+
+    if (!py_result) {
+        PyObject *ptype, *pvalue, *ptraceback;
+        PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+        error = "Function call failed: " + format_python_error(ptype, pvalue, ptraceback);
+        Py_XDECREF(ptype);
+        Py_XDECREF(pvalue);
+        Py_XDECREF(ptraceback);
+        return false;
+    }
+
+    result = py_object_to_string(py_result.get());
+    return true;
+}
+
+std::string PythonInterpreter::py_object_to_string(PyObject* obj)
+{
+    if (!obj) {
+        return "";
+    }
+
+    if (PyUnicode_Check(obj)) {
+        const char* str = PyUnicode_AsUTF8(obj);
+        return str ? std::string(str) : "";
+    }
+
+    PyObjectPtr str_obj(PyObject_Str(obj));
+    if (str_obj) {
+        const char* str = PyUnicode_AsUTF8(str_obj.get());
+        return str ? std::string(str) : "";
+    }
+
+    return "";
+}
+
+} // namespace Slic3r

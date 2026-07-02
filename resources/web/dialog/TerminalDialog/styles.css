@@ -1,0 +1,74 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: #1e1e1e;
+  color: #d4d4d4;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 8px;
+}
+
+#terminal-container {
+  flex: 1;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#terminal-container,
+#terminal-container .xterm,
+#terminal-container .xterm * {
+  font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", monospace;
+  letter-spacing: 0;
+  word-spacing: 0;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+#cmd-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background: #2d2d2d;
+  color: #d4d4d4;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+#cmd-input:focus {
+  border-color: #666;
+}
+
+#run-btn {
+  padding: 6px 20px;
+  border: none;
+  border-radius: 4px;
+  background: #0e639c;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#run-btn:hover {
+  background: #1177bb;
+}
+
+#run-btn:disabled {
+  background: #555;
+  cursor: not-allowed;
+}

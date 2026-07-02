@@ -85,6 +85,8 @@ class HMSQuery;
 class ModelMallDialog;
 class PingCodeBindDialog;
 class NetworkErrorDialog;
+class PluginsDialog;
+class TerminalDialog;
 
 
 enum FileType
@@ -550,6 +552,9 @@ public:
     void            update_single_bundle(wxCommandEvent& evt);
 
     PresetBundleDialog* m_preset_bundle_dlg{nullptr};
+    PluginsDialog* m_plugins_dlg{nullptr};
+    TerminalDialog* m_terminal_dlg{nullptr};
+
 
     void            start_http_server(const std::string& provider = ORCA_CLOUD_PROVIDER);
     void            start_http_server(int port, const std::string& provider = ORCA_CLOUD_PROVIDER);
@@ -617,6 +622,8 @@ public:
 
     void            open_preferences(size_t open_on_tab = 0, const std::string& highlight_option = std::string());
     void            open_presetbundledialog(size_t open_on_tab = 0, const std::string& highlight_option = std::string());
+    void            open_plugins_dialog(size_t open_on_tab = 0, const std::string& highlight_option = std::string());
+    void            open_terminal_dialog();
     void            open_exportpresetbundledialog(size_t open_on_tab = 0, const std::string& highlight_option = std::string());
     virtual bool OnExceptionInMainLoop() override;
     // Calls wxLaunchDefaultBrowser if user confirms in dialog.

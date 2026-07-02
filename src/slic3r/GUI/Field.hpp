@@ -466,6 +466,57 @@ public:
     void            suppress_scroll();
 };
 
+class PluginField : public Field {
+    using Field::Field;
+public:
+    PluginField(const ConfigOptionDef& opt, const t_config_option_key& id) : Field(opt, id) {}
+    PluginField(wxWindow* parent, const ConfigOptionDef& opt, const t_config_option_key& id) : Field(parent, opt, id) {}
+    ~PluginField() {}
+
+    void BUILD() override;
+
+    void set_selector(std::function<std::string()> selector);
+
+    void set_value(const boost::any& value, bool change_event = false) override;
+    boost::any& get_value() override;
+
+    void enable() override;
+    void disable() override;
+
+    // Window-field: the dynamic rows live inside a single container panel (assigned to the base
+    // `window` in BUILD), so the field exposes one window instead of a bare sizer. This lets focus/
+    // scroll, full-width sizing and teardown operate on the whole field.
+    wxWindow* getWindow() override { return window; }
+
+    void msw_rescale() override;
+
+private:
+    struct PluginRow {
+        ScalableButton* select_btn { nullptr };
+        wxTextCtrl*     display { nullptr };
+        ScalableButton* remove_btn { nullptr };
+        ScalableButton* add_btn { nullptr };
+        wxBoxSizer*     sizer { nullptr };
+    };
+
+    void rebuild_ui();
+    void add_empty_state_row();
+    void add_plugin_row(const wxString& value = wxEmptyString, bool is_last = false);
+    wxString display_name_for_value(const std::string& value) const;
+    void on_select_clicked(size_t index);
+    void on_add_clicked();
+    void on_remove_clicked(size_t index);
+    wxString get_row_value(size_t index) const;
+    void set_row_value(size_t index, const wxString& value);
+
+    wxWindow*               window { nullptr };  // container panel that hosts m_main_sizer
+    wxBoxSizer*             m_main_sizer { nullptr };
+    std::vector<PluginRow>  m_rows;
+    std::vector<std::string> m_values;
+    ScalableButton*         m_standalone_add_btn { nullptr };
+    std::function<std::string()> m_selector;
+};
+
 class ColourPicker : public Field {
 	using Field::Field;
 
