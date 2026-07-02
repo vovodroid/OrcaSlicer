@@ -1,6 +1,7 @@
 {
 	"type": "process",
 	"name": "0.32mm Optimal 0.6 nozzle @Voron",
+	"renamed_from": "0.32mm Optimal 0.8 nozzle @Voron",
 	"inherits": "fdm_process_voron_common_0_6",
 	"from": "system",
 	"setting_id": "I0th0trvF3qNf03w",
