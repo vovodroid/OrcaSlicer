@@ -255,26 +255,33 @@ Each entry is a single string with three `;`‑separated fields:
   entries drop out.
 - Parsing/serialization lives in `Config.cpp` (`parse_capability_ref` →
   `PluginCapabilityRef{ name, capability_name, uuid }`); the `plugins` option is defined in
-  `PrintConfig.cpp` and is a **process/print** preset setting. See
+  `PrintConfig.cpp` and is tracked on **process, printer, and filament** presets. See
   `tests/libslic3r/test_config.cpp` and
   `tests/slic3rutils/test_plugin_capability_identifier.cpp`.
 
 ## Restoring missing plugins
 
-When a slice is started (`Plater::reslice`), OrcaSlicer resolves the active preset's `plugins`
-array against the loaded catalog. Any reference that is not installed is **missing**, and a
-dialog appears before slicing continues. Missing references are split by whether they carry a
-cloud UUID:
+When you prepare to slice, OrcaSlicer resolves the active process, printer, and filament
+presets' `plugins` arrays against the loaded catalog (`Plater::refresh_missing_plugin_block`).
+Any reference it cannot satisfy is surfaced as a **non-closable notification**, and while any
+remain the **Slice button stays blocked** — there is no "slice anyway" path; you resolve the
+reference (or change the setting that pulls it in). References are sorted into four buckets:
 
-- **Missing OrcaCloud plugins** (have a UUID) — the dialog offers **Install plugins**, which
-  subscribes to, installs, loads, and enables each one so it is usable immediately, or
-  **Continue without plugins**.
-- **Missing local plugins** (no UUID) — these cannot be fetched automatically, so the dialog
-  offers **Open OrcaCloud** (a browser search for similarly named plugins on the OrcaCloud
-  plugins explore page) or **Continue without plugins**.
+- **Missing OrcaCloud plugins** (ref carries a UUID) — notification action **Install Plugins**,
+  which subscribes to, installs, loads, and enables each one so it becomes usable immediately.
+- **Missing local plugins** (no UUID) — cannot be fetched automatically; the action **Find on
+  OrcaCloud** just opens a browser search on the OrcaCloud plugins page. It is a suggestion
+  only: it neither closes the notification nor unblocks slicing.
+- **Inactive plugins** — the package is installed locally but the referenced capability is not
+  active (plugin not loaded, or capability disabled). Action **Activate Now** loads/enables it
+  locally, with no download.
+- **Broken references** — the plugin is installed and loaded but no longer provides the
+  referenced capability (renamed/removed/outdated). Activation cannot fix this, so it is
+  informational, with **Find on OrcaCloud** to look for an update.
 
-Choosing *Continue without plugins* proceeds with the slice; the functionality those plugins
-would have provided is simply skipped.
+The bucketing lives in `PluginResolver` (`get_missing_cloud_plugins`, `get_missing_local_plugins`,
+`get_inactive_plugins`, `get_broken_plugins`); the notifications and the slice block are driven
+from `Plater.cpp` (`refresh_missing_plugin_block`).
 
 ## The Plugins dialog
 

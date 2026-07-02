@@ -103,7 +103,7 @@ fields live at the TOML root. Parsing is implemented in
 | `author` | `[tool.orcaslicer.plugin]` | optional | |
 | `version` | `[tool.orcaslicer.plugin]` | recommended | |
 | `dependencies` | TOML root | optional | array of pip requirements (see [Dependencies](#dependencies)) |
-| `requires-python` | TOML root | optional | **stored but not enforced** against the bundled interpreter today |
+| `requires-python` | TOML root | optional | **read but not stored or enforced** against the bundled interpreter today |
 
 > **The metadata block no longer declares a `type`.** A plugin's type(s) are derived from the
 > capability classes it registers (each capability's `get_type()`), so the same metadata block
@@ -396,14 +396,15 @@ class SamplePlugin(orca.base):
 OrcaSlicer instantiates the package class (it must be callable as `SamplePlugin()` with no
 arguments), calls `register_capabilities()`, then instantiates each registered capability.
 
-Rules enforced by `PythonPluginBridge.cpp`:
+Rules enforced when a plugin loads (most in `PythonPluginBridge.cpp`):
 
 - The `@orca.plugin` class **must** subclass `orca.base`, and there must be **exactly one**
   per file — a second `@orca.plugin` fails the load.
 - Each class passed to `orca.register_capability` must subclass a capability base (ultimately
   `orca.PythonPluginBase`); otherwise it raises `value_error`.
-- Every capability must resolve `get_name()`, and the resulting `(type, name)` pair must be
-  unique across the plugin — a duplicate is rejected.
+- Every capability must resolve `get_name()` (checked in the bridge); the loader
+  (`PluginLoader.cpp`) additionally rejects the plugin if the resulting `(type, name)` pair is
+  not unique across it.
 - A capability class you never pass to `register_capability` is **invisible** to OrcaSlicer,
   even if it is defined in the file.
 
@@ -913,7 +914,7 @@ For your new type, add a call site (or an on‑capability‑load callback) that:
 
 List your new `.hpp` / `.cpp` files in `src/slic3r/CMakeLists.txt`, alongside the existing
 plugin‑type sources (search for `plugin/pluginTypes/gcode/GCodePluginCapability.cpp` — the block is
-around lines 613–621):
+around lines 615–623):
 
 ```cmake
     plugin/pluginTypes/<type>/<Type>PluginCapability.hpp
@@ -1011,5 +1012,5 @@ best covered by the manual steps above.
 | `src/slic3r/plugin/PythonInterpreter.cpp` | interpreter init, audit‑hook install, traceback formatting, `stderr` → log file |
 | `src/slic3r/GUI/PluginsDialog.cpp` | Plugins dialog: details/error area, script **Run**, error dialogs |
 | `src/slic3r/GUI/PostProcessor.cpp` | resolves the preset's plugin refs and invokes post‑processing (G‑code) capabilities during export |
-| `src/slic3r/CMakeLists.txt` (~602–610) | build list for plugin sources |
+| `src/slic3r/CMakeLists.txt` (~609–623) | build list for plugin sources |
 | [`plugin_audit_hook.md`](plugin_audit_hook.md) | the audit hook: modes, allow‑list, extending it |

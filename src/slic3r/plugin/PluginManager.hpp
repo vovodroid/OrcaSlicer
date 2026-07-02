@@ -31,7 +31,7 @@ public:
 
     ~PluginManager();
 
-    // Initialize plugin system (no longer initializes Python — that happens lazily on first load_plugin)
+    // Initialize the plugin system, eagerly starting the embedded Python interpreter on the main thread.
     bool initialize();
 
     // Stop discovery and unload Python plugin objects before Python finalizes.

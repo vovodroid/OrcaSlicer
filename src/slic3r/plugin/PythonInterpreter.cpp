@@ -622,8 +622,9 @@ bool PythonInterpreter::initialize()
             BOOST_LOG_TRIVIAL(info) << "Bundled uv executable not found";
 
         // Install the CPython audit hook for plugin policy enforcement.
-        // This is defense-in-depth: it monitors file/subprocess/socket/ctypes
-        // access from plugin code.  It is NOT a full security sandbox.
+        // This is defense-in-depth: today it only inspects the `open` audit event
+        // and blocks writes outside the allowed roots; subprocess/socket/ctypes and
+        // other events are not yet handled.  It is NOT a full security sandbox.
         PluginAuditManager::instance().install_hook();
 
         // Persist Python stderr (plugin tracebacks, including uncaught

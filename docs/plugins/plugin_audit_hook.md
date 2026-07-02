@@ -87,13 +87,13 @@ allows everything.
 
 ```cpp
 enum class AuditMode {
-    // Permissive reads, restricted writes. Python must be able to read stdlib
-    // modules and the plugin file during import/on-load, so reads are allowed;
-    // only writes outside the allowed roots are blocked.
+    // Import/loading phase: allow reads anywhere, only block writes
+    // outside allowed roots.  Python needs to read stdlib modules
+    // during import and those are not inside plugin directories.
     Loading,
 
-    // Restricted reads AND writes: every file path must resolve inside an
-    // allowed root, or it is blocked.
+    // Execution phase: block both reads and writes outside allowed
+    // roots, plus subprocess/socket/ctypes.
     Enforcing,
 };
 ```
@@ -318,8 +318,10 @@ This version is deliberately minimal. Do **not** treat it as a hardened sandbox.
 - **Only the `open` event is enforced.** `subprocess.Popen`, `os.system`, `socket.*`,
   `ctypes.*` and friends are *not* blocked. (The `Enforcing` enum comment describes an
   aspiration, not current behavior.)
-- **`os.open` slips through.** It raises the `open` event with `mode = None`, so the
-  `"s|si"` parse fails and the call is allowed. Low‑level opens are currently unaudited.
+- **Non‑string paths slip through the `open` check.** The audit callback parses only a
+  string path (`"s|si"`); any `open`‑event call whose first argument is bytes or an integer
+  file descriptor — including `os.open`, which additionally passes `mode = None` — fails the
+  parse and is allowed. Low‑level and non‑`str` opens are currently unaudited.
 - **`open(path, "x")`** (exclusive create — a write) contains no `w`/`a`/`+`, so it is
   classified as a read and allowed under `Loading`.
 - **Non‑`open` filesystem mutations are unaudited.** `os.remove`, `os.rename`, `os.mkdir`,

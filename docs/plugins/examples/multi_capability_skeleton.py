@@ -27,8 +27,6 @@ See ``plugin_development.md`` for the full reference, and ``host_ui_panel.py`` f
 richer worked example built on the ``orca.host`` read-only API.
 """
 
-import json
-
 import orca
 
 
@@ -85,11 +83,15 @@ class ExamplePostProcess(orca.gcode.GCodePluginCapabilityBase):
 
 # --------------------------------------------------------------------------- #
 # Capability 3 - a printer-connection (agent) capability
-#   Registers a network printer agent on load. The host serialises each native
-#   agent call into a single JSON request envelope
-#   ({command, request_id, dev_id, payload}); you dispatch on request["command"]
-#   and return a JSON response envelope string. Delete this whole class if your
-#   plugin is not a printer agent.
+#   Registers a network printer agent on load. Unlike the other capabilities, an
+#   agent is driven through the native printer-agent surface: the host calls
+#   individual operations (connect_printer, start_discovery, start_print, ...)
+#   directly on your object. orca.printer_agent.PrinterAgentBase declares ~30
+#   pure-virtual operations and EVERY one must be overridden - an operation you
+#   leave out raises RuntimeError the moment the host calls it. This skeleton
+#   implements just enough to load and be discovered; see
+#   resources/orca_plugins/BBLPrinterAgentPlugin.py for a complete working agent
+#   and the full method list. Delete this whole class if you are not writing one.
 # --------------------------------------------------------------------------- #
 class ExamplePrinterAgent(orca.printer_agent.PrinterAgentBase):
     def get_name(self):
@@ -103,28 +105,54 @@ class ExamplePrinterAgent(orca.printer_agent.PrinterAgentBase):
             description="Skeleton printer agent.",
         )
 
-    def send_command(self, request_json):
-        # Parse the request envelope and dispatch on its "command".
-        try:
-            request = json.loads(request_json or "{}")
-        except json.JSONDecodeError:
-            request = {}
-        command = request.get("command", "")
-        request_id = request.get("request_id", "")
+    # --- connection ------------------------------------------------------- #
+    def connect_printer(self, dev_id, dev_ip, username, password, use_ssl) -> int:
+        # TODO: open your transport (MQTT/HTTP/serial/...). Return 0 on success.
+        return 0
 
-        # TODO: handle the commands your device supports and build a real response.
-        return json.dumps({
-            "request_id": request_id,
-            "status": "error",
-            "message": f"unhandled command: {command}",
-        })
+    def disconnect_printer(self) -> int:
+        # TODO: tear the transport down. Return 0 on success.
+        return 0
 
-    def send_command_with_progress(self, request_json, update_fn, cancel_fn):
-        # Optional. Override only for long-running commands (uploads, prints).
-        #   update_fn(stage, percent, message) - push progress to the host UI.
-        #   cancel_fn() -> bool                - poll it; abort if it returns True.
-        # Default behaviour is to run as a plain send_command.
-        return self.send_command(request_json)
+    # --- discovery -------------------------------------------------------- #
+    def start_discovery(self, start=True, sending=False) -> bool:
+        # TODO: start/stop scanning the network for printers. Return True on success.
+        return True
+
+    # --- messaging -------------------------------------------------------- #
+    def send_message(self, dev_id, json_str, qos=0, flag=0) -> int:
+        # TODO: publish a control message to the device. Return 0 on success.
+        return 0
+
+    def get_user_selected_machine(self) -> str:
+        return ""
+
+    def set_user_selected_machine(self, dev_id) -> int:
+        return 0
+
+    # --- printing --------------------------------------------------------- #
+    def start_print(self, params=None, update_fn=None, cancel_fn=None, wait_fn=None) -> int:
+        # params is an orca.printer_agent.PrintParams. The host also passes callbacks:
+        #   update_fn(stage, percent, message) - report progress to the host UI
+        #   cancel_fn() -> bool                - poll it; abort if it returns True
+        #   wait_fn(...)                        - host-provided wait hook
+        # Return 0 on success.
+        return 0
+
+    # --- filament sync ---------------------------------------------------- #
+    def get_filament_sync_mode(self):
+        return orca.printer_agent.FilamentSyncMode.None_
+
+    def fetch_filament_info(self, dev_id) -> bool:
+        return False
+
+    # NOTE: PrinterAgentBase has more pure-virtual operations a real agent must
+    # implement, e.g. send_message_to_printer, bind_detect, bind/unbind, ping_bind,
+    # check_cert/install_device_cert, request_bind_ticket, start_local_print,
+    # start_local_print_with_record, start_sdcard_print, start_send_gcode_to_sdcard,
+    # and the host-callback setters (set_server_callback, set_on_message_fn,
+    # set_on_printer_connected_fn, set_queue_on_main_fn, ...). See
+    # BBLPrinterAgentPlugin.py for the full set and expected signatures.
 
 
 # --------------------------------------------------------------------------- #
