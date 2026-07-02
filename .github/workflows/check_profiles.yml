@@ -159,14 +159,6 @@ jobs:
 
           exit "${status}"
 
-      - name: Upload custom preset validation logs
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: custom-preset-validation-logs
-          path: ${{ runner.temp }}/custom-preset-validation/
-          retention-days: 7
-
       - name: Prepare PR number for comment workflow
         if: ${{ always() && github.event_name == 'pull_request' }}
         run: |
