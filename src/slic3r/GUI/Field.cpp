@@ -119,8 +119,8 @@ wxString get_formatted_tooltip_text(const ConfigOptionDef& opt, const t_config_o
 
     tooltip += (tooltip.empty() ? "" : "\n\n") + _(L("parameter name")) + ": " + opt_id;
 
-    // Orca: 
-    // We can't use Orca's default values as-is because they sometimes depend on other values. 
+    // Orca:
+    // We can't use Orca's default values as-is because they sometimes depend on other values.
     // Parent preset configuration values will be used instead.
     if (const Preset* print_parent_preset = wxGetApp().preset_bundle->prints.get_selected_preset_parent()) {
         const DynamicPrintConfig& parent_config = print_parent_preset->config;
@@ -158,8 +158,8 @@ wxString get_formatted_tooltip_text(const ConfigOptionDef& opt, const t_config_o
             tooltip += "\n\n" + _(L("Default")) + ": " + _(double_to_string(default_value)) + _(side_text);
 
             if (opt.min > -FLT_MAX && opt.max < FLT_MAX) {
-                tooltip += "\n" + _(L("Range")) + ": [" + 
-                    _(double_to_string(opt.min)) + _(side_text) + ", " + 
+                tooltip += "\n" + _(L("Range")) + ": [" +
+                    _(double_to_string(opt.min)) + _(side_text) + ", " +
                     _(double_to_string(opt.max)) + _(side_text) + "]";
             }
         } else if (opt.type == coBool || opt.type == coString) {
@@ -1998,7 +1998,6 @@ void PluginField::BUILD()
     // Wrap the dynamic rows in a single container panel so the field is a proper window-field
     // (getWindow() != null). The panel owns m_main_sizer; all row controls are children of it.
     auto* panel = new wxPanel(m_parent, wxID_ANY);
-    panel->SetBackgroundStyle(wxBG_STYLE_PAINT);
     wxGetApp().UpdateDarkUI(panel);
     window = panel;
 
@@ -2053,6 +2052,7 @@ void PluginField::rebuild_ui()
         // Report the stacked rows' size so the option-group / OG_CustomCtrl allocate the right height.
         window->SetMinSize(m_main_sizer->CalcMin());
         window->Layout();
+        window->Refresh();
     }
     if (m_parent)
         m_parent->Layout();
@@ -2066,7 +2066,6 @@ void PluginField::add_empty_state_row()
     wxTextCtrl* display = new wxTextCtrl(window, wxID_ANY, _L("No plugin selected"),
         wxDefaultPosition, wxSize(def_width_wider() * m_em_unit, wxDefaultCoord),
         wxTE_READONLY);
-    display->SetBackgroundStyle(wxBG_STYLE_PAINT);
     display->SetEditable(false);
     wxGetApp().UpdateDarkUI(display);
     display->SetToolTip(_L("No plugin selected"));
@@ -2080,7 +2079,7 @@ void PluginField::add_empty_state_row()
 
     row_sizer->Add(display, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
     row_sizer->Add(add_btn, 0, wxALIGN_CENTER_VERTICAL);
-    m_main_sizer->Add(row_sizer, 0, wxEXPAND | wxBOTTOM, 4);
+    m_main_sizer->Add(row_sizer, 0, wxEXPAND);
 
     PluginRow row;
     row.display = display;
@@ -2106,7 +2105,6 @@ void PluginField::add_plugin_row(const wxString& value, bool is_last)
     wxTextCtrl* display = new wxTextCtrl(window, wxID_ANY, value,
         wxDefaultPosition, wxSize(def_width_wider() * m_em_unit, wxDefaultCoord),
         wxTE_READONLY);
-    display->SetBackgroundStyle(wxBG_STYLE_PAINT);
     display->SetEditable(false);
     wxGetApp().UpdateDarkUI(display);
     display->SetToolTip(get_tooltip_text(value));
@@ -2145,7 +2143,8 @@ void PluginField::add_plugin_row(const wxString& value, bool is_last)
         row_sizer->Add(button_size.GetWidth(), button_size.GetHeight(), 0, wxALIGN_CENTER_VERTICAL);
     }
 
-    m_main_sizer->Add(row_sizer, 0, wxEXPAND | wxBOTTOM, 4);
+    const int bottom_gap = is_last ? 0 : 4;
+    m_main_sizer->Add(row_sizer, 0, wxEXPAND | (bottom_gap > 0 ? wxBOTTOM : 0), bottom_gap);
 
     PluginRow row;
     row.select_btn = select_btn;
