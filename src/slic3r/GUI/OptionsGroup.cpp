@@ -697,7 +697,9 @@ std::string OptionsGroup::pick_plugin(const ConfigOptionDef& opt)
         Slic3r::PluginDescriptor descriptor;
         wxString package_name = manager.get_catalog().try_get_plugin_descriptor(cap->plugin_key, descriptor)
                                     ? from_u8(descriptor.name) : from_u8(cap->plugin_key);
-        entries.push_back({cap->plugin_key, cap->name, from_u8(cap->name) + " — " + package_name, package_name});
+        entries.push_back({
+            cap->plugin_key, cap->name, from_u8(cap->name) + from_u8(" \xE2\x80\x94 ") + package_name, package_name
+        });
     }
 
     PluginPickerDialog dlg(m_parent, from_u8(opt.plugin_type), std::move(entries));
