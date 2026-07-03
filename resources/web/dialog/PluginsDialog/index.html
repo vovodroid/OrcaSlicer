@@ -18,6 +18,9 @@
 <body onLoad="OnInit()">
   <div class="app">
     <div class="toolbar">
+      <button id="open_terminal" class="ButtonStyleRegular ButtonTypeChoice left-btn">
+        Open Terminal
+      </button>
       <button id="refresh_btn" class="ButtonStyleRegular ButtonTypeChoice">
         Refresh
       </button>
@@ -27,10 +30,10 @@
           <span class="explore-menu-icon" aria-hidden="true"></span>
         </button>
         <button id="explore_btn" class="ButtonStyleConfirm ButtonTypeChoice explore-main-btn" type="button">
-          Browse plugins
+          Install plugin
         </button>
         <div id="exploreMenu" class="explore-menu" role="menu" hidden>
-          <button type="button" class="explore-menu-item" role="menuitem" data-install-action="explore">Browse plugins</button>
+          <button type="button" class="explore-menu-item" role="menuitem" data-install-action="explore">Install plugin</button>
           <button type="button" class="explore-menu-item" role="menuitem" data-install-action="install-local">Install local plugin</button>
         </div>
       </div>
@@ -129,11 +132,9 @@
     </main>
   </div>
 
-  <div id="AcceptArea">
-    <button id="open_terminal" class="ButtonStyleRegular ButtonTypeChoice left-btn">
-      Open Terminal
-    </button>
-    <div id="close_btn" class="ButtonStyleRegular ButtonTypeChoice">Close</div>
+  <div id="statusBar" class="status-bar is-empty" role="status" aria-live="polite">
+    <span class="status-dot" aria-hidden="true"></span>
+    <span id="statusText" class="status-text"></span>
   </div>
 
   <div id="ctxMenu" class="ctx" hidden></div>

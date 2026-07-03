@@ -1,7 +1,7 @@
 const pluginsById = new Map();
 const pluginInstallActions = {
   "explore": {
-    label: "Browse plugins",
+    label: "Install plugin",
     command: "open_plugin_hub"
   },
   "install-local": {
@@ -40,7 +40,6 @@ function OnInit() {
   exploreMenu?.addEventListener("click", OnExploreMenuClick);
   document.getElementById("open_terminal")?.addEventListener("click", () => SendMessage("open_terminal"));
   document.getElementById("detailUpdateBtn")?.addEventListener("click", UpdateSelectedPlugin);
-  document.getElementById("close_btn")?.addEventListener("click", () => SendMessage("close_page"));
 
   document.querySelectorAll("[role='tab']").forEach((tab) => {
     tab.addEventListener("click", () => ActivateDetailTab(String(tab.dataset.tab || "")));
@@ -216,7 +215,24 @@ function HandleStudio(value) {
   if (payload.command === "list_plugins") {
     SetSelectedInstallAction(payload.install_action, false);
     ApplyPlugins(payload.data || []);
+  } else if (payload.command === "status_message") {
+    ShowStatusMessage(String(payload.message || ""), String(payload.level || "info"));
   }
+}
+
+// Renders the latest plugin/capability operation result in the footer status bar. The result
+// persists until the next operation replaces it; the native side already localizes the text.
+function ShowStatusMessage(message, level) {
+  const bar = document.getElementById("statusBar");
+  const text = document.getElementById("statusText");
+  if (!bar || !text)
+    return;
+
+  const normalizedLevel = ["success", "warn", "error", "info"].includes(level) ? level : "info";
+  text.textContent = message;
+  text.title = message;
+  bar.classList.remove("is-empty", "level-success", "level-warn", "level-error", "level-info");
+  bar.classList.add(`level-${normalizedLevel}`);
 }
 
 function SafeJsonParse(value) {

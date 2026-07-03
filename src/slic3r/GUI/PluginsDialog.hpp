@@ -78,6 +78,14 @@ private:
     bool install_plugin_package(const std::string& package_path);
     bool install_cloud_plugin(const std::string& uuid, const std::string& version, const wxString& name);
     void run_script_plugin(const std::string& plugin_key, const std::string& capability_name);
+    // Pushes a one-line result into the web footer status bar (level: "success" | "warn" | "error" | "info"),
+    // used for every plugin/capability operation instead of a modal box so the dialog stays non-disruptive.
+    void show_status(const wxString& message, const char* level);
+    // Best-effort human-readable name for a plugin_key (falls back to the key itself).
+    wxString plugin_display_name(const std::string& plugin_key) const;
+    // Turns the pending "Activating..." status into "Activated"/"Failed to activate" once an
+    // asynchronous plugin load reported via update_plugin_dialog_ui() finishes. No-op otherwise.
+    void resolve_pending_activation();
     void update_plugin(const std::string& plugin_key);
 
     void open_plugin_folder(const Slic3r::PluginDescriptor& plugin);
@@ -218,6 +226,10 @@ private:
     // (message/show_dialog) or the result message box pumps a nested event loop, which could
     // re-dispatch the web "run_script_plugin" command and start a second, overlapping run.
     bool m_script_running = false;
+
+    // Plugin whose asynchronous activation is in flight, awaited by resolve_pending_activation().
+    // Empty when no activation is pending.
+    std::string m_activating_plugin_key;
 };
 
 } // namespace GUI

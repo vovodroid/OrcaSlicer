@@ -421,6 +421,28 @@ void PluginsDialog::update_plugin_dialog_ui()
     // Called after the shared catalog is already updated, for example from the
     // cloud-plugin state callback. Do not fetch here or the callback can re-enter.
     send_plugins();
+    resolve_pending_activation();
+}
+
+void PluginsDialog::resolve_pending_activation()
+{
+    if (m_activating_plugin_key.empty())
+        return;
+
+    PluginLoader& loader = PluginManager::instance().get_loader();
+    if (loader.is_plugin_load_in_progress(m_activating_plugin_key))
+        return; // Still loading: keep the "Activating..." message until the load resolves.
+
+    const std::string plugin_key = m_activating_plugin_key;
+    m_activating_plugin_key.clear();
+
+    // Mirror the row's status precedence (Error before Activated) so the message matches the list.
+    PluginDescriptor descriptor;
+    if (get_descriptor(plugin_key, descriptor) && descriptor.has_error())
+        show_status(wxString::Format(_L("Failed to activate \"%s\"."), plugin_display_name(plugin_key)), "error");
+    else if (loader.is_plugin_loaded(plugin_key))
+        show_status(wxString::Format(_L("Activated \"%s\"."), plugin_display_name(plugin_key)), "success");
+    // Otherwise it ended up inactive (toggled off or cancelled mid-load): stay silent.
 }
 
 void PluginsDialog::on_script_message(const nlohmann::json& payload)
@@ -607,13 +629,17 @@ void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
     if (!enabled) {
         if (!manager.get_loader().unload_plugin(plugin_key)) {
             BOOST_LOG_TRIVIAL(error) << "Failed to unload plugin from Plugins dialog: " << plugin_key;
-            wxMessageBox(_L("Failed to unload plugin."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+            show_status(_L("Failed to unload plugin."), "warn");
             send_plugins();
             return;
         }
 
         BOOST_LOG_TRIVIAL(info) << "Plugin unloaded from Plugins dialog: " << plugin_key;
+        // A prior activation of this plugin is moot now; drop it so no stale "Activated" arrives later.
+        if (m_activating_plugin_key == plugin_key)
+            m_activating_plugin_key.clear();
         send_plugins();
+        show_status(wxString::Format(_L("Deactivated \"%s\"."), plugin_display_name(plugin_key)), "success");
         return;
     }
 
@@ -624,7 +650,7 @@ void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
         if (dialog_item.unauthorized && available_actions.toggle_installs_cloud_plugin == false && row_data.has_local_package() == false) {
             const std::string install_error = "Unauthorized cloud plugins cannot be installed.";
             manager.set_plugin_error(plugin_key, install_error);
-            wxMessageBox(from_u8(install_error), _L("Plugins"), wxOK | wxICON_WARNING, this);
+            show_status(from_u8(install_error), "warn");
         }
         send_plugins();
         return;
@@ -658,7 +684,7 @@ void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
 
     const PluginDescriptor* descriptor_ptr = manager.get_catalog().find_valid_plugin_descriptor(plugin_key);
     if (!descriptor_ptr) {
-        wxMessageBox(_L("Plugin manifest was not found."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        show_status(_L("Plugin manifest was not found."), "warn");
         send_plugins();
         return;
     }
@@ -671,6 +697,10 @@ void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Starting plugin load from web dialog: " << plugin_key;
     manager.get_loader().load_plugin(manager.get_catalog(), plugin_key);
     send_plugins();
+    // Loading is asynchronous: show a pending message now; resolve_pending_activation() turns it into
+    // Activated/Failed once the loader's completion callback runs update_plugin_dialog_ui().
+    m_activating_plugin_key = plugin_key;
+    show_status(wxString::Format(_L("Activating \"%s\"..."), plugin_display_name(plugin_key)), "info");
 }
 
 void PluginsDialog::toggle_plugin_capability(const std::string& plugin_key, PluginCapabilityType type,
@@ -705,6 +735,7 @@ void PluginsDialog::toggle_plugin_capability(const std::string& plugin_key, Plug
     }
 
     send_plugins();
+    show_status(wxString::Format(enabled ? _L("Enabled \"%s\".") : _L("Disabled \"%s\"."), from_u8(capability_name)), "success");
 }
 
 void PluginsDialog::handle_plugin_menu_action(const std::string& plugin_key, const std::string& action)
@@ -761,7 +792,7 @@ bool PluginsDialog::install_plugin_package(const std::string& package_path)
     std::transform(extension.begin(), extension.end(), extension.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     if (extension != ".py" && extension != ".whl") {
-        wxMessageBox(_L("Select a .py or .whl plugin package."), _L("Plugins"), wxOK | wxICON_INFORMATION, this);
+        show_status(_L("Select a .py or .whl plugin package."), "info");
         return false;
     }
 
@@ -769,7 +800,7 @@ bool PluginsDialog::install_plugin_package(const std::string& package_path)
     bool existing_installation     = false;
     auto report_inspection_failure = [&]() {
         BOOST_LOG_TRIVIAL(error) << "Plugin package inspection failed for " << package_path << " error=" << error;
-        wxMessageBox(_L("Failed to install plugin package. See the log for details."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        show_status(_L("Failed to install plugin package. See the log for details."), "warn");
         send_plugins();
         return false;
     };
@@ -814,12 +845,14 @@ bool PluginsDialog::install_plugin_package(const std::string& package_path)
 
     if (!installed) {
         BOOST_LOG_TRIVIAL(error) << "Plugin package installation failed for " << package_path << " error=" << error;
-        wxMessageBox(_L("Failed to install plugin package. See the log for details."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        show_status(_L("Failed to install plugin package. See the log for details."), "warn");
         send_plugins();
         return false;
     }
 
     BOOST_LOG_TRIVIAL(info) << "Plugin package installed successfully from " << package_path;
+    const wxString installed_name = from_u8(plugin_descriptor.name.empty() ? package_file.filename().string() : plugin_descriptor.name);
+    show_status(wxString::Format(_L("Installed \"%s\"."), installed_name), "success");
     refresh_plugin_catalog_async(_L("Refreshing"), _L("Refreshing plugins data"), kUseCurrentCloudCatalog);
     return true;
 }
@@ -849,12 +882,29 @@ bool PluginsDialog::install_cloud_plugin(const std::string& plugin_key, const st
     if (!downloaded) {
         BOOST_LOG_TRIVIAL(error) << "Cloud plugin download failed. plugin_key=" << plugin_key << " error=" << error;
         PluginManager::instance().set_plugin_error(plugin_key, error);
-        wxMessageBox(from_u8(error), _L("Plugin Download Failed"), wxOK | wxICON_ERROR, this);
+        show_status(error.empty() ? _L("Plugin download failed.") : from_u8(error), "error");
         return false;
     }
 
     BOOST_LOG_TRIVIAL(info) << "Cloud plugin downloaded successfully. plugin_key=" << plugin_key;
     return true;
+}
+
+void PluginsDialog::show_status(const wxString& message, const char* level)
+{
+    nlohmann::json payload;
+    payload["command"] = "status_message";
+    payload["level"]   = level;
+    payload["message"] = into_u8(message);
+    call_web_handler(payload);
+}
+
+wxString PluginsDialog::plugin_display_name(const std::string& plugin_key) const
+{
+    PluginDescriptor descriptor;
+    if (get_descriptor(plugin_key, descriptor) && !descriptor.name.empty())
+        return from_u8(descriptor.name);
+    return from_u8(plugin_key);
 }
 
 void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::string& capability_name)
@@ -893,8 +943,7 @@ void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::
     BOOST_LOG_TRIVIAL(info) << "Run script plugin requested from Plugins dialog. plugin_key=" << plugin_key
                             << " capability_name=" << capability_name;
 
-    auto complete_with_error = [this, &manager, &plugin_key](const std::string& plugin_error, const wxString& dialog_message,
-                                                             const wxString& dialog_title, long dialog_style) {
+    auto complete_with_error = [this, &manager, &plugin_key](const std::string& plugin_error, const wxString& status_message) {
         const std::string normalized_error = plugin_error.empty() ? "Script plugin failed." : plugin_error;
         if (!manager.get_catalog().set_plugin_error(plugin_key, normalized_error))
             BOOST_LOG_TRIVIAL(warning) << "Failed to record plugin error. plugin_key=" << plugin_key;
@@ -904,19 +953,21 @@ void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::
 
         send_plugins();
 
-        const wxString message = dialog_message.empty() ? from_u8(normalized_error) : dialog_message;
-        wxMessageBox(message, dialog_title, dialog_style, this);
+        // The row now shows an "Error" status and the Diagnostics tab holds the full text, so surface
+        // the outcome in the footer status bar instead of a modal box (prefer the friendlier override).
+        const wxString message = status_message.empty() ? from_u8(normalized_error) : status_message;
+        show_status(message, "error");
     };
 
     PluginDescriptor descriptor;
     if (!get_descriptor(plugin_key, descriptor)) {
         BOOST_LOG_TRIVIAL(error) << "Cannot run script plugin because manifest was not found. plugin_key=" << plugin_key;
-        complete_with_error("Plugin manifest was not found.", _L("Plugin manifest was not found."), _L("Plugins"), wxOK | wxICON_WARNING);
+        complete_with_error("Plugin manifest was not found.", _L("Plugin manifest was not found."));
         return;
     }
 
     if (descriptor.has_error()) {
-        complete_with_error(descriptor.normalized_error(), wxString(), _L("Plugins"), wxOK | wxICON_WARNING);
+        complete_with_error(descriptor.normalized_error(), wxString());
         return;
     }
 
@@ -929,8 +980,7 @@ void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::
         BOOST_LOG_TRIVIAL(error) << "Cannot run plugin because its metadata is invalid. plugin_key=" << plugin_key
                                  << " is_metadata_valid=" << descriptor.is_metadata_valid()
                                  << " type=" << plugin_capability_type_to_string(descriptor.primary_capability_type());
-        complete_with_error(plugin_error, _L("Only plugins with valid metadata can be run from this dialog."), _L("Plugins"),
-                            wxOK | wxICON_WARNING);
+        complete_with_error(plugin_error, _L("Only plugins with valid metadata can be run from this dialog."));
         return;
     }
 
@@ -938,7 +988,7 @@ void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::
     if (!manager.get_loader().is_plugin_loaded(plugin_key)) {
         BOOST_LOG_TRIVIAL(warning) << "Cannot run script plugin because it is not loaded. plugin_key=" << plugin_key;
         complete_with_error("Load the script plugin before running it: Cannot run script plugin because it is not loaded.",
-                            _L("Load the script plugin before running it."), _L("Plugins"), wxOK | wxICON_INFORMATION);
+                            _L("Load the script plugin before running it."));
         return;
     }
 
@@ -946,7 +996,7 @@ void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::
     if (!plugin) {
         BOOST_LOG_TRIVIAL(error) << "Loaded plugin does not implement ScriptPluginCapability. plugin_key=" << plugin_key;
         complete_with_error("The selected plugin is not a runnable script plugin: Loaded plugin does not implement ScriptPluginCapability.",
-                            _L("The selected plugin is not a runnable script plugin."), _L("Plugins"), wxOK | wxICON_WARNING);
+                            _L("The selected plugin is not a runnable script plugin."));
         return;
     }
 
@@ -977,29 +1027,29 @@ void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::
     if (!error.empty()) {
         plugin.reset();
         cap.reset();
-        complete_with_error(error, wxString(), _L("Script Plugin Failed"), wxOK | wxICON_ERROR);
+        complete_with_error(error, wxString());
         return;
     }
 
     BOOST_LOG_TRIVIAL(info) << "Script plugin execution completed. plugin_key=" << plugin_key
                             << " status=" << static_cast<int>(result.status) << " message=" << result.message << " data=" << result.data;
 
-    const bool failed                  = result.status == PluginResult::RecoverableError || result.status == PluginResult::FatalError;
-    const std::string fallback_message = failed                                 ? "Script plugin failed." :
-                                         result.status == PluginResult::Skipped ? "Script plugin skipped." :
-                                                                                  "Script plugin finished.";
+    const bool failed = result.status == PluginResult::RecoverableError || result.status == PluginResult::FatalError;
     if (failed) {
         plugin.reset();
         cap.reset();
-        complete_with_error(result.message.empty() ? fallback_message : result.message, wxString(), _L("Script Plugin"),
-                            wxOK | wxICON_ERROR);
+        // complete_with_error normalizes an empty message to "Script plugin failed." and reports via the status bar.
+        complete_with_error(result.message, wxString());
         return;
     }
 
     manager.clear_plugin_error(plugin_key);
     send_plugins();
-    const wxString message = from_u8(result.message.empty() ? fallback_message : result.message);
-    wxMessageBox(message, _L("Script Plugin"), wxOK | wxICON_INFORMATION, this);
+
+    const bool     skipped  = result.status == PluginResult::Skipped;
+    const wxString fallback = skipped ? _L("Script plugin skipped.") : _L("Script plugin finished.");
+    const wxString message  = result.message.empty() ? fallback : from_u8(result.message);
+    show_status(message, skipped ? "info" : "success");
 }
 
 void PluginsDialog::update_plugin(const std::string& plugin_key)
@@ -1029,7 +1079,7 @@ void PluginsDialog::update_plugin(const std::string& plugin_key)
 
     if (!updated) {
         BOOST_LOG_TRIVIAL(error) << "Cloud plugin update failed. plugin_key=" << plugin_key << " error=" << error;
-        wxMessageBox(from_u8(error), _L("Failed to update plugin"), wxOK | wxICON_ERROR, this);
+        show_status(error.empty() ? _L("Failed to update plugin.") : from_u8(error), "error");
         send_plugins();
         return;
     }
@@ -1037,6 +1087,7 @@ void PluginsDialog::update_plugin(const std::string& plugin_key)
     // update_cloud_plugin installs the package and updates the in-memory descriptor
     // (installed=true, update_available=false) on success.
     send_plugins();
+    show_status(wxString::Format(_L("Updated \"%s\"."), name), "success");
 }
 
 void PluginsDialog::open_plugin_folder(const PluginDescriptor& plugin)
@@ -1044,7 +1095,7 @@ void PluginsDialog::open_plugin_folder(const PluginDescriptor& plugin)
     const boost::filesystem::path plugin_folder = resolve_plugin_root_from_descriptor(plugin);
 
     if (plugin_folder.empty()) {
-        wxMessageBox(_L("Plugin folder could not be determined."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        show_status(_L("Plugin folder could not be determined."), "warn");
         return;
     }
 
@@ -1101,14 +1152,15 @@ void PluginsDialog::delete_local_plugin(const PluginDescriptor& plugin)
                 refresh_plugin_catalog_blocking(kFetchCloudCatalog);
             store_plugin_operation_result(state, succeeded, std::move(error));
         },
-        [this, state]() {
+        [this, state, plugin_name]() {
             std::string error;
             if (!take_plugin_operation_result(state, error)) {
-                wxMessageBox(error.empty() ? _L("Failed to delete plugin.") : from_u8(error), _L("Plugins"), wxOK | wxICON_ERROR, this);
+                show_status(error.empty() ? _L("Failed to delete plugin.") : from_u8(error), "error");
                 return;
             }
 
             send_plugins();
+            show_status(wxString::Format(_L("Deleted \"%s\"."), plugin_name), "success");
         },
         _L("Deleting plugin"), _L("Deleting plugin..."));
 }
@@ -1130,14 +1182,15 @@ void PluginsDialog::unsubscribe_cloud_plugin(const PluginDescriptor& plugin)
             const bool succeeded = PluginManager::instance().delete_and_unsubscribe_cloud_plugin(plugin_key, error);
             store_plugin_operation_result(state, succeeded, std::move(error));
         },
-        [this, state]() {
+        [this, state, plugin_name]() {
             std::string error;
             if (!take_plugin_operation_result(state, error)) {
-                wxMessageBox(error.empty() ? _L("Failed to unsubscribe plugin.") : from_u8(error), _L("Plugins"), wxOK | wxICON_ERROR, this);
+                show_status(error.empty() ? _L("Failed to unsubscribe plugin.") : from_u8(error), "error");
                 return;
             }
 
             send_plugins();
+            show_status(wxString::Format(_L("Unsubscribed \"%s\"."), plugin_name), "success");
         },
         _L("Unsubscribing plugin"), _L("Deleting local files and unsubscribing plugin..."));
 }
@@ -1150,7 +1203,7 @@ void PluginsDialog::reinstall_local_plugin(const std::string& plugin_key)
     PluginManager& manager = PluginManager::instance();
     const bool was_loaded  = manager.get_loader().is_plugin_loaded(plugin_key);
     if (!manager.get_loader().unload_plugin(plugin_key)) {
-        wxMessageBox(_L("Failed to unload plugin."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        show_status(_L("Failed to unload plugin."), "warn");
         send_plugins();
         return;
     }
@@ -1158,10 +1211,13 @@ void PluginsDialog::reinstall_local_plugin(const std::string& plugin_key)
     manager.get_loader().load_plugin(manager.get_catalog(), plugin_key, false);
 
     if (!was_loaded && !manager.get_loader().unload_plugin(plugin_key)) {
-        wxMessageBox(_L("Plugin reloaded, but failed to restore the inactive state."), _L("Plugins"), wxOK | wxICON_WARNING, this);
+        show_status(_L("Plugin reloaded, but failed to restore the inactive state."), "warn");
+        send_plugins();
+        return;
     }
 
     send_plugins();
+    show_status(wxString::Format(_L("Reloaded \"%s\"."), plugin_display_name(plugin_key)), "success");
 }
 
 void PluginsDialog::reinstall_cloud_plugin(const PluginDescriptor& plugin)
@@ -1176,7 +1232,7 @@ void PluginsDialog::reinstall_cloud_plugin(const PluginDescriptor& plugin)
     std::string error;
     if (plugin.has_local_package()) {
         if (!manager.delete_plugin(plugin_key, error)) {
-            wxMessageBox(from_u8(error.empty() ? "Failed to delete plugin." : error), _L("Plugins"), wxOK | wxICON_ERROR, this);
+            show_status(error.empty() ? _L("Failed to delete plugin.") : from_u8(error), "error");
             send_plugins();
             return;
         }
@@ -1194,6 +1250,7 @@ void PluginsDialog::reinstall_cloud_plugin(const PluginDescriptor& plugin)
     }
 
     send_plugins();
+    show_status(wxString::Format(_L("Reloaded \"%s\"."), plugin_display_name(plugin_key)), "success");
 }
 
 void PluginsDialog::delete_mine_local_and_cloud_plugin(const std::string& plugin_key)
@@ -1211,8 +1268,7 @@ void PluginsDialog::delete_mine_local_and_cloud_plugin(const std::string& plugin
 
     std::string error;
     if (!PluginManager::instance().delete_mine_local_and_cloud_plugin(plugin_key, error)) {
-        wxMessageBox(error.empty() ? _L("Failed to delete plugin from local and cloud.") : from_u8(error), _L("Plugins"),
-                     wxOK | wxICON_ERROR, this);
+        show_status(error.empty() ? _L("Failed to delete plugin from local and cloud.") : from_u8(error), "error");
         return;
     }
 
@@ -1221,6 +1277,7 @@ void PluginsDialog::delete_mine_local_and_cloud_plugin(const std::string& plugin
     // re-syncs the cloud list itself), so a UI refresh is sufficient here — an extra
     // clearing rescan + cloud fetch would be redundant.
     send_plugins();
+    show_status(wxString::Format(_L("Deleted \"%s\"."), plugin_name), "success");
 }
 
 }} // namespace Slic3r::GUI
