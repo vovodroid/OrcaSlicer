@@ -10,7 +10,7 @@
 
 namespace Slic3r {
 
-enum class PluginCapabilityType { PostProcessing = 0, PrinterConnection, Automation, Analysis, Importer, Exporter, Visualization, Script, Unknown };
+enum class PluginCapabilityType { PostProcessing = 0, PrinterConnection, Automation, Analysis, Importer, Exporter, Visualization, Script, SlicingPipeline, Unknown };
 
 inline std::string plugin_capability_type_to_string(PluginCapabilityType type)
 {
@@ -23,6 +23,7 @@ inline std::string plugin_capability_type_to_string(PluginCapabilityType type)
     case PluginCapabilityType::Exporter: return "exporter";
     case PluginCapabilityType::Visualization: return "visualization";
     case PluginCapabilityType::Script: return "script";
+    case PluginCapabilityType::SlicingPipeline: return "slicing-pipeline";
     default: return "unknown";
     }
 }
@@ -38,6 +39,7 @@ inline std::string plugin_capability_type_display_name(PluginCapabilityType type
     case PluginCapabilityType::Exporter: return "Exporter";
     case PluginCapabilityType::Visualization: return "Visualization";
     case PluginCapabilityType::Script: return "Script";
+    case PluginCapabilityType::SlicingPipeline: return "Slicing Pipeline";
     default: return "Unknown";
     }
 }
@@ -67,6 +69,8 @@ inline PluginCapabilityType plugin_capability_type_from_string(std::string_view 
         return PluginCapabilityType::Visualization;
     if (lowered == "script")
         return PluginCapabilityType::Script;
+    if (lowered == "slicing-pipeline")
+        return PluginCapabilityType::SlicingPipeline;
     return PluginCapabilityType::Unknown;
 }
 

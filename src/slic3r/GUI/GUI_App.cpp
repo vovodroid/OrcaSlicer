@@ -81,6 +81,7 @@
 #include "slic3r/plugin/PluginManager.hpp"
 #include "slic3r/plugin/PluginHostUi.hpp"
 #include "slic3r/plugin/PythonInterpreter.hpp"
+#include "slic3r/plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.hpp"
 
 #include "GUI.hpp"
 #include "GUI_Utils.hpp"
@@ -3121,6 +3122,61 @@ bool GUI_App::on_init_inner()
         const std::string identity = descriptor.is_cloud_plugin() ? descriptor.name : descriptor.plugin_key;
         return identity + ';' + descriptor.cloud_uuid() + ';' + cap_name;
     });
+
+    // Orca: register the slicing-pipeline plugin dispatcher (mirrors set_resolve_capability_fn: the
+    // GUI/plugin layer supplies the Python bridge so libslic3r stays free of any plugin dependency).
+    // Print::process() fires this hook at each pipeline seam on the slicing worker thread; here we run
+    // the picker-selected SlicingPipeline capabilities. Per capability we acquire the GIL, honor
+    // cancellation, and convert a plugin failure into a (non-critical) SlicingError so it surfaces as a
+    // slicing-error notification rather than the fatal-crash dialog.
+    Slic3r::Print::set_slicing_pipeline_hook_fn(
+        [](Slic3r::Print& print, const Slic3r::PrintObject* object, Slic3r::SlicingPipelineStep step) {
+            const auto* caps  = print.config().option<ConfigOptionStrings>("slicing_pipeline_plugin");
+            // `plugins` is a dynamic-only manifest key (not a static PrintConfig member), so it
+            // must be read from the full/dynamic config -- reading it off print.config() (the
+            // static PrintConfig) always yields nullptr and skips every capability. Mirrors the
+            // post-process path (PostProcessor.cpp, via BackgroundSlicingProcess::full_print_config()).
+            const auto* plugs = print.full_print_config().option<ConfigOptionStrings>("plugins");
+            if (caps == nullptr || caps->values.empty())
+                return;
+
+            Slic3r::execute_capabilities_from_refs<Slic3r::SlicingPipelinePluginCapability>(
+                *caps, plugs, Slic3r::PluginCapabilityType::SlicingPipeline,
+                [&](std::shared_ptr<Slic3r::SlicingPipelinePluginCapability> cap, const Slic3r::PluginCapabilityRef& ref) {
+                    Slic3r::ExecutionResult r;
+                    try {
+                        // GIL is acquired per capability (not once for the whole dispatch) so it is
+                        // released between capabilities. ctx is built inside this scope because
+                        // ctx.owner is a py::capsule: it must be created and destroyed while the GIL
+                        // is held (ctx destructs before `gil`, so its capsule is decref'd under GIL).
+                        PythonGILState gil;
+                        // throw_if_canceled() is protected on PrintBase; canceled() is the public
+                        // equivalent check (same cancel flag), so honor cancellation via it.
+                        if (print.canceled())
+                            throw Slic3r::CanceledException();
+                        Slic3r::SlicingPipelineContext ctx;
+                        ctx.orca_version = SoftFever_VERSION;
+                        ctx.step   = step;
+                        ctx.print  = &print;
+                        ctx.object = object;
+                        // No-op-destructor capsule threaded into every zero-copy numpy array as its
+                        // base. It references `print` but frees nothing: `print` is owned by libslic3r
+                        // and outlives the hook, and arrays are valid only during this execute() call.
+                        ctx.owner  = pybind11::capsule(&print, [](void*) {});
+                        r = cap->execute(ctx);
+                    } catch (const Slic3r::CanceledException&) {
+                        throw; // cancellation must reach process(), never become a slicing error
+                    } catch (const std::exception& ex) {
+                        // A Python raise reaches here as pybind11::error_already_set; surface it as a
+                        // (non-critical) slicing error instead of a crash.
+                        throw Slic3r::SlicingError(std::string("Slicing pipeline plugin '") +
+                                                   ref.capability_name + "' error: " + ex.what());
+                    }
+                    if (r.status == Slic3r::PluginResult::FatalError)
+                        throw Slic3r::SlicingError(std::string("Slicing pipeline plugin '") +
+                                                   ref.capability_name + "' error: " + r.message);
+                });
+        });
 
     // Set cloud plugin directory from previous session so cloud-installed
     // plugins are discovered even before the network agent is ready.

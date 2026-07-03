@@ -1626,6 +1626,11 @@ void ConfigBase::save_plugin_collection(const std::string& opt_key, const Config
             append_ref(val, "post-processing");
     } else if (opt_key == "printer_agent") {
         append_ref((dynamic_cast<const ConfigOptionString *>(opt))->value, "printer-connection");
+    } else if (opt_key == "slicing_pipeline_plugin") {
+        if (const auto* vec = dynamic_cast<const ConfigOptionStrings*>(opt)) {
+            for (const std::string& val : vec->vserialize())
+                append_ref(val, "slicing-pipeline");
+        }
     }
     // Extend for other plugin-backed settings as needed.
 }

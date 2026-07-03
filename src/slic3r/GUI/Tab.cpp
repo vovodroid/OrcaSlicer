@@ -3079,6 +3079,12 @@ void TabPrint::build()
         option.opt.full_width = true;
         optgroup->append_single_option_line(option, "others_settings_plugin_picker");
 
+        optgroup = page->new_optgroup(L("Slicing Pipeline Plugin"), L"param_gcode", 0);
+        optgroup->hide_labels();
+        option = optgroup->get_option("slicing_pipeline_plugin");
+        option.opt.full_width = true;
+        optgroup->append_single_option_line(option, "others_settings_plugin_picker");
+
         optgroup = page->new_optgroup(L("Notes"), "note", 0);
         option = optgroup->get_option("notes");
         option.opt.full_width = true;

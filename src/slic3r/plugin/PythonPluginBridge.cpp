@@ -16,6 +16,7 @@
 #include "pluginTypes/gcode/GCodePluginCapability.hpp"
 #include "pluginTypes/printerAgent/PrinterAgentPluginCapability.hpp"
 #include "pluginTypes/script/ScriptPluginCapability.hpp"
+#include "pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.hpp"
 
 namespace py = pybind11;
 
@@ -294,6 +295,7 @@ void bind_python_api(pybind11::module_& m)
                            .value("Exporter", PluginCapabilityType::Exporter)
                            .value("Visualization", PluginCapabilityType::Visualization)
                            .value("Script", PluginCapabilityType::Script)
+                           .value("SlicingPipeline", PluginCapabilityType::SlicingPipeline)
                            .value("Unknown", PluginCapabilityType::Unknown)
                            .export_values();
 
@@ -337,6 +339,7 @@ void bind_python_api(pybind11::module_& m)
     GCodePluginCapability::RegisterBindings(m, pluginTypes);
     PrinterAgentPluginCapability::RegisterBindings(m, pluginTypes);
     ScriptPluginCapability::RegisterBindings(m, pluginTypes);
+    SlicingPipelinePluginCapability::RegisterBindings(m, pluginTypes);
     PluginHostApi::RegisterBindings(m);
     BOOST_LOG_TRIVIAL(debug) << "Registered ScriptPluginCapability Python bindings";
 

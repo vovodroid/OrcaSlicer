@@ -882,6 +882,11 @@ enum FilamentCompatibilityType {
     InvalidTemperatureRange
 };
 
+enum class SlicingPipelineStep {
+    Slice, Perimeters, EstimateCurledExtrusions, Infill, Ironing, Contouring,
+    SupportMaterial, DetectOverhangsForLift, SimplifyPath, WipeTower, SkirtBrim
+};
+
 // The complete print tray with possibly multiple objects.
 class Print : public PrintBaseWithState<PrintStep, psCount>
 {
@@ -891,6 +896,11 @@ private: // Prevents erroneous use by other classes.
     typedef std::pair<PrintObject *, bool>         PrintObjectInfo;
 
 public:
+    using SlicingPipelineHookFn = std::function<void(Print&, const PrintObject*, SlicingPipelineStep)>;
+    // Cross-layer injection (mirrors ConfigBase::set_resolve_capability_fn): the GUI/plugin
+    // layer registers a dispatcher; libslic3r stays free of any plugin/Python dependency.
+    static void set_slicing_pipeline_hook_fn(SlicingPipelineHookFn fn) { s_slicing_pipeline_hook_fn = std::move(fn); }
+
     Print() = default;
 	virtual ~Print() { this->clear(); }
 
@@ -1146,6 +1156,13 @@ private:
 
     // Islands of objects and their supports extruded at the 1st layer.
     Polygons            first_layer_islands() const;
+
+    static SlicingPipelineHookFn s_slicing_pipeline_hook_fn;
+    bool m_pipeline_plugin_active { false };
+    void run_pipeline_hook(SlicingPipelineStep step, const PrintObject* object) {
+        if (m_pipeline_plugin_active && s_slicing_pipeline_hook_fn)
+            s_slicing_pipeline_hook_fn(*this, object, step);
+    }
 
     PrintConfig                             m_config;
     PrintObjectConfig                       m_default_object_config;

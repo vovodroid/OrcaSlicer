@@ -1,0 +1,215 @@
+#include <catch2/catch_test_macros.hpp>
+#include "libslic3r/PrintConfig.hpp"
+using namespace Slic3r;
+
+TEST_CASE("slicing_pipeline_plugin option exists and defaults empty", "[slicing_pipeline]") {
+    DynamicPrintConfig cfg = DynamicPrintConfig::full_print_config();
+    const ConfigOptionStrings* opt = cfg.option<ConfigOptionStrings>("slicing_pipeline_plugin");
+    REQUIRE(opt != nullptr);
+    CHECK(opt->values.empty());
+    const ConfigOptionDef* def = cfg.def()->get("slicing_pipeline_plugin");
+    REQUIRE(def != nullptr);
+    CHECK(def->support_plugin == true);
+    CHECK(def->gui_type == ConfigOptionDef::GUIType::plugin_picker);
+}
+
+#include "libslic3r/Print.hpp"
+
+TEST_CASE("slicing pipeline hook setter is a no-op-safe injection", "[slicing_pipeline]") {
+    int calls = 0;
+    Slic3r::Print::set_slicing_pipeline_hook_fn(
+        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep){ ++calls; });
+    Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr); // reset — must be legal
+    CHECK(calls == 0);
+}
+
+#include "test_data.hpp"
+#include <vector>
+#include <algorithm>
+using namespace Slic3r::Test;
+
+TEST_CASE("SlicingPipeline hook fires once per step per object in order", "[slicing_pipeline]") {
+    struct Call { const Slic3r::PrintObject* obj; Slic3r::SlicingPipelineStep step; };
+    std::vector<Call> calls;
+    Slic3r::Print::set_slicing_pipeline_hook_fn(
+        [&](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStep s){ calls.push_back({o, s}); });
+
+    Slic3r::Print print; Slic3r::Model model;
+    Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
+    config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"})); // activate
+    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    print.process();
+    Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+
+    using S = Slic3r::SlicingPipelineStep;
+    auto count = [&](S s){ return std::count_if(calls.begin(), calls.end(), [&](const Call& c){ return c.step == s; }); };
+    CHECK(count(S::Slice) == 1);
+    CHECK(count(S::Perimeters) == 1);
+    CHECK(count(S::Infill) == 1);
+    CHECK(count(S::WipeTower) == 1);
+    CHECK(count(S::SkirtBrim) == 1);
+    // print-wide steps carry a null object:
+    for (const auto& c : calls)
+        if (c.step == S::WipeTower || c.step == S::SkirtBrim) CHECK(c.obj == nullptr);
+    // Slice must fire before Perimeters for the same object:
+    auto idx = [&](S s){ for (size_t i=0;i<calls.size();++i) if (calls[i].step==s) return (int)i; return -1; };
+    CHECK(idx(S::Slice) < idx(S::Perimeters));
+}
+
+#include <sstream>
+
+TEST_CASE("Inactive hook: process output is byte-identical (no-op hook == unset)", "[slicing_pipeline]") {
+    // Three configurations must all normalize to the same G-code:
+    //   (activate=false, hook=none) baseline -- feature entirely absent.
+    //   (activate=false, hook=noop) hook registered but option empty -> gated off, never fires.
+    //   (activate=true,  hook=noop) hook ACTIVE and firing at every pipeline seam, mutating
+    //                               nothing. This is the real backward-compat claim: an active
+    //                               but non-mutating hook must not perturb the output.
+    auto run = [](bool activate, bool set_noop_hook) {
+        Slic3r::Print print; Slic3r::Model model;
+        auto config = Slic3r::DynamicPrintConfig::full_print_config();
+        // Activating requires BOTH a non-empty option and a registered hook (see Print::apply).
+        if (activate)
+            config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
+        if (set_noop_hook)
+            Slic3r::Print::set_slicing_pipeline_hook_fn([](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep){});
+        else
+            Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        std::string g = Slic3r::Test::gcode(print);
+        Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+        return g;
+    };
+    // Pre-existing nondeterminism unrelated to the hook makes a raw string compare
+    // impossible: exported gcode embeds a wall-clock timestamp and ids derived from
+    // the process-global ObjectID counter (never reset between runs) in a handful of
+    // comment lines. Strip exactly those comment lines; every other byte -- all
+    // motion/extrusion/temperature commands and all remaining comments -- is still
+    // compared, so the assertion still proves the inactive hook leaves all
+    // machine-meaningful output byte-identical.
+    auto normalize = [](const std::string& gcode) {
+        std::string out; out.reserve(gcode.size());
+        std::istringstream in(gcode);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.compare(0, 15, "; generated by ") == 0) continue;    // wall-clock timestamp
+            if (line.compare(0, 18, "; model label id: ") == 0) continue; // ObjectID-derived
+            // "; [stop] printing object <name> id:N copy M" and
+            // "; start/stop printing object, unique label id: N" (ObjectID-derived):
+            if (line.find("printing object") != std::string::npos && line.find(" id:") != std::string::npos) continue;
+            // Config-dump comment: the active run legitimately records the selected plugin
+            // ("; slicing_pipeline_plugin = probe") while the baseline leaves it empty. This
+            // is a machine-irrelevant comment, not motion -- strip it so the comparison isolates
+            // whether the active-but-non-mutating hook perturbs the real toolpath.
+            if (line.find("slicing_pipeline_plugin") != std::string::npos) continue;
+            out += line; out += '\n';
+        }
+        return out;
+    };
+    const std::string baseline = normalize(run(false, false));       // feature absent
+    CHECK(normalize(run(false, true)) == baseline);                   // gated off: hook never fires
+    CHECK(normalize(run(true,  true)) == baseline);                   // active no-op hook fires everywhere, mutates nothing
+}
+
+// Fix 4(a): gating negative path. With the option EMPTY the plugin is inactive, so a
+// registered hook must NOT fire even once across a full slice (m_pipeline_plugin_active
+// stays false in Print::apply). Distinct from the byte-identical test above: this asserts
+// the gate directly by counting invocations rather than comparing output.
+TEST_CASE("Empty option: registered hook is gated off and never fires", "[slicing_pipeline]") {
+    int calls = 0;
+    Slic3r::Print::set_slicing_pipeline_hook_fn(
+        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep){ ++calls; });
+    Slic3r::Print print; Slic3r::Model model;
+    auto config = Slic3r::DynamicPrintConfig::full_print_config();
+    // option left EMPTY -> inactive regardless of the registered hook.
+    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    print.process();
+    Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+    CHECK(calls == 0);
+}
+
+// Fix 4(b): duplicate-skip gating. Two ModelObjects that share one mesh_ptr are detected as
+// identical by Print::process()'s is_print_object_the_same(); the second becomes a shared
+// (duplicate) object and is NOT re-sliced, so the Slice hook must fire exactly once even
+// though there are two print objects. The clone shares mesh_ptr and copies the volume
+// transformation/config (ModelVolume copy ctor), which the equality check requires.
+TEST_CASE("Duplicate objects share a slice: Slice hook fires exactly once", "[slicing_pipeline]") {
+    int slice_calls = 0, perim_calls = 0;
+    Slic3r::Print::set_slicing_pipeline_hook_fn(
+        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep s){
+            if (s == Slic3r::SlicingPipelineStep::Slice)      ++slice_calls;
+            if (s == Slic3r::SlicingPipelineStep::Perimeters) ++perim_calls;
+        });
+
+    Slic3r::Print print; Slic3r::Model model;
+    auto config = Slic3r::DynamicPrintConfig::full_print_config();
+    config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"})); // activate
+
+    // init_print builds one arranged, on-bed cube object (o1).
+    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    Slic3r::ModelObject* o1 = model.objects.front();
+    // Model::add_object(const ModelObject&) force-sets object extruder=1 on the clone; give o1
+    // the same so the two objects' configs match (is_print_object_the_same compares config).
+    if (!o1->config.has("extruder"))
+        o1->config.set_key_value("extruder", new Slic3r::ConfigOptionInt(1));
+    // Clone o1: shares mesh_ptr and copies the volume transformation + config (genuine duplicate).
+    Slic3r::ModelObject* o2 = model.add_object(*o1);
+    // Shift the clone in X so validate() sees no collision (20mm cubes -> 40mm centres = 20mm gap).
+    for (Slic3r::ModelInstance* inst : o2->instances)
+        inst->set_offset(inst->get_offset() + Slic3r::Vec3d(40.0, 0.0, 0.0));
+
+    print.apply(model, config);
+    print.validate();
+    print.set_status_silent();
+    print.process();
+    Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+
+    REQUIRE(print.objects().size() == 2);   // two print objects present...
+    CHECK(slice_calls == 1);                // ...but the duplicate is skipped -> one slice
+    CHECK(perim_calls == 1);                // and one perimeters pass (the sliced object)
+}
+
+#include "libslic3r/Layer.hpp"          // Layer, LayerRegion (full defs for the cascade hook)
+#include "libslic3r/ClipperUtils.hpp"   // offset_ex
+
+// Task 11: the correctness heart of the mutation feature. A C++ hook insets every
+// region's `slices` at the Slice boundary (via SurfaceCollection::set with offset
+// polygons); because make_perimeters() derives fill_surfaces from slices AFTER the
+// Slice hook fires (see Print::process's split slice loop), the downstream
+// fill_surfaces area must shrink relative to a baseline (un-inset) run. This proves
+// the mutation cascade end-to-end using the same C++ APIs the Python mutators wrap.
+TEST_CASE("Mutating slices at the Slice boundary cascades downstream", "[slicing_pipeline]") {
+    auto fill_area = [](bool inset) {
+        Slic3r::Print print; Slic3r::Model model;
+        auto config = Slic3r::DynamicPrintConfig::full_print_config();
+        config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
+        if (inset) Slic3r::Print::set_slicing_pipeline_hook_fn(
+            [](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStep s){
+                if (s != Slic3r::SlicingPipelineStep::Slice || !o) return;
+                for (Slic3r::Layer* l : const_cast<Slic3r::PrintObject*>(o)->layers())
+                    for (Slic3r::LayerRegion* r : l->regions()) {
+                        Slic3r::Surfaces in = r->slices.surfaces;
+                        for (auto& sf : in) sf.expolygon = offset_ex(sf.expolygon, -scale_(1.0)).front();
+                        r->slices.set(std::move(in));
+                    }
+            });
+        else Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        print.process();
+        double a = 0; for (auto* l : print.objects().front()->layers()) for (auto* r : l->regions()) for (auto& s : r->fill_surfaces.surfaces) a += s.expolygon.area();
+        Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+        return a;
+    };
+    CHECK(fill_area(true) < fill_area(false));
+}
+
+TEST_CASE("Changing slicing_pipeline_plugin invalidates posSlice", "[slicing_pipeline]") {
+    Slic3r::Print print; Slic3r::Model model;
+    auto config = Slic3r::DynamicPrintConfig::full_print_config();
+    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    print.process();
+    REQUIRE(print.objects().front()->is_step_done(posSlice));
+    config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
+    print.apply(model, config);
+    CHECK_FALSE(print.objects().front()->is_step_done(posSlice)); // re-slice required
+}

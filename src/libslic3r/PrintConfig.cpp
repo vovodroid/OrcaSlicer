@@ -5122,6 +5122,16 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionStrings());
 
+    def = this->add("slicing_pipeline_plugin", coStrings);
+    def->label = L("Slicing Pipeline Plugin");
+    def->tooltip = L("Python plugin(s) invoked at each slicing pipeline step to read and modify intermediate slicing data. Research/experimental.");
+    def->gui_type = ConfigOptionDef::GUIType::plugin_picker;
+    def->plugin_type = "slicing-pipeline";
+    def->support_plugin = true;
+    def->full_width = true;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionStrings());
+
     def = this->add("printer_model", coString);
     def->label = L("Printer type");
     def->tooltip = L("Type of the printer.");
