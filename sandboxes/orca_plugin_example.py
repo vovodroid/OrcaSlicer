@@ -3,12 +3,12 @@
 # dependencies = ["numpy"]
 #
 # [tool.orcaslicer.plugin]
-# name = "Orca Host Inspector Panel"
+# name = "Orca Inspector Example"
 # description = "An interactive panel that browses the whole orca.host read-only API and demos every orca.host.ui facility."
 # author = "OrcaSlicer"
 # version = "2.0.0"
 # ///
-"""Orca Host Inspector — the worked sample for `orca.host` and `orca.host.ui`.
+"""Orca Inspector — the worked example for `orca.host` and `orca.host.ui`.
 
 Run it from the Plugins dialog. It opens a NON-MODAL window (OrcaSlicer stays
 usable) with a sidebar of sections, each exercising one part of the API:
@@ -567,7 +567,7 @@ PAGE = r"""<!DOCTYPE html>
 </head>
 <body>
   <header>
-    <h1>Host Inspector</h1>
+    <h1>Orca Inspector</h1>
     <span id="stamp"></span>
     <button class="small" onclick="refresh()">Refresh</button>
     <button class="small secondary" onclick="orca.close()">Close</button>
@@ -1146,12 +1146,12 @@ CHILD_PAGE = r"""<!DOCTYPE html>
 # --------------------------------------------------------------------------- #
 # the plugin
 # --------------------------------------------------------------------------- #
-class HostInspectorPanel(orca.script.ScriptPluginCapabilityBase):
+class OrcaInspectorPanel(orca.script.ScriptPluginCapabilityBase):
     win = None
     child = None
 
     def get_name(self):
-        return "Host Inspector"
+        return "Orca Inspector"
 
     def execute(self):
         # Capability objects are instantiated once per plugin load, so a second
@@ -1165,14 +1165,14 @@ class HostInspectorPanel(orca.script.ScriptPluginCapabilityBase):
         # Non-modal: returns immediately. The window is host-owned and lives on
         # after execute() returns; on_message keeps firing when the page posts.
         self.win = orca.host.ui.create_window(
-            title="Host Inspector",
+            title="Orca Inspector",
             html=PAGE,
             width=940,
             height=680,
             on_message=self.on_message,
             on_close=self.on_close,
         )
-        return orca.ExecutionResult.success("Host Inspector opened.")
+        return orca.ExecutionResult.success("Orca Inspector opened.")
 
     # Called on the UI thread when the page posts a message. Every branch posts
     # a reply carrying ok/error so the page never waits on a silent failure.
@@ -1192,7 +1192,7 @@ class HostInspectorPanel(orca.script.ScriptPluginCapabilityBase):
         if self.child is not None:
             self.child.close()
             self.child = None
-        print("Host Inspector closed")
+        print("Orca Inspector closed")
 
     def send_section(self, section):
         builder = SECTION_BUILDERS.get(section)
@@ -1232,8 +1232,8 @@ class HostInspectorPanel(orca.script.ScriptPluginCapabilityBase):
         try:
             if action == "message":
                 clicked = orca.host.ui.message(
-                    msg.get("text") or "Hello from Host Inspector",
-                    title="Host Inspector",
+                    msg.get("text") or "Hello from Orca Inspector",
+                    title="Orca Inspector",
                     buttons=msg.get("buttons", "ok"),
                     icon=msg.get("icon", "info"))
                 report(f"user clicked {clicked!r}")
@@ -1242,7 +1242,7 @@ class HostInspectorPanel(orca.script.ScriptPluginCapabilityBase):
                 # blocks right here until the dialog closes. on_message still
                 # fires while the dialog is open (the log updates live).
                 result = orca.host.ui.show_dialog(
-                    html=MODAL_PAGE, title="Host Inspector — modal", width=420, height=280,
+                    html=MODAL_PAGE, title="Orca Inspector — modal", width=420, height=280,
                     on_message=lambda m: self.win.post(
                         {**reply, "ok": True, "result": f"modal posted {m!r} while open"}))
                 report(f"show_dialog returned {result!r}")
@@ -1257,7 +1257,7 @@ class HostInspectorPanel(orca.script.ScriptPluginCapabilityBase):
                     report("child already open")
                 else:
                     self.child = orca.host.ui.create_window(
-                        title="Host Inspector — child", html=CHILD_PAGE,
+                        title="Orca Inspector — child", html=CHILD_PAGE,
                         width=380, height=240, on_message=self.on_child_message,
                         on_close=lambda: self.win.post(
                             {**reply, "ok": True, "result": "child window closed"}))
@@ -1289,7 +1289,7 @@ class HostInspectorPanel(orca.script.ScriptPluginCapabilityBase):
                  orca.host.ui.PD_ESTIMATED_TIME | orca.host.ui.PD_REMAINING_TIME)
         outcome = "completed 40 steps"
         with orca.host.ui.create_progress_dialog(
-                "Host Inspector", "Crunching very important numbers…",
+                "Orca Inspector", "Crunching very important numbers…",
                 maximum=40, style=style) as progress:
             for step in range(1, 41):
                 time.sleep(0.05)
@@ -1302,7 +1302,7 @@ class HostInspectorPanel(orca.script.ScriptPluginCapabilityBase):
     def pulse_demo(self):
         # ui.ProgressDialog(...) is the constructor form of create_progress_dialog().
         with orca.host.ui.ProgressDialog(
-                "Host Inspector", "Waiting for something indeterminate…",
+                "Orca Inspector", "Waiting for something indeterminate…",
                 style=orca.host.ui.PD_APP_MODAL | orca.host.ui.PD_AUTO_HIDE) as progress:
             for _ in range(10):                     # manual single-shot pulses...
                 time.sleep(0.1)
@@ -1317,6 +1317,6 @@ class HostInspectorPanel(orca.script.ScriptPluginCapabilityBase):
 
 
 @orca.plugin
-class HostInspectorPlugin(orca.base):
+class OrcaInspectorPlugin(orca.base):
     def register_capabilities(self):
-        orca.register_capability(HostInspectorPanel)
+        orca.register_capability(OrcaInspectorPanel)
