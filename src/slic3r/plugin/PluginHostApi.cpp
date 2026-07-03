@@ -396,6 +396,25 @@ void PluginHostApi::RegisterBindings(pybind11::module_& module)
         .def("matrix", [](const ModelInstance& instance) { return mat4_to_numpy(instance.get_matrix()); },
             "Object-to-world 4x4 float64 affine matrix (copy). Requires numpy.")
         .def("is_left_handed", &ModelInstance::is_left_handed)
+        // Assemble-view placement. Each instance carries a second transform used only by
+        // the Assemble view, set from stored 3mf assemble data or derived from the regular
+        // transform. Until then (is_assemble_initialized() false) it is identity.
+        .def("is_assemble_initialized", [](ModelInstance& instance) { return instance.is_assemble_initialized(); })
+        .def("assemble_offset", [](const ModelInstance& instance) {
+            return vec3_to_tuple(instance.get_assemble_transformation().get_offset());
+        })
+        .def("assemble_rotation", [](const ModelInstance& instance) {
+            return vec3_to_tuple(instance.get_assemble_transformation().get_rotation());
+        })
+        // 4x4 float64 affine matrix placing the object in the Assemble view. Requires numpy.
+        .def("assemble_matrix", [](const ModelInstance& instance) {
+            return mat4_to_numpy(instance.get_assemble_transformation().get_matrix());
+        }, "Assemble-view 4x4 float64 affine matrix (copy). Requires numpy.")
+        // Offset from the instance origin to its position within the source assembly,
+        // recorded at import time (e.g. from a STEP assembly).
+        .def("offset_to_assembly", [](const ModelInstance& instance) {
+            return vec3_to_tuple(instance.get_offset_to_assembly());
+        })
         // World-space bounding box of this instance.
         .def("bounding_box", [](ModelInstance& instance) {
             const ModelObject* object = instance.get_object();
@@ -409,6 +428,9 @@ void PluginHostApi::RegisterBindings(pybind11::module_& module)
         .def_readonly("name", &ModelObject::name)
         .def_readonly("module_name", &ModelObject::module_name)
         .def_readonly("input_file", &ModelObject::input_file)
+        // Import-time flag only: the GUI's printable toggle writes the per-instance
+        // ModelInstance::printable and never updates this field, so derive an
+        // object's effective state from its instances.
         .def_readonly("printable", &ModelObject::printable)
         .def("instance_count", [](const ModelObject& object) {
             return object.instances.size();
