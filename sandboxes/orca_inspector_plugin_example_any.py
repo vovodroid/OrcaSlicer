@@ -6,7 +6,7 @@
 # name = "Orca Inspector Example"
 # description = "An interactive panel that browses the whole orca.host read-only API and demos every orca.host.ui facility."
 # author = "OrcaSlicer"
-# version = "2.0.0"
+# version = "0.0.1"
 # ///
 """Orca Inspector — the worked example for `orca.host` and `orca.host.ui`.
 
