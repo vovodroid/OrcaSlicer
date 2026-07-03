@@ -876,7 +876,7 @@ endforeach()
 find_package(NLopt 1.4 REQUIRED)
 
 # Use bundled Python from deps instead of system Python
-set(_bundled_python_version "3.12.3")
+set(_bundled_python_version "3.12.13")
 set(_bundled_python_abi "312")
 string(REGEX REPLACE "^([0-9]+\\.[0-9]+)\\..*$" "\\1" _bundled_python_version_short "${_bundled_python_version}")
 set(_bundled_python_root "${CMAKE_PREFIX_PATH}/libpython")

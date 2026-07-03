@@ -2,10 +2,10 @@
 include(ProcessorCount)
 ProcessorCount(NPROC)
 
-set(_python_version "3.12.3")
+set(_python_version "3.12.13")
 string(REGEX REPLACE "^([0-9]+\\.[0-9]+)\\..*" "\\1" _python_version_short "${_python_version}")
 set(_python_url "https://www.python.org/ftp/python/${_python_version}/Python-${_python_version}.tar.xz")
-set(_python_sha256 "56bfef1fdfc1221ce6720e43a661e3eb41785dd914ce99698d8c7896af4bdaa1")
+set(_python_sha256 "c08bc65a81971c1dd5783182826503369466c7e67374d1646519adf05207b684")
 
 if(WIN32)
     if(MSVC_VERSION EQUAL 1800)
@@ -24,10 +24,16 @@ if(WIN32)
         message(FATAL_ERROR "Unsupported MSVC version for CPython build: ${MSVC_VERSION}")
     endif()
 
+    # 64-bit-hosted MSBuild selection (see the build-step comment below). Default
+    # to the amd64 host + x64 tools; only the native ARM64 build differs.
+    set(_python_msbuild_host amd64)
+    set(_python_tool_arch x64)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
         set(_python_pcbuild_platform ARM64)
         set(_python_layout_arch arm64)
         set(_python_pcbuild_output_dir arm64)
+        set(_python_msbuild_host arm64)   # native ARM64 MSBuild already hosts arm64 tools
+        set(_python_tool_arch "")
     elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
         set(_python_pcbuild_platform x64)
         set(_python_layout_arch amd64)
@@ -45,11 +51,36 @@ if(WIN32)
         set(_python_layout_debug ON)
     endif()
 
+    # CPython's PCbuild needs a 64-bit-hosted toolchain: find_msbuild.bat picks the
+    # 32-bit Bin\MSBuild.exe, whose x86 cl.exe/link.exe run out of address space
+    # (fatal C1002 "out of heap space") building the LTCG-optimized pythoncore.
+    # That 32-bit MSBuild ignores PreferredToolArchitecture, so build.bat must be
+    # pointed at a 64-bit MSBuild via the MSBUILD env var. The native arm64 MSBuild
+    # then hosts arm64 tools on its own; the amd64 MSBuild still defaults to x86, so
+    # PreferredToolArchitecture pins it to x64. Scoped to this build step, so
+    # CPython's own sources stay untouched.
+    set(_python_env_args "GIT_CEILING_DIRECTORIES=<SOURCE_DIR>/..")
+    if(CMAKE_GENERATOR_INSTANCE)   # empty for non-VS generators (e.g. Ninja)
+        set(_python_msbuild "${CMAKE_GENERATOR_INSTANCE}/MSBuild/Current/Bin/${_python_msbuild_host}/MSBuild.exe")
+        if(EXISTS "${_python_msbuild}")
+            file(TO_NATIVE_PATH "${_python_msbuild}" _python_msbuild_native)
+            list(APPEND _python_env_args "MSBUILD=${_python_msbuild_native}")
+        else()
+            # Loud signal: a silent fall-through to the 32-bit MSBuild reintroduces C1002.
+            message(WARNING "Bundled Python: 64-bit MSBuild not found at '${_python_msbuild}'. "
+                "CPython will fall back to find_msbuild.bat's default (32-bit) MSBuild, which may "
+                "fail with C1002 (out of heap space) building the optimized pythoncore.")
+        endif()
+    endif()
+    if(_python_tool_arch)
+        list(APPEND _python_env_args "PreferredToolArchitecture=${_python_tool_arch}")
+    endif()
+
     set(_conf_cmd
         cmd /c "echo /p:PlatformToolset=${_python_platform_toolset}>PCbuild\\msbuild.rsp"
     )
     set(_build_cmd
-        ${CMAKE_COMMAND} -E env "GIT_CEILING_DIRECTORIES=<SOURCE_DIR>/.."
+        ${CMAKE_COMMAND} -E env ${_python_env_args}
         cmd /c PCbuild\\build.bat
             -p ${_python_pcbuild_platform}
             -c ${_python_pcbuild_config}
