@@ -385,6 +385,21 @@ function IsPluginChecked(plugin) {
   return GetStatus(plugin) === "Activated";
 }
 
+function HasMixedCapabilityState(plugin) {
+  if (!IsPluginChecked(plugin))
+    return false;
+
+  const toggleableCapabilities = GetCapabilities(plugin).filter((capability) =>
+    capability?.can_toggle !== false &&
+    String(capability?.name || "") &&
+    String(capability?.type_key || "")
+  );
+
+  const hasEnabled = toggleableCapabilities.some((capability) => capability?.enabled === true);
+  const hasDisabled = toggleableCapabilities.some((capability) => capability?.enabled !== true);
+  return hasEnabled && hasDisabled;
+}
+
 function IsPluginLoading(plugin) {
   return GetStatus(plugin) === "Loading";
 }
@@ -420,12 +435,20 @@ function CheckCell(row, plugin) {
     checkboxLabel.classList.add("loading");
   if (!plugin.can_toggle)
     checkboxLabel.classList.add("disabled");
+  const hasMixedCapabilityState = HasMixedCapabilityState(plugin);
+  if (hasMixedCapabilityState)
+    checkboxLabel.classList.add("mixed");
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.className = "plugin-checkbox-input";
   checkbox.checked = IsPluginChecked(plugin);
+  checkbox.indeterminate = hasMixedCapabilityState;
   checkbox.disabled = isLoading || !plugin.can_toggle;
   checkbox.dataset.pluginKey = row.dataset.pluginKey;
+  if (checkbox.indeterminate) {
+    checkbox.setAttribute("aria-checked", "mixed");
+    checkbox.setAttribute("aria-label", "Some plugin capabilities are enabled");
+  }
   const checkboxMark = document.createElement("span");
   checkboxMark.className = "plugin-checkbox-mark";
   checkboxLabel.appendChild(checkbox);

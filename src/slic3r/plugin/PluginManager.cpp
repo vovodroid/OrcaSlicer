@@ -2,10 +2,8 @@
 #include "slic3r/GUI/GUI_App.hpp"
 
 #include <pybind11/embed.h>
-namespace py = pybind11;
 
 #include "PythonPluginBridge.hpp"
-#include "PythonPluginInterface.hpp"
 #include "PluginFsUtils.hpp"
 #include "PythonFileUtils.hpp"
 
@@ -13,7 +11,6 @@ namespace py = pybind11;
 #include <boost/filesystem.hpp>
 #include <mutex>
 #include <algorithm>
-#include <memory>
 #include <chrono>
 #include <slic3r/GUI/NotificationManager.hpp>
 #include <slic3r/plugin/PluginDescriptor.hpp>

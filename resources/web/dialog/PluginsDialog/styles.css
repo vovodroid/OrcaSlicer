@@ -878,6 +878,25 @@ body {
   transform: rotate(45deg);
 }
 
+.plugin-checkbox-input:indeterminate + .plugin-checkbox-mark,
+.plugin-checkbox.mixed .plugin-checkbox-mark {
+  border-color: #009688;
+  background: #009688;
+}
+
+.plugin-checkbox-input:indeterminate + .plugin-checkbox-mark::after,
+.plugin-checkbox.mixed .plugin-checkbox-mark::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 5px;
+  width: 6px;
+  height: 0;
+  border: solid #fff;
+  border-width: 1.5px 0 0 0;
+  transform: none;
+}
+
 .plugin-checkbox-input:disabled + .plugin-checkbox-mark {
   opacity: 0.6;
 }

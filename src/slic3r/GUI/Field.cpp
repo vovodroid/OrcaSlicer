@@ -33,7 +33,6 @@
 #include "Widgets/TextCtrl.h"
 
 #include "../Utils/ColorSpaceConvert.hpp"
-#include "slic3r/plugin/PluginManager.hpp"
 #ifdef __WXOSX__
 #define wxOSX true
 #else
