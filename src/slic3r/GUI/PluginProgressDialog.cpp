@@ -10,11 +10,15 @@ PluginProgressDialog::PluginProgressDialog(wxWindow*       parent,
                                            int             maximum,
                                            int             style,
                                            CloseHandler    on_destroyed)
-    : wxProgressDialog(title, message, maximum, parent, style)
+    : ProgressDialog(title, message, maximum, parent, style)
     , m_pulse_message(message)
     , m_on_destroyed(std::move(on_destroyed))
 {
-    Bind(wxEVT_CLOSE_WINDOW, &PluginProgressDialog::on_close_window, this);
+    // The base ProgressDialog already binds wxEVT_CLOSE_WINDOW (its OnClose vetoes
+    // a non-cancelable dialog and marks a cancelable one Canceled). We deliberately
+    // don't add a second handler: a user-initiated close surfaces to the plugin as
+    // update()/pulse() returning false, and programmatic close() calls Destroy()
+    // directly, so no extra wiring is needed here.
 }
 
 PluginProgressDialog::~PluginProgressDialog()
@@ -118,11 +122,6 @@ void PluginProgressDialog::close()
     m_open = false;
     stop_pulse();
     Destroy();
-}
-
-void PluginProgressDialog::on_close_window(wxCloseEvent& /*event*/)
-{
-    close();
 }
 
 void PluginProgressDialog::on_timer(wxTimerEvent& /*event*/)

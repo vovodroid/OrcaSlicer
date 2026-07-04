@@ -5,17 +5,24 @@
 #include <memory>
 
 #include <wx/event.h>
-#include <wx/progdlg.h>
 #include <wx/string.h>
 #include <wx/timer.h>
 #include <wx/window.h>
+
+#include "Widgets/ProgressDialog.hpp"
 
 namespace Slic3r { namespace GUI {
 
 // A host-owned progress dialog for Python plugins. This class is deliberately
 // Python-agnostic; the plugin layer owns any pybind/GIL concerns and marshals
 // all calls to the UI thread.
-class PluginProgressDialog : public wxProgressDialog
+//
+// It derives from OrcaSlicer's own Slic3r::GUI::ProgressDialog (a real wxDialog
+// with themable wx children) rather than the native wxProgressDialog: on Windows
+// wxProgressDialog is a comctl32 TaskDialog running on a worker thread with no
+// recolorable wx surface, so it cannot follow OrcaSlicer's (OS-independent) dark
+// theme. The base themes itself via UpdateDlgDarkUI(this) in its Create().
+class PluginProgressDialog : public ProgressDialog
 {
 public:
     using CloseHandler = std::function<void()>;
@@ -52,7 +59,6 @@ public:
     bool is_open() const { return m_open; }
 
 private:
-    void on_close_window(wxCloseEvent& event);
     void on_timer(wxTimerEvent& event);
 
     bool                     m_open{true};
