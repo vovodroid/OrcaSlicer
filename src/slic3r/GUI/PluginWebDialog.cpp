@@ -80,22 +80,32 @@ std::string host_theme_style()
     return s;
 }
 
-// User script that prepends the host theme into the document at document-start,
-// before the plugin's own <style>/scripts run (and before first paint). Works
-// whether the plugin page has a <head> or is a bare fragment.
+// User script that prepends the host theme into the document, before the plugin's
+// own <style>/scripts affect layout (and before first paint). Works whether the
+// plugin page has a <head> or is a bare fragment.
 std::string host_theme_user_script()
 {
     // JSON-encode the style so it is a safe JS string literal regardless of
     // quotes/newlines it may contain.
     const std::string style_literal = nlohmann::json(host_theme_style()).dump();
-    std::string js;
-    js += "(function(){";
-    js += "if(document.getElementById('orca-host-theme'))return;";
-    js += "var css=" + style_literal + ";";
-    js += "var head=document.head||document.documentElement;";
-    js += "head.insertAdjacentHTML('afterbegin',css);";
-    js += "})();";
-    return js;
+    // On WebView2 a document-start user script runs before <html> exists
+    // (document.head and document.documentElement are both null), so inserting
+    // right away would throw and the theme would silently never apply. Inject at
+    // the first opportunity instead: immediately when a root already exists,
+    // otherwise the moment <html> appears as a direct child of the observed
+    // document — still before first paint.
+    return "(function(){var css=" + style_literal + ";" R"JS(
+function inject(){
+    var root=document.head||document.documentElement;
+    if(!root)return false;
+    if(!document.getElementById('orca-host-theme'))
+        root.insertAdjacentHTML('afterbegin',css);
+    return true;
+}
+if(inject())return;
+var obs=new MutationObserver(function(){if(inject())obs.disconnect();});
+obs.observe(document,{childList:true});
+})();)JS";
 }
 
 // Injected into every page at document start (before the plugin's own scripts).
