@@ -33,6 +33,20 @@ public:
     bool run_script(const wxString& script);
     void call_web_handler(const nlohmann::json& payload, const wxString& handler = wxT("HandleStudio"));
 
+    // Wraps `markup` (an HTML fragment, usually a <style> block) in a document-start user
+    // script that inserts it once — guarded by element id `dom_id`, at `position` (an
+    // insertAdjacentHTML target such as "afterbegin"/"beforeend") — retrying via a
+    // MutationObserver until a root node exists. On WebView2 a document-start script can run
+    // before <html> exists (document.head and document.documentElement both null), so a bare
+    // insert would throw and silently never apply. `prelude` is emitted once before the
+    // injector (extra var/flag declarations); `on_inject` runs inside inject() after each
+    // successful insert. Both default to empty.
+    static std::string document_start_injector(const std::string& markup,
+                                               const char*        dom_id,
+                                               const char*        position,
+                                               const std::string& prelude   = {},
+                                               const std::string& on_inject = {});
+
 protected:
     wxWebView* browser() const { return m_browser; }
 
@@ -45,8 +59,24 @@ protected:
     virtual void on_script_message_parse_error(const wxString& payload, const std::exception& error);
     virtual bool append_language_to_url() const { return true; }
 
+    // Registers all document-start user scripts: the shared host theme contract first,
+    // then subclass scripts from add_user_scripts(). Called ONCE, at creation. Live
+    // re-theme goes through apply_theme_live() (RunScript), not a re-registration —
+    // calling this again would append duplicate scripts.
+    void register_theme_user_scripts();
+
+    // Subclasses override to add page-specific document-start user scripts (e.g. the
+    // plugin bridge / unstyled-content defaults). Called AFTER the theme contract is
+    // added, by register_theme_user_scripts(). Default: none.
+    virtual void add_user_scripts() {}
+
+    // Pushes the current app theme into the already-loaded document without a reload
+    // (updates the injected :root variables and the data-orca-theme attribute).
+    void apply_theme_live();
+
 private:
     void on_script_message_event(wxWebViewEvent& event);
+    void on_webview_recreated(wxCommandEvent& event);
 
     wxWebView* m_browser{nullptr};
 };

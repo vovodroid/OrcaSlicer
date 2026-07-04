@@ -1,36 +1,3 @@
-:root {
-  --bg: #ffffff;
-  --panel: #ffffff;
-  --border: #d8d8d8;
-  --border-strong: #e6e6e6;
-  --col-sep: #e1e1e1;
-  --text: #1f2328;
-  --muted: #6f7782;
-  --row-hover: #f7f9fb;
-  --row-selected: #eaf2ff;
-  --row-selected-outline: #b7d0ff;
-  --border-soft: #f0f0f0;
-  --danger: #b42318;
-  --ok: #137333;
-  --warn: #a15c00;
-  --plugin-status-danger: var(--danger);
-  --plugin-status-ok: var(--ok);
-  --plugin-status-warn: var(--warn);
-  --plugin-status-inactive: var(--muted);
-  --plugin-status-danger-bg: rgba(180, 35, 24, 0.12);
-  --plugin-status-ok-bg: rgba(19, 115, 51, 0.12);
-  --plugin-status-warn-bg: rgba(199, 122, 22, 0.12);
-  --plugin-status-inactive-bg: #edf1f5;
-  --plugin-status-inactive-text: #44505c;
-  --plugin-source-mine-bg: rgba(0, 137, 123, 0.12);
-  --plugin-source-mine-text: #00897b;
-  --plugin-source-neutral-bg: #edf1f5;
-  --plugin-source-neutral-text: #44505c;
-  --plugin-source-subscribed-bg: rgba(37, 99, 170, 0.12);
-  --plugin-source-subscribed-text: #2563aa;
-  --plugin-link-text: #00796b;
-}
-
 html,
 body {
   width: 100% !important;
@@ -929,9 +896,9 @@ body {
   width: 12px;
   height: 12px;
   box-sizing: border-box;
-  border: 1px solid #4a4a51;
+  border: 1px solid var(--border);
   border-radius: 2px;
-  background: #2d2d31;
+  background: var(--bg);
 }
 
 .plugin-checkbox-input:checked + .plugin-checkbox-mark {
