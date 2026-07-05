@@ -2,7 +2,6 @@
 
 #include "slic3r/GUI/GUI.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
-#include "slic3r/GUI/Widgets/StateColor.hpp"
 
 #include <libslic3r/Utils.hpp>
 
@@ -16,86 +15,37 @@ namespace Slic3r { namespace GUI {
 
 namespace {
 
-// CSS "#rrggbb" for a wxColour (wxC2S_HTML_SYNTAX is the portable accessor used
-// throughout the codebase for color->CSS).
-std::string css_color(const wxColour& c) { return c.GetAsString(wxC2S_HTML_SYNTAX).ToStdString(); }
-
-// Build a <style> block that matches OrcaSlicer's current theme. Injected at
-// document-start (see ctor) so an unstyled plugin page already looks native,
-// while plugin CSS still wins:
-//   * variables live on :root and elements use only low-specificity selectors,
-//   * nothing is marked !important,
-// so any later rule the plugin ships (even an element selector) overrides these.
-// Generated in C++ from the live theme — correct for the active light/dark mode
-// and accent without the page needing to detect anything.
-std::string host_theme_style()
+// Low-specificity element defaults (no !important) for UNSTYLED plugin HTML, so a bare
+// plugin page looks native while any CSS the plugin ships still wins. Built on the
+// --orca-* variables the host injects (see WebViewHostDialog); document-start injected
+// AFTER the host contract so the variables are defined (shares the base injector's
+// WebView2 timing guard).
+std::string plugin_defaults_user_script()
 {
-    GUI_App&       app    = wxGetApp();
-    const wxColour bg     = app.get_window_default_clr();        // dialog background
-    const wxColour fg     = app.get_label_clr_default();         // primary text
-    const wxColour muted  = app.get_label_clr_sys();             // secondary text
-    const wxColour border = app.get_highlight_default_clr();     // subtle lines / row hover
-    const wxColour accent = StateColor::darkModeColorFor(wxColour("#009688")); // ORCA teal
-    const wxColour accent_fg = *wxWHITE;
-    const std::string font = app.normal_font().GetFaceName().ToStdString();
-
-    std::string s;
-    s += "<style id=\"orca-host-theme\">";
-    s += ":root{";
-    s += "--orca-bg:" + css_color(bg) + ";";
-    s += "--orca-fg:" + css_color(fg) + ";";
-    s += "--orca-muted:" + css_color(muted) + ";";
-    s += "--orca-border:" + css_color(border) + ";";
-    s += "--orca-accent:" + css_color(accent) + ";";
-    s += "--orca-accent-fg:" + css_color(accent_fg) + ";";
-    // The themed face name first, then a portable system-ui fallback stack.
-    s += "--orca-font:" + (font.empty() ? std::string() : "'" + font + "',") +
-         "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;";
-    s += "color-scheme:" + std::string(app.dark_mode() ? "dark" : "light") + ";";
-    s += "}";
-
-    // Element defaults — low specificity, no !important.
-    s += "html,body{background:var(--orca-bg);color:var(--orca-fg);"
-         "font-family:var(--orca-font);font-size:13px;}";
-    s += "body{margin:0;}";
-    s += "h1,h2,h3,h4,h5,h6{color:var(--orca-fg);font-weight:600;}";
-    s += "a{color:var(--orca-accent);}";
-    s += "hr{border:0;border-top:1px solid var(--orca-border);}";
-    s += "button{font:inherit;color:var(--orca-accent-fg);background:var(--orca-accent);"
-         "border:1px solid var(--orca-accent);border-radius:4px;padding:5px 14px;cursor:pointer;}";
-    s += "button:hover{filter:brightness(1.1);}";
-    s += "button:disabled{opacity:.5;cursor:default;}";
-    s += "input,select,textarea{font:inherit;color:var(--orca-fg);"
-         "background:var(--orca-bg);border:1px solid var(--orca-border);"
-         "border-radius:4px;padding:4px 8px;}";
-    s += "input:focus,select:focus,textarea:focus{outline:none;border-color:var(--orca-accent);}";
-    s += "table{border-collapse:collapse;}";
-    s += "th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--orca-border);}";
-    s += "th{color:var(--orca-muted);font-weight:600;}";
-    // WebKit/Chromium scrollbars themed to the background (no-op on others).
-    s += "::-webkit-scrollbar{width:12px;height:12px;}";
-    s += "::-webkit-scrollbar-thumb{background:var(--orca-border);border-radius:6px;}";
-    s += "::-webkit-scrollbar-track{background:transparent;}";
-    s += "</style>";
-    return s;
-}
-
-// User script that prepends the host theme into the document at document-start,
-// before the plugin's own <style>/scripts run (and before first paint). Works
-// whether the plugin page has a <head> or is a bare fragment.
-std::string host_theme_user_script()
-{
-    // JSON-encode the style so it is a safe JS string literal regardless of
-    // quotes/newlines it may contain.
-    const std::string style_literal = nlohmann::json(host_theme_style()).dump();
-    std::string js;
-    js += "(function(){";
-    js += "if(document.getElementById('orca-host-theme'))return;";
-    js += "var css=" + style_literal + ";";
-    js += "var head=document.head||document.documentElement;";
-    js += "head.insertAdjacentHTML('afterbegin',css);";
-    js += "})();";
-    return js;
+    std::string css;
+    css += "<style id=\"orca-plugin-defaults\">";
+    css += "html,body{background:var(--orca-bg);color:var(--orca-fg);"
+           "font-family:var(--orca-font);font-size:13px;}";
+    css += "body{margin:0;}";
+    css += "h1,h2,h3,h4,h5,h6{color:var(--orca-fg);font-weight:600;}";
+    css += "a{color:var(--orca-accent);}";
+    css += "hr{border:0;border-top:1px solid var(--orca-border);}";
+    css += "button{font:inherit;color:var(--orca-accent-fg);background:var(--orca-accent);"
+           "border:1px solid var(--orca-accent);border-radius:4px;padding:5px 14px;cursor:pointer;}";
+    css += "button:hover{filter:brightness(1.1);}";
+    css += "button:disabled{opacity:.5;cursor:default;}";
+    css += "input,select,textarea{font:inherit;color:var(--orca-fg);"
+           "background:var(--orca-bg);border:1px solid var(--orca-border);"
+           "border-radius:4px;padding:4px 8px;}";
+    css += "input:focus,select:focus,textarea:focus{outline:none;border-color:var(--orca-accent);}";
+    css += "table{border-collapse:collapse;}";
+    css += "th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--orca-border);}";
+    css += "th{color:var(--orca-muted);font-weight:600;}";
+    css += "::-webkit-scrollbar{width:12px;height:12px;}";
+    css += "::-webkit-scrollbar-thumb{background:var(--orca-border);border-radius:6px;}";
+    css += "::-webkit-scrollbar-track{background:transparent;}";
+    css += "</style>";
+    return WebViewHostDialog::document_start_injector(css, "orca-plugin-defaults", "beforeend");
 }
 
 // Injected into every page at document start (before the plugin's own scripts).
@@ -162,17 +112,22 @@ PluginWebDialog::PluginWebDialog(wxWindow*          parent,
 
     if (wxWebView* wv = browser()) {
         wv->SetBackgroundColour(wxGetApp().get_window_default_clr());
-        // Inject the host theme first so its <style> sits ahead of any plugin
-        // CSS in the document (later same-specificity rules win), making the
-        // plugin page match OrcaSlicer's light/dark theme by default.
-        wv->AddUserScript(wxString::FromUTF8(host_theme_user_script()));
-        wv->AddUserScript(wxString::FromUTF8(ORCA_BRIDGE_JS));
+        // Theme contract + plugin defaults + bridge are registered by the base
+        // create_webview() via add_user_scripts(); nothing to add here.
         // Swap in the plugin HTML once the bootstrap page settles. Bind ERROR too so a
         // missing/blocked bootstrap resource (e.g. a packaged build) still triggers it.
         Bind(wxEVT_WEBVIEW_LOADED, &PluginWebDialog::on_bootstrap_event, this, wv->GetId());
         Bind(wxEVT_WEBVIEW_ERROR, &PluginWebDialog::on_bootstrap_event, this, wv->GetId());
     }
     Bind(wxEVT_CLOSE_WINDOW, &PluginWebDialog::on_close_window, this);
+}
+
+void PluginWebDialog::add_user_scripts()
+{
+    if (wxWebView* wv = browser()) {
+        wv->AddUserScript(wxString::FromUTF8(plugin_defaults_user_script()));
+        wv->AddUserScript(ORCA_BRIDGE_JS);
+    }
 }
 
 PluginWebDialog::~PluginWebDialog()

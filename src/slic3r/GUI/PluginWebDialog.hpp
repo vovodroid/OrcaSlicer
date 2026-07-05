@@ -69,6 +69,7 @@ protected:
     void on_script_message(const nlohmann::json& payload) override;
     // Plugin HTML is loaded as a raw string, not a localized resource URL.
     bool append_language_to_url() const override { return false; }
+    void add_user_scripts() override;
 
 private:
     void on_bootstrap_event(wxWebViewEvent& event);
