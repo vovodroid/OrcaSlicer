@@ -49,11 +49,11 @@ TEST_CASE("plugin dialog status sort uses requested priority and base-order ties
 
     sort_plugin_items_for_dialog(items, PluginSortKey::Status, PluginSortOrder::Asc);
 
-    // why: local_activated and mine_activated tie on Status, so base order breaks the tie by
-    //   declared source priority - Mine (ordinal 0) before Local (ordinal 2).
+    // why: local_activated and mine_activated tie on Status, so base order breaks the tie by name
+    //   (case-insensitive) - "Local Activated" before "Mine Activated".
     const std::vector<std::string> expected = {
-        "mine_activated",
         "local_activated",
+        "mine_activated",
         "mine_error",
         "local_inactive",
         "subscribed_loading",
@@ -63,13 +63,13 @@ TEST_CASE("plugin dialog status sort uses requested priority and base-order ties
     sort_plugin_items_for_dialog(items, PluginSortKey::Status, PluginSortOrder::Desc);
 
     // why: Desc reverses the status ordinal, but the Activated tie still resolves by ascending
-    //   base order (Mine before Local) - the direction only flips the primary key.
+    //   base order (name: "Local Activated" before "Mine Activated") - direction only flips the key.
     const std::vector<std::string> desc_expected = {
         "subscribed_loading",
         "local_inactive",
         "mine_error",
-        "mine_activated",
         "local_activated",
+        "mine_activated",
     };
     CHECK(keys(items) == desc_expected);
 }
@@ -121,14 +121,16 @@ TEST_CASE("plugin dialog name sort is case-insensitive and numeric-aware", "[plu
 
     sort_plugin_items_for_dialog(items, PluginSortKey::Name, PluginSortOrder::Asc);
 
-    const std::vector<std::string> expected = {"ada_upper", "ada_lower", "rig2", "rig10"};
+    // why: "Ada"/"ada" tie on the case-insensitive name (primary AND base name level), so the tie
+    //   falls through source/status/type to plugin_key: "ada_lower" before "ada_upper".
+    const std::vector<std::string> expected = {"ada_lower", "ada_upper", "rig2", "rig10"};
     CHECK(keys(items) == expected);
 
     sort_plugin_items_for_dialog(items, PluginSortKey::Name, PluginSortOrder::Desc);
 
     // why: names reverse ("Rig 10" before "Rig 2"), but "Ada"/"ada" tie on the case-insensitive
-    //   key and keep ascending base order (case-sensitive "Ada" < "ada").
-    const std::vector<std::string> desc_expected = {"rig10", "rig2", "ada_upper", "ada_lower"};
+    //   key and keep ascending base order, which resolves by plugin_key ("ada_lower" < "ada_upper").
+    const std::vector<std::string> desc_expected = {"rig10", "rig2", "ada_lower", "ada_upper"};
     CHECK(keys(items) == desc_expected);
 }
 
@@ -159,14 +161,14 @@ TEST_CASE("natural compare handles digits, case, prefixes and leading zeros", "[
 TEST_CASE("plugin dialog None sort key falls to ascending base order in both directions", "[plugin][sort]")
 {
     std::vector<SortFixtureItem> items = {
-        {"local_z", PluginSource::Local, PluginStatus::Activated, "script", "Zeta"},
-        {"mine_a", PluginSource::Mine, PluginStatus::Inactive, "script", "Alpha"},
-        {"sub_m", PluginSource::Subscribed, PluginStatus::Error, "script", "Mu"},
+        {"z_mine", PluginSource::Mine, PluginStatus::Activated, "script", "Zebra"},
+        {"a_local", PluginSource::Local, PluginStatus::Activated, "script", "Apple"},
+        {"m_sub", PluginSource::Subscribed, PluginStatus::Error, "script", "Mango"},
     };
 
-    // why: base order is source priority (Mine, Subscribed, Local) then name - and it ignores the
-    //   requested status/order entirely, so the neutral baseline is deterministic.
-    const std::vector<std::string> base_expected = {"mine_a", "sub_m", "local_z"};
+    // why: no primary key -> pure name-first base order (Apple < Mango < Zebra). A source-first
+    //   baseline would instead give {z_mine, m_sub, a_local}, so this pins the name-first order.
+    const std::vector<std::string> base_expected = {"a_local", "m_sub", "z_mine"};
 
     sort_plugin_items_for_dialog(items, PluginSortKey::None, PluginSortOrder::Asc);
     CHECK(keys(items) == base_expected);
