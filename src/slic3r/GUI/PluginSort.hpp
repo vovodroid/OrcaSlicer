@@ -3,6 +3,8 @@
 #include "PluginSource.hpp"
 #include "PluginStatus.hpp"
 
+#include "libslic3r/Semver.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <string>
@@ -16,6 +18,7 @@ namespace Slic3r::GUI
         Status,
         Name,
         Source,
+        Version,
         // why: neutral "no column selected" state - clearing a header sort returns here and the
         //   list falls to compare_plugin_base_order only. Header UI reaches it via the asc/desc/clear cycle.
         None
@@ -34,6 +37,7 @@ namespace Slic3r::GUI
         case PluginSortKey::Status: return "status";
         case PluginSortKey::Name: return "name";
         case PluginSortKey::Source: return "source";
+        case PluginSortKey::Version: return "version";
         case PluginSortKey::None: return "none";
         }
 
@@ -53,6 +57,8 @@ namespace Slic3r::GUI
             return PluginSortKey::Name;
         if (sort_key == "source")
             return PluginSortKey::Source;
+        if (sort_key == "version")
+            return PluginSortKey::Version;
         if (sort_key == "none")
             return PluginSortKey::None;
         return fallback;
@@ -141,6 +147,23 @@ namespace Slic3r::GUI
         return lhs.plugin_key.compare(rhs.plugin_key);
     }
 
+    // Compares two version strings returning -1 / 0 / +1. Uses Slic3r::Semver (the same parser the
+    // plugin catalog's update-available check uses); on unparseable input falls back to the natural
+    // compare so the order stays deterministic.
+    //   e.g. "1.2.0" < "1.10.0" (numeric), "1.0.0-rc1" < "1.0.0" (semver prerelease rule).
+    inline int compare_plugin_version(const std::string& lhs, const std::string& rhs)
+    {
+        const auto lhs_semver = Semver::parse(lhs);
+        const auto rhs_semver = Semver::parse(rhs);
+        if (lhs_semver && rhs_semver)
+        {
+            if (*lhs_semver < *rhs_semver) return -1;
+            if (*rhs_semver < *lhs_semver) return 1;
+            return 0;
+        }
+        return compare_ascii_case_insensitive_natural(lhs, rhs);
+    }
+
     // Compares two items by the chosen primary key, returning -1 / 0 / +1. Status and Source
     // rank by enum ordinal (the declared dialog priority); Name uses the natural compare above.
     //   e.g. Status: an enabled item (lower ordinal) sorts before a disabled one.
@@ -157,6 +180,8 @@ namespace Slic3r::GUI
             return compare_ascii_case_insensitive_natural(lhs.display_name, rhs.display_name);
         case PluginSortKey::Source:
             return static_cast<int>(lhs.source) - static_cast<int>(rhs.source);
+        case PluginSortKey::Version:
+            return compare_plugin_version(lhs.sort_version, rhs.sort_version);
         case PluginSortKey::None:
             // why: no primary key - every pair ties here so sort_plugin_items_for_dialog falls
             //   straight to the ascending base order (direction is irrelevant for the baseline).

@@ -89,6 +89,7 @@ struct PluginDialogItem
     std::string version;
     std::string installed_version;
     std::string latest_version;
+    std::string sort_version;   // Version shown in the row (installed if installed, else latest); used by the Version sort.
     std::string type_label;
     std::string type_key;
     std::string sharing_token;
@@ -319,6 +320,9 @@ PluginDialogItem build_plugin_dialog_item(const PluginDescriptor& descriptor)
                                  (descriptor.installed_version.empty() ? descriptor.version : descriptor.installed_version) :
                                  std::string{};
     item.latest_version    = descriptor.latest_available_version();
+    // why: sort by the same version the row displays (GetDisplayVersion in index.js) - installed when
+    //   installed, otherwise latest - so the Version sort matches what the user sees.
+    item.sort_version      = item.installed_version.empty() ? item.latest_version : item.installed_version;
     item.type_label        = descriptor.type_label();
     item.type_key          = plugin_capability_type_to_string(descriptor.primary_capability_type());
     // "types" is the display-only compatibility list. Cloud plugins show the raw labels the

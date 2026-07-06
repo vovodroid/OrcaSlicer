@@ -3,7 +3,7 @@
 const DEFAULT_PLUGIN_SORT = { key: "none", order: "asc" };
 // note: SORT_FIELDS are the clickable columns. "none" is the baseline/cleared state, not a field -
 //   it is special-cased in NormalizePluginSort and produced by CyclePluginSort's third click.
-const SORT_FIELDS = new Set(["status", "name", "source"]);
+const SORT_FIELDS = new Set(["status", "name", "source", "version"]);
 let pluginSort = { ...DEFAULT_PLUGIN_SORT };
 
 // why: C++ returns canonical sort state; guard stale or malformed values before reflecting them.

@@ -23,6 +23,7 @@ struct SortFixtureItem
     PluginStatus status;
     std::string type_key;
     std::string display_name;
+    std::string sort_version;
 };
 
 std::vector<std::string> keys(const std::vector<SortFixtureItem>& items)
@@ -87,6 +88,25 @@ TEST_CASE("plugin dialog source sort uses enum priority", "[plugin][sort]")
 
     sort_plugin_items_for_dialog(items, PluginSortKey::Source, PluginSortOrder::Desc);
     const std::vector<std::string> desc_expected = {"local", "subscribed", "mine"};
+    CHECK(keys(items) == desc_expected);
+}
+
+TEST_CASE("plugin dialog version sort is semver-aware with base-order ties", "[plugin][sort]")
+{
+    std::vector<SortFixtureItem> items = {
+        {"v_1_2_0",  PluginSource::Local, PluginStatus::Activated, "script", "B", "1.2.0"},
+        {"v_1_10_0", PluginSource::Local, PluginStatus::Activated, "script", "A", "1.10.0"},
+        {"v_0_9_3",  PluginSource::Local, PluginStatus::Activated, "script", "C", "0.9.3"},
+    };
+
+    sort_plugin_items_for_dialog(items, PluginSortKey::Version, PluginSortOrder::Asc);
+    // why: semver numeric compare - 1.10.0 > 1.2.0 (not lexical "1.10" < "1.2"), so ascending is
+    //   0.9.3 < 1.2.0 < 1.10.0.
+    const std::vector<std::string> asc_expected = {"v_0_9_3", "v_1_2_0", "v_1_10_0"};
+    CHECK(keys(items) == asc_expected);
+
+    sort_plugin_items_for_dialog(items, PluginSortKey::Version, PluginSortOrder::Desc);
+    const std::vector<std::string> desc_expected = {"v_1_10_0", "v_1_2_0", "v_0_9_3"};
     CHECK(keys(items) == desc_expected);
 }
 
