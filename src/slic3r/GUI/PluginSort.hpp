@@ -129,20 +129,20 @@ namespace Slic3r::GUI
         return li == lhs.size() ? -1 : 1;
     }
 
-    // Neutral baseline order used as the tie-breaker under every primary sort key. Always
-    // ascending: source priority, then type_key, then display_name, then plugin_key.
-    //   e.g. two items with equal Status sort by source priority (Mine, then Subscribed,
-    //        then Local), then by name.
+    // Neutral baseline order: the whole order when no column is sorted, and the tie-breaker under
+    // every primary sort key. Name-first so the default view is intuitively alphabetical:
+    // name, then source, then status, then type, with plugin_key as the final deterministic tie.
+    //   e.g. with no column sorted the list reads A..Z by name.
     template <class PluginItem>
     int compare_plugin_base_order(const PluginItem& lhs, const PluginItem& rhs)
     {
-        // why: source ties use the declared PluginSource ordinal priority - the same order the
-        //   Source sort key uses - so the neutral baseline never contradicts it.
+        if (const int cmp = compare_ascii_case_insensitive_natural(lhs.display_name, rhs.display_name); cmp != 0)
+            return cmp;
         if (const int cmp = static_cast<int>(lhs.source) - static_cast<int>(rhs.source); cmp != 0)
             return cmp;
-        if (const int cmp = lhs.type_key.compare(rhs.type_key); cmp != 0)
+        if (const int cmp = static_cast<int>(lhs.status) - static_cast<int>(rhs.status); cmp != 0)
             return cmp;
-        if (const int cmp = lhs.display_name.compare(rhs.display_name); cmp != 0)
+        if (const int cmp = lhs.type_key.compare(rhs.type_key); cmp != 0)
             return cmp;
         return lhs.plugin_key.compare(rhs.plugin_key);
     }
