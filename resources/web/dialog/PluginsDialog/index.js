@@ -271,7 +271,6 @@ function ApplyPlugins(plugins) {
   expandedPluginIds = new Set(Array.from(expandedPluginIds).filter((pluginKey) => pluginsById.has(pluginKey)));
 
   RenderPlugins();
-  SyncPluginListHeaderGutter();
   RenderDetails();
 }
 
@@ -337,6 +336,7 @@ function RenderPlugins() {
     empty.className = "empty-state";
     empty.textContent = "No plugins found";
     pluginList.appendChild(empty);
+    SyncPluginListHeaderGutter();
     return;
   }
 
@@ -398,6 +398,9 @@ function RenderPlugins() {
     empty.appendChild(document.createTextNode('"'));
     pluginList.appendChild(empty);
   }
+
+  // why: recompute the scrollbar gutter on every render - search and sort re-render via RenderPlugins
+  SyncPluginListHeaderGutter();
 }
 
 function GetErrorText(plugin) {
