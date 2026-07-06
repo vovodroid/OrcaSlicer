@@ -11,6 +11,12 @@ const pluginInstallActions = {
 };
 
 let expandedPluginIds = new Set();
+
+// why: transient per-search override on top of expandedPluginIds. A search
+//      auto-expands rows whose capabilities match, display-only. This lets a
+//      triangle click during search collapse/reopen such a row without touching
+//      the base (id -> bool).
+let searchExpandOverride = new Map();
 let selectedPluginId = "";
 let contextPluginId = "";
 let activeDetailTab = "plugin-info";
@@ -299,6 +305,27 @@ function SyncPluginListHeaderGutter() {
   listPane.style.setProperty("--plugin-list-scrollbar-width", `${scrollbarWidth}px`);
 }
 
+// why: paint matched-character ranges as <mark> without an innerHTML build
+// note: if no ranges -> return the plain text node
+function ApplyHighlight(container, text, ranges) {
+  if (!ranges || !ranges.length) {
+    container.appendChild(document.createTextNode(text));
+    return;
+  }
+  let pos = 0;
+  for (const [start, end] of ranges) {
+    if (start > pos)
+      container.appendChild(document.createTextNode(text.slice(pos, start)));
+    const mark = document.createElement("mark");
+    mark.className = "plugin-search-hit";
+    mark.textContent = text.slice(start, end);
+    container.appendChild(mark);
+    pos = end;
+  }
+  if (pos < text.length)
+    container.appendChild(document.createTextNode(text.slice(pos)));
+}
+
 function RenderPlugins() {
   if (!pluginList)
     return;
@@ -313,10 +340,28 @@ function RenderPlugins() {
     return;
   }
 
+  // why: stable filter over the existing C++ sort order - no scoring, no reorder. The empty query
+  //      short-circuits (searching=false), leaving every existing render path untouched.
+  const searching = typeof PluginSearchActive === "function" && PluginSearchActive();
+  let shown = 0;
+
   for (const plugin of pluginsById.values()) {
     const pluginKey = String(plugin.plugin_key || "");
     const capabilities = GetCapabilities(plugin);
-    const isExpanded = expandedPluginIds.has(pluginKey) && capabilities.length > 0;
+    const match = searching ? ComputePluginMatch(plugin) : null;
+    if (searching && !match.matched)
+      continue;
+    shown++;
+
+    // why: transient override wins. Otherwise while searching start collapsed and auto-expand only
+    //      capability matches (the persistent expand state is ignored so unrelated caps don't clutter
+    //      results); when not searching use the persistent state. The base is never written while
+    //      searching, so clearing the search restores exactly what the user had.
+    const open = searchExpandOverride.has(pluginKey)
+      ? searchExpandOverride.get(pluginKey)
+      : (searching ? match.hasCapMatch : expandedPluginIds.has(pluginKey));
+    const isExpanded = open && capabilities.length > 0;
+
     const block = document.createElement("div");
     block.className = "plugin-block";
     block.dataset.pluginKey = pluginKey;
@@ -331,15 +376,27 @@ function RenderPlugins() {
       row.classList.add("selected");
 
     row.appendChild(CheckCell(row, plugin));
-    row.appendChild(LabelCell(plugin, isExpanded, capabilities.length));
+    row.appendChild(LabelCell(plugin, isExpanded, capabilities.length, match?.nameRanges));
     row.appendChild(VersionCell(plugin));
     row.appendChild(SourceCell(plugin));
     row.appendChild(StatusCell(plugin));
 
     block.appendChild(row);
     if (isExpanded)
-      block.appendChild(RenderCapabilityTree(plugin, capabilities));
+      block.appendChild(RenderCapabilityTree(plugin, capabilities, match?.capRanges));
     pluginList.appendChild(block);
+  }
+
+  // why: distinct from the size===0 "no plugins" state - here plugins exist but none match the query.
+  if (searching && shown === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.appendChild(document.createTextNode('No plugins match "'));
+    const term = document.createElement("b");
+    term.textContent = pluginSearch.query;
+    empty.appendChild(term);
+    empty.appendChild(document.createTextNode('"'));
+    pluginList.appendChild(empty);
   }
 }
 
@@ -479,7 +536,7 @@ function CheckCell(row, plugin) {
   return checkCell;
 }
 
-function LabelCell(plugin, isExpanded = false, capabilityCount = 0) {
+function LabelCell(plugin, isExpanded = false, capabilityCount = 0, nameRanges = null) {
   const labelCell = document.createElement("span");
   labelCell.className = "label-cell";
 
@@ -510,7 +567,7 @@ function LabelCell(plugin, isExpanded = false, capabilityCount = 0) {
   nameWrap.className = "plugin-name-wrap";
 
   const labelElement = document.createElement(hasCloudLink ? "a" : "span");
-  labelElement.textContent = pluginLabelText;
+  ApplyHighlight(labelElement, pluginLabelText, nameRanges);
   labelElement.className = "plugin-name-text";
 
   if (hasCloudLink) {
@@ -546,20 +603,20 @@ function SourceCell(plugin) {
   return cell;
 }
 
-function RenderCapabilityTree(plugin, capabilities) {
+function RenderCapabilityTree(plugin, capabilities, capRanges = null) {
   const tree = document.createElement("div");
   tree.className = "capabilities-tree";
   tree.setAttribute("role", "group");
   tree.setAttribute("aria-label", "Capabilities");
 
   capabilities.forEach((capability, index) => {
-    tree.appendChild(RenderCapabilityRow(plugin, capability, index === capabilities.length - 1));
+    tree.appendChild(RenderCapabilityRow(plugin, capability, index === capabilities.length - 1, capRanges));
   });
 
   return tree;
 }
 
-function RenderCapabilityRow(plugin, capability, isLast) {
+function RenderCapabilityRow(plugin, capability, isLast, capRanges = null) {
   const row = document.createElement("div");
   row.className = "capability-row plugin-cols";
   row.classList.toggle("is-last", isLast);
@@ -574,7 +631,8 @@ function RenderCapabilityRow(plugin, capability, isLast) {
   branch.setAttribute("aria-hidden", "true");
   const name = document.createElement("span");
   name.className = "capability-name";
-  name.textContent = String(capability?.name || "") || "-";
+  const capabilityLabel = String(capability?.name || "");
+  ApplyHighlight(name, capabilityLabel || "-", capRanges?.get(capabilityLabel));
   nameCell.appendChild(branch);
   nameCell.appendChild(name);
   row.appendChild(nameCell);
@@ -921,7 +979,12 @@ function OnPluginListClick(event) {
 
     const pluginKey = String(block.dataset.pluginKey || "");
     selectedPluginId = pluginKey;
-    if (expandedPluginIds.has(pluginKey))
+    // why: during a search the triangle writes to the transient override (read from the on-screen open
+    //      state), so an auto-expanded row collapses without touching the saved layout. With no search
+    //      active, toggle the persistent base exactly as before.
+    if (typeof PluginSearchActive === "function" && PluginSearchActive())
+      searchExpandOverride.set(pluginKey, !block.classList.contains("expanded"));
+    else if (expandedPluginIds.has(pluginKey))
       expandedPluginIds.delete(pluginKey);
     else
       expandedPluginIds.add(pluginKey);
