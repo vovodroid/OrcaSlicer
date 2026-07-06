@@ -15,7 +15,10 @@ namespace Slic3r::GUI
     {
         Status,
         Name,
-        Source
+        Source,
+        // why: neutral "no column selected" state - clearing a header sort returns here and the
+        //   list falls to compare_plugin_base_order only. Header UI reaches it via the asc/desc/clear cycle.
+        None
     };
 
     enum class PluginSortOrder
@@ -31,6 +34,7 @@ namespace Slic3r::GUI
         case PluginSortKey::Status: return "status";
         case PluginSortKey::Name: return "name";
         case PluginSortKey::Source: return "source";
+        case PluginSortKey::None: return "none";
         }
 
         return "status";
@@ -49,6 +53,8 @@ namespace Slic3r::GUI
             return PluginSortKey::Name;
         if (sort_key == "source")
             return PluginSortKey::Source;
+        if (sort_key == "none")
+            return PluginSortKey::None;
         return fallback;
     }
 
@@ -151,6 +157,10 @@ namespace Slic3r::GUI
             return compare_ascii_case_insensitive_natural(lhs.display_name, rhs.display_name);
         case PluginSortKey::Source:
             return static_cast<int>(lhs.source) - static_cast<int>(rhs.source);
+        case PluginSortKey::None:
+            // why: no primary key - every pair ties here so sort_plugin_items_for_dialog falls
+            //   straight to the ascending base order (direction is irrelevant for the baseline).
+            return 0;
         }
 
         return 0;

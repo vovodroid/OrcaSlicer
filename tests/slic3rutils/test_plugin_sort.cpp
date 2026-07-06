@@ -136,9 +136,30 @@ TEST_CASE("natural compare handles digits, case, prefixes and leading zeros", "[
     CHECK(compare_ascii_case_insensitive_natural("", "a") < 0);
 }
 
+TEST_CASE("plugin dialog None sort key falls to ascending base order in both directions", "[plugin][sort]")
+{
+    std::vector<SortFixtureItem> items = {
+        {"local_z", PluginSource::Local, PluginStatus::Activated, "script", "Zeta"},
+        {"mine_a", PluginSource::Mine, PluginStatus::Inactive, "script", "Alpha"},
+        {"sub_m", PluginSource::Subscribed, PluginStatus::Error, "script", "Mu"},
+    };
+
+    // why: base order is source priority (Mine, Subscribed, Local) then name - and it ignores the
+    //   requested status/order entirely, so the neutral baseline is deterministic.
+    const std::vector<std::string> base_expected = {"mine_a", "sub_m", "local_z"};
+
+    sort_plugin_items_for_dialog(items, PluginSortKey::None, PluginSortOrder::Asc);
+    CHECK(keys(items) == base_expected);
+
+    // why: None has no direction - Desc must not reverse the baseline.
+    sort_plugin_items_for_dialog(items, PluginSortKey::None, PluginSortOrder::Desc);
+    CHECK(keys(items) == base_expected);
+}
+
 TEST_CASE("plugin dialog sort request parsing keeps previous state on invalid values", "[plugin][sort]")
 {
     CHECK(plugin_sort_key_from_string("source", PluginSortKey::Status) == PluginSortKey::Source);
+    CHECK(plugin_sort_key_from_string("none", PluginSortKey::Status) == PluginSortKey::None);
     CHECK(plugin_sort_key_from_string("missing", PluginSortKey::Name) == PluginSortKey::Name);
 
     CHECK(plugin_sort_order_from_string("desc", PluginSortOrder::Asc) == PluginSortOrder::Desc);

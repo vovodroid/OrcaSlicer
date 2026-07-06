@@ -23,45 +23,6 @@
 <!--        <button id="open_terminal" class="ButtonStyleRegular ButtonTypeChoice left-btn">-->
 <!--            Open Terminal-->
 <!--        </button>-->
-      <div id="sortDropdown" class="sort-dropdown">
-        <button id="sort_menu_btn" class="ButtonStyleRegular ButtonTypeChoice sort-menu-btn" type="button"
-          aria-haspopup="true" aria-expanded="false" aria-controls="sortMenu" title="Sort plugins">
-          <svg class="sort-order-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
-            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M2.5 4.5h3.5M2.5 8h5.5M2.5 11.5h7.5" />
-            <path d="M12.5 11.5V4.5M10 7l2.5-2.5L15 7" />
-          </svg>
-          <span id="sort_current_label"></span>
-          <span class="sort-caret" aria-hidden="true"></span>
-        </button>
-        <div id="sortMenu" class="sort-menu" role="menu" hidden>
-          <div class="sort-group-label" id="sortByLabel">Sort by</div>
-          <div role="group" aria-labelledby="sortByLabel">
-            <button type="button" class="sort-menu-item" role="menuitemradio" data-sort-field="status">Status</button>
-            <button type="button" class="sort-menu-item" role="menuitemradio" data-sort-field="name">Name</button>
-            <button type="button" class="sort-menu-item" role="menuitemradio" data-sort-field="source">Source</button>
-          </div>
-          <div class="sort-group-label" id="sortOrderLabel">Order</div>
-          <div role="group" aria-labelledby="sortOrderLabel">
-            <button type="button" class="sort-menu-item" role="menuitemradio" data-sort-order="asc">
-              <svg class="sort-order-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
-                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M2.5 4.5h3.5M2.5 8h5.5M2.5 11.5h7.5" />
-                <path d="M12.5 11.5V4.5M10 7l2.5-2.5L15 7" />
-              </svg>
-              Ascending
-            </button>
-            <button type="button" class="sort-menu-item" role="menuitemradio" data-sort-order="desc">
-              <svg class="sort-order-icon desc" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
-                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M2.5 4.5h3.5M2.5 8h5.5M2.5 11.5h7.5" />
-                <path d="M12.5 11.5V4.5M10 7l2.5-2.5L15 7" />
-              </svg>
-              Descending
-            </button>
-          </div>
-        </div>
-      </div>
       <button id="refresh_btn" class="ButtonStyleRegular ButtonTypeChoice">
         Refresh
       </button>
@@ -84,9 +45,13 @@
       <section class="pane plugin-list-pane">
         <div class="hdr plugin-cols">
           <span>Activate</span>
-          <span>Name</span>
+          <span class="sort-th" data-sort-field="name" role="button" tabindex="0"
+            title="Sort by name">Name<span class="sort-tri" aria-hidden="true"></span></span>
           <span>Plugin Version</span>
-          <span>Status</span>
+          <span class="sort-th" data-sort-field="source" role="button" tabindex="0"
+            title="Sort by source">Source<span class="sort-tri" aria-hidden="true"></span></span>
+          <span class="sort-th" data-sort-field="status" role="button" tabindex="0"
+            title="Sort by status">Status<span class="sort-tri" aria-hidden="true"></span></span>
         </div>
         <div id="pluginList" class="body thin-scroll"></div>
       </section>

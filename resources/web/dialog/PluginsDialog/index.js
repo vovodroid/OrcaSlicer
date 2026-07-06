@@ -118,10 +118,6 @@ function ShowExploreMenu() {
   if (!exploreMenu || !exploreMenuButton)
     return;
 
-  // why: our stopPropagation blocks the outside-click handler, so close the sibling sort menu ourselves (mirror of ToggleSortMenu).
-  if (typeof HideSortMenu === "function")
-    HideSortMenu();
-
   exploreMenu.hidden = false;
   exploreMenuButton.setAttribute("aria-expanded", "true");
 }
@@ -220,7 +216,7 @@ function HandleStudio(value) {
     SetSelectedInstallAction(payload.install_action, false);
     if (typeof NormalizePluginSort === "function") {
       pluginSort = NormalizePluginSort(payload.sort_key, payload.sort_order);
-      RenderSortMenuState();
+      RenderSortHeaders();
     }
     ApplyPlugins(payload.data || []);
   } else if (payload.command === "status_message") {
@@ -337,6 +333,7 @@ function RenderPlugins() {
     row.appendChild(CheckCell(row, plugin));
     row.appendChild(LabelCell(plugin, isExpanded, capabilities.length));
     row.appendChild(VersionCell(plugin));
+    row.appendChild(SourceCell(plugin));
     row.appendChild(StatusCell(plugin));
 
     block.appendChild(row);
@@ -531,9 +528,22 @@ function LabelCell(plugin, isExpanded = false, capabilityCount = 0) {
     nameWrap.appendChild(countBadge);
   }
   labelCell.appendChild(nameWrap);
-  labelCell.appendChild(SourceBadge(plugin.source));
 
   return labelCell;
+}
+
+function SourceCell(plugin) {
+  const cell = document.createElement("span");
+  const normalized = String(plugin.source || "").toLowerCase();
+  const variant = (normalized === "mine" || normalized === "subscribed") ? normalized : "local";
+  cell.className = `source-cell source-${variant}`;
+
+  const sourceLabel = document.createElement("span");
+  sourceLabel.className = "source-label";
+  sourceLabel.textContent = SourceLabel(plugin.source);
+  cell.appendChild(sourceLabel);
+
+  return cell;
 }
 
 function RenderCapabilityTree(plugin, capabilities) {
@@ -573,6 +583,11 @@ function RenderCapabilityRow(plugin, capability, isLast) {
   typeCell.className = "capability-type-cell";
   typeCell.textContent = String(capability?.type || "-");
   row.appendChild(typeCell);
+
+  // why: empty placeholder for the new Source column so the run-action cell stays under Status.
+  const sourceSpacer = document.createElement("span");
+  sourceSpacer.className = "capability-source-cell";
+  row.appendChild(sourceSpacer);
 
   const actionsCell = document.createElement("span");
   actionsCell.className = "capability-actions-cell";

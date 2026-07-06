@@ -210,7 +210,7 @@ private:
     }
 
     std::function<void()> m_open_terminal_dlg_fn;
-    PluginSortKey m_plugin_sort_key       = PluginSortKey::Status;
+    PluginSortKey m_plugin_sort_key       = PluginSortKey::None;
     PluginSortOrder m_plugin_sort_order   = PluginSortOrder::Asc;
 
     // Serializes run_script_plugin. With main-thread execution a plugin's orca.host.ui modal
