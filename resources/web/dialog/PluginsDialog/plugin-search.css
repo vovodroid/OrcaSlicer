@@ -107,6 +107,28 @@
   border-color: var(--main-color-hover);
 }
 
+/* "ab" over a bracket drawn by ::after box draws it */
+.plugin-search-underline {
+  position: relative;
+  display: inline-block;
+  padding-bottom: 2px;
+}
+.plugin-search-underline::after {
+  content: "";
+  position: absolute;
+  /* why: ticks stick out past the outer edges of "a"/"b" on each side. */
+  left: -1px;
+  right: -1px;
+  bottom: 0;
+  /* why: short ticks + bottom rule, tucked near the baseline. */
+  height: 2px;
+  border: 1px solid currentColor;
+  border-top: 0;
+  /* why: soften the two joints where the ticks meet the bottom rule. */
+  border-bottom-left-radius: 2px;
+  border-bottom-right-radius: 2px;
+}
+
 /* why: reuse the themed warn tokens so matched-char marks track light and dark automatically.
    note: no padding/margin/border - a highlight must not change text width, else rows reflow. */
 mark.plugin-search-hit {
