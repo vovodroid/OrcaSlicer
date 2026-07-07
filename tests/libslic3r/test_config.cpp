@@ -483,3 +483,57 @@ TEST_CASE("parse_capability_ref rejects malformed input", "[Config][plugin]") {
     CHECK_FALSE(Slic3r::parse_capability_ref("plugin;;").has_value());
     CHECK_FALSE(Slic3r::parse_capability_ref("plugin;uuid;").has_value());
 }
+
+namespace {
+// Installs a stub capability resolver that echoes the capability type into the reference, so tests
+// can assert each plugin-backed option resolved with its own ConfigOptionDef::plugin_type. Resets
+// the global resolver on teardown -- tests run in random order and other cases assert the
+// no-resolver behavior (an absent "plugins" manifest).
+struct PluginResolverFixture {
+    PluginResolverFixture() {
+        ConfigBase::set_resolve_capability_fn([](const std::string& name, const std::string& type) {
+            return name.empty() ? std::string() : name + ";;" + type;
+        });
+    }
+    ~PluginResolverFixture() { ConfigBase::set_resolve_capability_fn(nullptr); }
+};
+} // namespace
+
+TEST_CASE_METHOD(PluginResolverFixture,
+    "update_plugin_manifest derives references generically from plugin-backed options",
+    "[Config][plugins]") {
+    // Both scalar (printer_agent) and vector (post_process_plugin, slicing_pipeline_plugin) options
+    // opt in via a non-empty ConfigOptionDef::plugin_type (is_plugin_backed) and are resolved with it
+    // -- there is no hardcoded per-option switch. printer_agent in particular relies on its plugin_type
+    // metadata being wired up (it is edited via a dedicated widget, not the plugin_picker).
+    std::unique_ptr<DynamicPrintConfig> config_ptr(DynamicPrintConfig::new_from_defaults_keys(
+        {"post_process_plugin", "slicing_pipeline_plugin", "printer_agent"}));
+    DynamicPrintConfig config = std::move(*config_ptr);
+    config.option<ConfigOptionStrings>("post_process_plugin", true)->values    = {"pp"};
+    config.option<ConfigOptionStrings>("slicing_pipeline_plugin", true)->values = {"sp"};
+    config.option<ConfigOptionString>("printer_agent", true)->value            = "agent";
+
+    config.update_plugin_manifest();
+    const std::vector<std::string> manifest = config.option<ConfigOptionStrings>("plugins")->values;
+
+    using Catch::Matchers::VectorContains;
+    REQUIRE_THAT(manifest, VectorContains(std::string("pp;;post-processing")));
+    REQUIRE_THAT(manifest, VectorContains(std::string("sp;;slicing-pipeline")));
+    REQUIRE_THAT(manifest, VectorContains(std::string("agent;;printer-connection")));
+    CHECK(manifest.size() == 3);
+}
+
+TEST_CASE_METHOD(PluginResolverFixture,
+    "update_plugin_manifest de-duplicates references and skips unset options",
+    "[Config][plugins]") {
+    std::unique_ptr<DynamicPrintConfig> config_ptr(DynamicPrintConfig::new_from_defaults_keys(
+        {"post_process_plugin", "printer_agent"}));
+    DynamicPrintConfig config = std::move(*config_ptr);
+    config.option<ConfigOptionStrings>("post_process_plugin", true)->values = {"x", "x"};  // duplicate
+    // printer_agent stays at its default empty value -> contributes nothing to the manifest.
+
+    config.update_plugin_manifest();
+    const std::vector<std::string> manifest = config.option<ConfigOptionStrings>("plugins")->values;
+
+    CHECK(manifest == std::vector<std::string>{"x;;post-processing"});
+}

@@ -1521,8 +1521,6 @@ void ConfigBase::save_to_json(const std::string &file, const std::string &name, 
     j[BBL_JSON_KEY_NAME] = name;
     j[BBL_JSON_KEY_FROM] = from;
 
-    std::vector<std::string> plugin_refs;
-
     //record all the key-values
     for (const std::string &opt_key : this->keys())
     {
@@ -1548,24 +1546,14 @@ void ConfigBase::save_to_json(const std::string &file, const std::string &name, 
             json j_array(string_values);
             j[opt_key] = j_array;
         }
-
-        this->save_plugin_collection(opt_key, opt, plugin_refs);
     }
 
-    // Lazily serialize the top-level "plugins" manifest: the individual plugin-backed options keep
-    // bare capability names, and the full "name;uuid;capability" references are derived here from
-    // those options via the registered resolver. Only do this when a resolver is available (GUI);
-    // without one (CLI/headless) leave whatever the "plugins" option already serialized above, so a
-    // round-trip never drops the manifest. De-duplicate while preserving order and skip empties.
+    // Serialize the top-level "plugins" manifest: the individual plugin-backed options keep bare
+    // capability names; the full "name;uuid;capability" references are derived here (same helper as
+    // update_plugin_manifest). Only with a resolver (GUI); without one (CLI/headless) leave whatever
+    // the "plugins" option already serialized above, so a round-trip never drops the manifest.
     if (resolve_capability_fn) {
-        std::vector<std::string> unique_refs;
-        unique_refs.reserve(plugin_refs.size());
-        for (std::string& ref : plugin_refs) {
-            if (ref.empty())
-                continue;
-            if (std::find(unique_refs.begin(), unique_refs.end(), ref) == unique_refs.end())
-                unique_refs.emplace_back(std::move(ref));
-        }
+        std::vector<std::string> unique_refs = this->collect_plugin_manifest();
         if (unique_refs.empty())
             j.erase("plugins");
         else
@@ -1610,29 +1598,60 @@ void ConfigBase::save_plugin_collection(const std::string& opt_key, const Config
     if (!resolve_capability_fn)
         return;
 
-    // Resolve a single bare capability value into its full reference and append it, skipping
-    // unset values and capabilities that could not be resolved (resolver returns "").
-    const auto append_ref = [&plugin_refs](const std::string& capability_value, const std::string& type) {
+    // A plugin-backed option declares its capability type via ConfigOptionDef::plugin_type (the same
+    // metadata PluginResolver::find_option_for_capability scans). Deriving off the def rather than a
+    // per-key branch keeps this generic across every plugin-backed option.
+    const ConfigDef*       def     = this->def();
+    const ConfigOptionDef* opt_def = def ? def->get(opt_key) : nullptr;
+    if (opt_def == nullptr || !opt_def->is_plugin_backed())
+        return;
+    const std::string& type = opt_def->plugin_type;
+
+    // Resolve a single bare capability value into its full reference and append it, skipping unset
+    // values, capabilities that could not be resolved (resolver returns ""), and duplicates already
+    // collected (preserving insertion order).
+    const auto append_ref = [&plugin_refs, &type](const std::string& capability_value) {
         if (capability_value.empty())
             return;
         std::string ref = resolve_capability_fn(capability_value, type);
-        if (!ref.empty())
+        if (!ref.empty() && std::find(plugin_refs.begin(), plugin_refs.end(), ref) == plugin_refs.end())
             plugin_refs.emplace_back(std::move(ref));
     };
 
-    if (opt_key == "post_process_plugin") {
-        const ConfigOptionVectorBase* vec = static_cast<const ConfigOptionVectorBase*>(opt);
-        for (const std::string& val : vec->vserialize())
-            append_ref(val, "post-processing");
-    } else if (opt_key == "printer_agent") {
-        append_ref((dynamic_cast<const ConfigOptionString *>(opt))->value, "printer-connection");
-    } else if (opt_key == "slicing_pipeline_plugin") {
-        if (const auto* vec = dynamic_cast<const ConfigOptionStrings*>(opt)) {
-            for (const std::string& val : vec->vserialize())
-                append_ref(val, "slicing-pipeline");
-        }
-    }
-    // Extend for other plugin-backed settings as needed.
+    // Scalar options carry a single capability name; vector options carry a list. Same scalar/vector
+    // dispatch as PluginResolver::find_option_for_capability.
+    if (const auto* string_option = dynamic_cast<const ConfigOptionString*>(opt))
+        append_ref(string_option->value);
+    else if (const auto* vector_option = dynamic_cast<const ConfigOptionVectorBase*>(opt))
+        for (const std::string& val : vector_option->vserialize())
+            append_ref(val);
+}
+
+std::vector<std::string> ConfigBase::collect_plugin_manifest() const
+{
+    std::vector<std::string> refs;
+    if (!resolve_capability_fn)
+        return refs;
+
+    // Each plugin-backed option (ConfigOptionDef::is_plugin_backed) contributes its resolved
+    // reference(s) via save_plugin_collection, which appends in order and skips duplicates, so no
+    // second de-duplication pass is needed here.
+    for (const std::string& opt_key : this->keys())
+        if (const ConfigOption* opt = this->option(opt_key))
+            this->save_plugin_collection(opt_key, opt, refs);
+    return refs;
+}
+
+void ConfigBase::update_plugin_manifest()
+{
+    // Writes the derived manifest back into this config's "plugins" option (save_to_json writes the
+    // same manifest into a JSON document instead), so an in-memory backend config carries a resolved
+    // manifest even when the source preset was never serialized (picked-but-unsaved). Without a
+    // resolver (CLI/headless) leave whatever manifest was loaded from disk untouched.
+    if (!resolve_capability_fn)
+        return;
+    if (auto* manifest = this->option<ConfigOptionStrings>("plugins", true))
+        manifest->values = this->collect_plugin_manifest();
 }
 
 DynamicConfig::DynamicConfig(const ConfigBase& rhs, const t_config_option_keys& keys)

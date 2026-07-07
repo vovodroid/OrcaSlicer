@@ -6,14 +6,14 @@
 # name = "Inset Every Slice"
 # description = "Insets every layer's slices by 1mm at the Slice boundary (demo)."
 # author = "OrcaSlicer"
-# version = "1.0.0"
+# version = "0.01"
 # type = "slicing-pipeline"
 # ///
 """Inset Every Slice -- a small, WORKING SlicingPipeline sample plugin.
 
 At Step.Slice, for every layer/region of the sliced object, this shrinks each
 sliced surface's outer contour by INSET_MM and writes the result back with
-LayerRegionView.set_slices(). set_slices() at Step.Slice is the fully-supported
+LayerRegion.set_slices(). set_slices() at Step.Slice is the fully-supported
 mutation-cascade entry point (see docs/plugins/slicing_pipeline_plugin.md next
 to this file): the split slice loop runs make_perimeters() right after the
 Slice hook, so the change cascades into perimeters, infill and the final
@@ -24,10 +24,10 @@ This is a *teaching* sample, not a production-grade offset:
     center: each vertex coordinate is pulled toward the center by up to
     INSET_MM, independently on X and Y, and never crosses the center. That is
     an exact inward offset for a convex, axis-aligned contour (e.g. the square
-    cross-section of a plain cube, which is what the manual test in the design
-    docs uses) but it is NOT a general polygon offset -- it will distort a
-    rotated or non-rectangular contour. A real plugin should reach for a proper
-    offset library (e.g. Shapely's buffer(), or Clipper) instead.
+    cross-section of a plain cube) but it is NOT a general polygon offset -- it
+    will distort a rotated or non-rectangular contour. A real plugin should
+    reach for a proper offset library (e.g. Shapely's buffer(), or Clipper)
+    instead.
   - Holes are passed through unchanged. A correct hole inset needs an
     *outward* offset plus re-validating containment against the shrunk outer
     contour, which is more than a short demo should attempt.
@@ -35,8 +35,8 @@ This is a *teaching* sample, not a production-grade offset:
     inset without inverting) are left unmodified rather than mutated into
     garbage.
 
-numpy is declared as a dependency: the read views hand back zero-copy int64
-ndarrays, and set_slices() requires genuine ndarrays back (not plain lists),
+numpy is declared as a dependency: the geometry accessors hand back zero-copy
+int64 ndarrays, and set_slices() requires genuine ndarrays back (not plain lists),
 so building the modified contour needs numpy.
 """
 import numpy as np
@@ -94,19 +94,19 @@ class InsetEverySlice(orca.slicing.SlicingPipelineCapabilityBase):
             if ctx.cancelled():
                 break
             for region in layer.regions():
-                surfaces = region.slices()
+                surfaces = region.slices.surfaces
                 if not surfaces:
-                    continue  # set_slices() rejects an empty list
+                    continue  # an empty region has nothing to inset
 
                 new_surfaces = []
                 for surface in surfaces:
                     expoly = surface.expolygon
-                    contour = expoly.contour()
+                    contour = expoly.contour.points()
                     inset = _inset_contour(contour, inset_scaled)
                     if inset is not None:
                         contour = inset
                     # Holes are passed through unchanged -- see module docstring.
-                    new_surfaces.append([contour, expoly.holes()])
+                    new_surfaces.append([contour, [h.points() for h in expoly.holes]])
 
                 region.set_slices(new_surfaces)
                 regions_touched += 1

@@ -3145,10 +3145,8 @@ bool GUI_App::on_init_inner()
                 [&](std::shared_ptr<Slic3r::SlicingPipelinePluginCapability> cap, const Slic3r::PluginCapabilityRef& ref) {
                     Slic3r::ExecutionResult r;
                     try {
-                        // GIL is acquired per capability (not once for the whole dispatch) so it is
-                        // released between capabilities. ctx is built inside this scope because
-                        // ctx.owner is a py::capsule: it must be created and destroyed while the GIL
-                        // is held (ctx destructs before `gil`, so its capsule is decref'd under GIL).
+                        // GIL is acquired per capability (not once for the whole dispatch) so it
+                        // is released between capabilities.
                         PythonGILState gil;
                         // throw_if_canceled() is protected on PrintBase; canceled() is the public
                         // equivalent check (same cancel flag), so honor cancellation via it.
@@ -3159,10 +3157,10 @@ bool GUI_App::on_init_inner()
                         ctx.step   = step;
                         ctx.print  = &print;
                         ctx.object = object;
-                        // No-op-destructor capsule threaded into every zero-copy numpy array as its
-                        // base. It references `print` but frees nothing: `print` is owned by libslic3r
-                        // and outlives the hook, and arrays are valid only during this execute() call.
-                        ctx.owner  = pybind11::capsule(&print, [](void*) {});
+                        // hand the plugin its own [tool.orcaslicer.plugin.settings] as ctx.params
+                        // (same plugin_key the capability was resolved by, so it always matches).
+                        const std::string plugin_key = ref.uuid.empty() ? ref.name : ref.uuid;
+                        ctx.params = Slic3r::PluginManager::instance().get_loader().get_plugin_settings(plugin_key);
                         r = cap->execute(ctx);
                     } catch (const Slic3r::CanceledException&) {
                         throw; // cancellation must reach process(), never become a slicing error
@@ -3175,6 +3173,22 @@ bool GUI_App::on_init_inner()
                     if (r.status == Slic3r::PluginResult::FatalError)
                         throw Slic3r::SlicingError(std::string("Slicing pipeline plugin '") +
                                                    ref.capability_name + "' error: " + r.message);
+                    // log a non-empty success/skipped message instead of dropping it. This is
+                    // log-only by design: every pipeline hook fires AFTER set_done() (see Print.cpp),
+                    // so the Print-level m_step_active is -1 here. Calling active_step_add_warning()
+                    // would then index m_state[-1] (out-of-bounds; the guarding assert is compiled
+                    // out in Release), so it must NOT be called from a pipeline hook.
+                    if (!r.message.empty()) {
+                        static const char* const kStepNames[] = {
+                            "Slice", "Perimeters", "EstimateCurledExtrusions", "PrepareInfill", "Infill",
+                            "Ironing", "Contouring", "SupportMaterial", "DetectOverhangsForLift",
+                            "SimplifyPath", "WipeTower", "SkirtBrim"
+                        }; // order must match Slic3r::SlicingPipelineStep
+                        const char* step_name = static_cast<size_t>(step) < sizeof(kStepNames) / sizeof(kStepNames[0])
+                                                    ? kStepNames[static_cast<int>(step)] : "Unknown";
+                        BOOST_LOG_TRIVIAL(info) << "Slicing pipeline plugin '" << ref.capability_name
+                                                << "' [" << step_name << "]: " << r.message;
+                    }
                 });
         });
 

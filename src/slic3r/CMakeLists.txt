@@ -593,10 +593,13 @@ set(SLIC3R_GUI_SOURCES
     plugin/PythonPluginBridge.hpp
     plugin/PythonPluginInterface.hpp
     plugin/PyPluginPackage.hpp
+    plugin/PluginBindingUtils.hpp
     plugin/PluginHostApi.cpp
     plugin/PluginHostApi.hpp
     plugin/PluginHostUi.cpp
     plugin/PluginHostUi.hpp
+    plugin/PluginHostSlicing.cpp
+    plugin/PluginHostSlicing.hpp
     plugin/CloudPluginService.cpp
     plugin/CloudPluginService.hpp
     plugin/PluginFsUtils.cpp
@@ -624,7 +627,6 @@ set(SLIC3R_GUI_SOURCES
     plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.hpp
     plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.cpp
     plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapabilityTrampoline.hpp
-    plugin/pluginTypes/slicingPipeline/SlicingNumpy.hpp
     pchheader.cpp
     pchheader.hpp
     Utils/ASCIIFolding.cpp

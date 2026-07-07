@@ -828,7 +828,10 @@ void PrintConfigDef::init_common_params()
     def->tooltip = L("Select the network agent implementation for printer communication.");
     def->mode = comAdvanced;
     def->cli = ConfigOptionDef::nocli;
-    def->support_plugin = true;
+    // Plugin-backed like the pickers, but edited via a dedicated Choice widget rather than a
+    // plugin_picker field. plugin_type marks it plugin-backed and names its capability type, so its
+    // "plugins" manifest reference is derived generically (see ConfigOptionDef::is_plugin_backed).
+    def->plugin_type = "printer-connection";
     def->set_default_value(new ConfigOptionString(""));
 
     def = this->add("print_host", coString);
@@ -5118,7 +5121,6 @@ void PrintConfigDef::init_fff_params()
                    "The plugin will receive the G-code file path and can modify it in place.");
     def->gui_type = ConfigOptionDef::GUIType::plugin_picker;
     def->plugin_type = "post-processing";
-    def->support_plugin = true;
     def->full_width = true;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionStrings());
@@ -5128,7 +5130,6 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Python plugin(s) invoked at each slicing pipeline step to read and modify intermediate slicing data. Research/experimental.");
     def->gui_type = ConfigOptionDef::GUIType::plugin_picker;
     def->plugin_type = "slicing-pipeline";
-    def->support_plugin = true;
     def->full_width = true;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionStrings());

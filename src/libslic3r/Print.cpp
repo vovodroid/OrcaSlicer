@@ -2330,6 +2330,17 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
                 const bool was_done = obj->is_step_done(posSlice);
                 obj->slice();
                 hook_after(obj, was_done, posSlice, SlicingPipelineStep::Slice);
+                // re-snapshot each layer's raw_slices AFTER the Slice hook ran, so the
+                // plugin's mutation becomes the untyped baseline. Without this, a later
+                // perimeter-only re-run (make_perimeters -> restore_untyped_slices) reverts
+                // slices to the PRE-hook geometry while posSlice stays cached (the hook does
+                // not re-fire), silently un-applying the mutation; raw_slices consumers
+                // (sharp-tail support, ToolOrdering) also read this backup directly. Gated on
+                // an active plugin AND a genuine (re)slice, so the inactive path is untouched
+                // and re-backing-up an unmutated layer is a harmless identical copy.
+                if (m_pipeline_plugin_active && !was_done && obj->is_step_done(posSlice))
+                    for (Layer *layer : obj->layers())
+                        layer->backup_untyped_slices();
             } else {
                 if (obj->set_started(posSlice)) obj->set_done(posSlice);   // shared/duplicate — no hook
             }
@@ -2356,6 +2367,14 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
         }
         for (PrintObject *obj : m_objects) {
             if (need_slicing_objects.count(obj) != 0) {
+                // split prepare_infill (fill-surface prep) from infill (make_fills) so a
+                // plugin can mutate fill surfaces at the PrepareInfill seam and have make_fills
+                // consume them (unlike the Infill seam, which fires after the fills are already
+                // built). infill() re-invokes prepare_infill() as a no-op once posPrepareInfill
+                // is DONE, so this is a mechanical split mirroring the slice/perimeters loop.
+                const bool prepare_was_done = obj->is_step_done(posPrepareInfill);
+                obj->prepare_infill();
+                hook_after(obj, prepare_was_done, posPrepareInfill, SlicingPipelineStep::PrepareInfill);
                 const bool was_done = obj->is_step_done(posInfill);
                 obj->infill();
                 hook_after(obj, was_done, posInfill, SlicingPipelineStep::Infill);

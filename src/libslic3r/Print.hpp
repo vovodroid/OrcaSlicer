@@ -883,7 +883,7 @@ enum FilamentCompatibilityType {
 };
 
 enum class SlicingPipelineStep {
-    Slice, Perimeters, EstimateCurledExtrusions, Infill, Ironing, Contouring,
+    Slice, Perimeters, EstimateCurledExtrusions, PrepareInfill, Infill, Ironing, Contouring,
     SupportMaterial, DetectOverhangsForLift, SimplifyPath, WipeTower, SkirtBrim
 };
 

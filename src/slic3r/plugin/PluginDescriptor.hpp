@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -61,6 +62,7 @@ struct PluginDescriptor
     std::string entry_path;                             // Full path to the installed plugin entry file
     std::string entry_package;                          // Import package/module used for package-based loading
     std::vector<std::string> dependencies;              // Python dependency requirements declared by plugin package metadata
+    std::map<std::string, std::string> settings;        // [tool.orcaslicer.plugin.settings] table -> per-plugin params (ctx.params)
     std::vector<PluginChangelog> changelog;             // Cloud release changelog, sorted newest-first when available.
 
     std::string error;                     // Blocking error message. Non-empty means the plugin is in an error state.

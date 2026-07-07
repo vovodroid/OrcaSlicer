@@ -1,5 +1,7 @@
 #include "PluginHostApi.hpp"
 #include "PluginHostUi.hpp"
+#include "PluginHostSlicing.hpp"
+#include "PluginBindingUtils.hpp"
 
 #include <libslic3r/BoundingBox.hpp>
 #include <libslic3r/Model.hpp>
@@ -46,20 +48,6 @@ PresetBundle* current_preset_bundle()
     return preset_bundle;
 }
 
-py::object config_value_or_none(const DynamicPrintConfig& config, const std::string& key)
-{
-    if (!config.has(key))
-        return py::none();
-    return py::cast(config.opt_serialize(key));
-}
-
-// Plugins receive 3D vectors as plain Python tuples (x, y, z) so the API stays
-// Pythonic and free of an Eigen/numpy runtime dependency.
-py::tuple vec3_to_tuple(const Vec3d& v)
-{
-    return py::make_tuple(v.x(), v.y(), v.z());
-}
-
 // Build a BoundingBoxf3 from precomputed (float) triangle-mesh stats min/max.
 BoundingBoxf3 bbox_from_stats(const TriangleMeshStats& stats)
 {
@@ -86,59 +74,20 @@ struct HostTriangleMesh
     const indexed_triangle_set&         its() const { return mesh->its; }
 };
 
-// Run a builder that constructs numpy objects, translating the "numpy missing"
-// ImportError into an actionable message (plugins must declare numpy as a dep).
-template<typename Builder>
-py::object with_numpy(Builder&& build)
-{
-    try {
-        return std::forward<Builder>(build)();
-    } catch (py::error_already_set& err) {
-        if (err.matches(PyExc_ImportError))
-            throw py::import_error("numpy is required to access mesh arrays/matrices; "
-                                   "add dependencies = [\"numpy\"] to your plugin metadata");
-        throw;
-    }
-}
-
 // Read-only, zero-copy (rows, 3) numpy view over a packed T[rows][3] buffer.
-// The array owns a capsule that pins `mesh` alive for the view's lifetime.
+// The array's base is a capsule owning a strong ref to `mesh`, so the view
+// stays valid even if the volume's mesh is later replaced on the main thread.
 template<typename T>
 py::array make_readonly_rows3(const std::shared_ptr<const TriangleMesh>& mesh,
                               const T* data, py::ssize_t rows)
 {
     if (rows == 0 || data == nullptr)
-        return py::array_t<T>(std::vector<py::ssize_t>{0, 3});
-
+        return py::array_t<T>(std::vector<py::ssize_t>{ 0, 3 });
     auto* owner = new std::shared_ptr<const TriangleMesh>(mesh);
     py::capsule base(owner, [](void* p) {
         delete reinterpret_cast<std::shared_ptr<const TriangleMesh>*>(p);
     });
-
-    py::array_t<T> array(
-        { rows, py::ssize_t(3) },
-        { py::ssize_t(3 * sizeof(T)), py::ssize_t(sizeof(T)) },
-        data,
-        base);
-    // A capsule-based array is writable by default in pybind11; the underlying
-    // mesh is const, so force the view read-only.
-    array.attr("setflags")(py::arg("write") = false);
-    return array;
-}
-
-// 4x4 row-major float64 copy of an affine transform. Eigen stores column-major,
-// so fill element-wise to produce correct C-order data.
-py::object mat4_to_numpy(const Transform3d& transform)
-{
-    return with_numpy([&] {
-        py::array_t<double> array({ py::ssize_t(4), py::ssize_t(4) });
-        auto                view   = array.mutable_unchecked<2>();
-        const auto&         matrix = transform.matrix();
-        for (int i = 0; i < 4; ++i)
-            for (int j = 0; j < 4; ++j)
-                view(i, j) = matrix(i, j);
-        return py::object(std::move(array));
-    });
+    return make_readonly_rows<T, 3>(base, data, rows);
 }
 
 py::list current_filament_presets(PresetBundle& bundle)
@@ -530,6 +479,9 @@ void PluginHostApi::RegisterBindings(pybind11::module_& module)
 
     // UI: native dialogs and interactive HTML windows for plugins.
     PluginHostUi::RegisterBindings(host);
+
+    // Slicing print-graph data model (Print, Layer, Surface, ...).
+    PluginHostSlicing::RegisterBindings(host);
 }
 
 } // namespace Slic3r

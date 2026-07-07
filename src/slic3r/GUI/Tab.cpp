@@ -1790,6 +1790,13 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
         return;
     }
 
+    // Keep this preset's "plugins" manifest in sync when a plugin picker changes, so the edited preset
+    // always carries resolved "name;uuid;capability" references that full_config() and save_to_json()
+    // then pass downstream as-is -- no separate rebuild anywhere else.
+    if (const ConfigOptionDef* opt_def = m_config->def()->get(opt_key);
+        opt_def && opt_def->gui_type == ConfigOptionDef::GUIType::plugin_picker)
+        m_config->update_plugin_manifest();
+
     if (opt_key == "gcode_flavor" && m_type == Preset::TYPE_PRINTER) {
         if (auto printer_tab = dynamic_cast<TabPrinter*>(this))
             printer_tab->on_gcode_flavor_changed();
