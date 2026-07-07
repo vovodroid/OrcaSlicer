@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Plugins</title>
   <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./plugin-sort.css" />
+  <link rel="stylesheet" href="./plugin-search.css" />
   <link rel="stylesheet" type="text/css" href="../../include/global.css" />
   <link rel="stylesheet" type="text/css" href="../css/common.css" />
   <link rel="stylesheet" type="text/css" href="../css/theme.css" />
@@ -14,10 +16,33 @@
   <script type="text/javascript" src="../js/globalapi.js"></script>
   <script type="text/javascript" src="../js/common.js"></script>
   <script src="./index.js"></script>
+  <script src="./plugin-sort.js"></script>
+  <script src="./plugin-search.js"></script>
 </head>
 <body onLoad="OnInit()">
   <div class="app">
     <div class="toolbar">
+      <div id="pluginSearch" class="plugin-search">
+        <span class="plugin-search-icon" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4">
+            <circle cx="6.5" cy="6.5" r="4.5" />
+            <line x1="10" y1="10" x2="14" y2="14" />
+          </svg>
+        </span>
+        <input id="plugin_search_input" class="plugin-search-input" type="text"
+          placeholder="Search plugins" autocomplete="off" spellcheck="false" aria-label="Search plugins" />
+        <button id="plugin_search_clear" class="plugin-search-clear" type="button" title="Clear" aria-label="Clear search">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor"
+            stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <line x1="5" y1="5" x2="11" y2="11" />
+            <line x1="11" y1="5" x2="5" y2="11" />
+          </svg>
+        </button>
+        <button id="plugin_search_cc" class="plugin-search-toggle" type="button"
+          aria-pressed="false" title="Match case">Aa</button>
+        <button id="plugin_search_w" class="plugin-search-toggle" type="button"
+          aria-pressed="false" title="Match whole word"><span class="plugin-search-underline">ab</span></button>
+      </div>
 <!--        <button id="open_terminal" class="ButtonStyleRegular ButtonTypeChoice left-btn">-->
 <!--            Open Terminal-->
 <!--        </button>-->
@@ -43,9 +68,14 @@
       <section class="pane plugin-list-pane">
         <div class="hdr plugin-cols">
           <span>Activate</span>
-          <span>Name</span>
-          <span>Plugin Version</span>
-          <span>Status</span>
+          <span class="sort-th" data-sort-field="name" role="button" tabindex="0"
+            title="Sort by name">Name<span class="sort-tri" aria-hidden="true"></span></span>
+          <span class="sort-th" data-sort-field="version" role="button" tabindex="0"
+            title="Sort by version">Plugin Version<span class="sort-tri" aria-hidden="true"></span></span>
+          <span class="sort-th" data-sort-field="source" role="button" tabindex="0"
+            title="Sort by source">Source<span class="sort-tri" aria-hidden="true"></span></span>
+          <span class="sort-th" data-sort-field="status" role="button" tabindex="0"
+            title="Sort by status">Status<span class="sort-tri" aria-hidden="true"></span></span>
         </div>
         <div id="pluginList" class="body thin-scroll"></div>
       </section>
