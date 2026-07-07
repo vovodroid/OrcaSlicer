@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Plugins</title>
   <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./plugin-sort.css" />
   <link rel="stylesheet" type="text/css" href="../../include/global.css" />
   <link rel="stylesheet" type="text/css" href="../css/common.css" />
   <link rel="stylesheet" type="text/css" href="../css/theme.css" />
@@ -14,6 +15,7 @@
   <script type="text/javascript" src="../js/globalapi.js"></script>
   <script type="text/javascript" src="../js/common.js"></script>
   <script src="./index.js"></script>
+  <script src="./plugin-sort.js"></script>
 </head>
 <body onLoad="OnInit()">
   <div class="app">
@@ -43,9 +45,14 @@
       <section class="pane plugin-list-pane">
         <div class="hdr plugin-cols">
           <span>Activate</span>
-          <span>Name</span>
-          <span>Plugin Version</span>
-          <span>Status</span>
+          <span class="sort-th" data-sort-field="name" role="button" tabindex="0"
+            title="Sort by name">Name<span class="sort-tri" aria-hidden="true"></span></span>
+          <span class="sort-th" data-sort-field="version" role="button" tabindex="0"
+            title="Sort by version">Plugin Version<span class="sort-tri" aria-hidden="true"></span></span>
+          <span class="sort-th" data-sort-field="source" role="button" tabindex="0"
+            title="Sort by source">Source<span class="sort-tri" aria-hidden="true"></span></span>
+          <span class="sort-th" data-sort-field="status" role="button" tabindex="0"
+            title="Sort by status">Status<span class="sort-tri" aria-hidden="true"></span></span>
         </div>
         <div id="pluginList" class="body thin-scroll"></div>
       </section>

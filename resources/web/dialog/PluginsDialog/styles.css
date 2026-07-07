@@ -187,7 +187,27 @@ body {
 }
 
 .plugin-cols {
-  grid-template-columns: 70px minmax(0, 2.8fr) minmax(120px, 0.9fr) minmax(140px, 1fr);
+  grid-template-columns: 70px minmax(0, 2.4fr) minmax(110px, 0.85fr) minmax(96px, 0.7fr) minmax(130px, 0.95fr);
+}
+
+/* Source is its own (sortable) column, shown as colored text (mirrors .status-cell), not a chip. */
+.source-cell {
+  display: flex;
+  align-items: center;
+}
+
+.source-cell.source-mine {
+  color: var(--plugin-source-mine-text);
+  font-weight: 600;
+}
+
+.source-cell.source-subscribed {
+  color: var(--plugin-source-subscribed-text);
+  font-weight: 600;
+}
+
+.source-cell.source-local {
+  color: var(--plugin-source-neutral-text);
 }
 
 /* Center the "Activate" header over the centered checkbox in each row. */
@@ -833,11 +853,6 @@ body {
   font-weight: 600;
   line-height: 17px;
   white-space: nowrap;
-}
-
-/* In a list row, sit at the right edge of the Name column (the name fills the rest). */
-.label-cell .plugin-source-badge {
-  margin-right: 4px;
 }
 
 .plugin-source-badge.source-local {
