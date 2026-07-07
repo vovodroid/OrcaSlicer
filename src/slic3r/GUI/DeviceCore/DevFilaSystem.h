@@ -9,6 +9,9 @@
 #include <map>
 #include <optional>
 #include <memory>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 #include <wx/string.h>
 #include <wx/colour.h>
 
@@ -17,6 +20,7 @@
 namespace Slic3r
 {
 class MachineObject;
+struct DevFilamentDryingPreset;
 
 /**
  * DevAmsTray - Represents a single filament tray/slot in an AMS unit or virtual tray.
@@ -138,6 +142,61 @@ public:
     static constexpr AmsType N3S = DevAmsType::N3S;
 
 public:
+
+    enum class DryCtrlMode : int
+    {
+        Off = 0,
+        OnTime = 1,
+        OnHumidity = 2,
+    };
+
+    enum class DryStatus : char
+    {
+        Off = 0,
+        Checking = 1,
+        Drying = 2,
+        Cooling = 3,
+        Stopping = 4,
+        Error = 5,
+        CannotStopHeatOutofControl = 6,
+        PrdTesting = 7,
+    };
+
+    enum class DrySubStatus
+    {
+        Off = 0,
+        Heating = 1,
+        Dehumidify = 2,
+    };
+
+    enum class DryFanStatus : char
+    {
+        Off = 0,
+        On = 1,
+    };
+
+    enum class CannotDryReason : int
+    {
+        TaskOccupied = 0,
+        InsufficientPower = 1,
+        AmsBusy = 2,
+        ConsumableAtAmsOutlet = 3,
+        InitiatingAmsDrying = 4,
+        NotSupportedIn2dMode = 5,
+        DryingInProgress = 6,
+        Upgrading = 7,
+        InsufficientPowerNeedPluginPower = 8,
+        FilamentAtAmsOutletManualUnload = 10,
+    };
+
+    struct DrySettings
+    {
+        std::string dry_filament;
+        int dry_temp = -1; // -1 means invalid
+        int dry_hour = -1; // -1 means invalid, hours
+    };
+
+public:
     DevAms(const std::string& ams_id, int extruder_id, AmsType type);
     DevAms(const std::string& ams_id, int nozzle_id, int type);
     ~DevAms();
@@ -168,8 +227,19 @@ public:
     int   GetHumidityLevel() const { return m_humidity_level; }
     int   GetHumidityPercent() const { return m_humidity_percent; }
 
-    bool  SupportDrying() const { return m_ams_type > AMS_LITE; }
+    bool  SupportDrying() const { return m_ams_type == N3F || m_ams_type == N3S; }
     int   GetLeftDryTime() const { return m_left_dry_time; }
+
+    // remote drying control
+    bool IsSupportRemoteDry(const MachineObject* obj) const;
+    std::optional<DryStatus> GetDryStatus() const { return m_dry_status; };
+    std::optional<DrySubStatus> GetDrySubStatus() const { return m_dry_sub_status; }
+    std::optional<DryFanStatus> GetFan1Status() const { return m_dry_fan1_status; }
+    std::optional<DryFanStatus> GetFan2Status() const { return m_dry_fan2_status; }
+    std::optional<std::vector<CannotDryReason>> GetCannotDryReason() const { return m_dry_cannot_reasons; }
+    std::optional<DrySettings> GetDrySettings() const { return m_dry_settings; };
+
+    bool AmsIsDrying();
 
 private:
     AmsType       m_ams_type = AmsType::AMS;
@@ -185,6 +255,14 @@ private:
     int    m_humidity_level = 5; // AmsType::AMS
     int    m_humidity_percent = -1; // N3F N3S, the percentage, -1 means invalid. eg. 100 means 100%
     int    m_left_dry_time = 0;
+
+    // see is_support_remote_dry
+    std::optional<DryStatus> m_dry_status;
+    std::optional<DrySubStatus> m_dry_sub_status;
+    std::optional<DryFanStatus> m_dry_fan1_status;
+    std::optional<DryFanStatus> m_dry_fan2_status;
+    std::optional<std::vector<CannotDryReason>> m_dry_cannot_reasons;
+    std::optional<DrySettings> m_dry_settings;
 };
 
 /**
