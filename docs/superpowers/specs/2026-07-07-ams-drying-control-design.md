@@ -2,6 +2,7 @@
 
 **Date:** 2026-07-07
 **Source:** Port from BambuStudio `AMSDryControl` feature
+**Reference:** `D:\projects\BambuStudio` — match its behavior as much as possible; when in doubt, check the BambuStudio source
 **Branch:** `dev/ams-heat`
 
 ## Overview
@@ -75,9 +76,9 @@ Additionally, OrcaSlicer already has `ams_drying.svg` and `ams_is_drying.svg`.
 Promoted from `DevAms::AmsType` (currently local to the class) to a global enum in `DevDefs.h` so `DevFilamentDryingPreset` and `DevUtilBackend` can reference it without depending on `DevAms`. `DevAms::AmsType` is updated to be a typedef for `DevAmsType`, and all existing references to `DevAms::AmsType` remain valid (it's the same type):
 
 ```cpp
-// DevDefs.h — global enum using OrcaSlicer's existing names (same integer values as before)
+// DevDefs.h — global enum matching BambuStudio's DevAmsType naming
 enum DevAmsType : int {
-    DUMMY = 0,
+    EXT_SPOOL = 0,
     AMS = 1,
     AMS_LITE = 2,
     N3F = 3,    // AMS 2 Pro
@@ -86,7 +87,8 @@ enum DevAmsType : int {
 
 // DevFilaSystem.h — DevAms class updated:
 // Replace "enum AmsType { DUMMY=0, AMS=1, AMS_LITE=2, N3F=3, N3S=4 }"
-// with "using AmsType = DevAmsType;" (keeps existing code compiling)
+// with "using AmsType = DevAmsType;"
+// Existing references to DevAms::DUMMY become DevAms::EXT_SPOOL (same value, different name).
 ```
 
 ### `DevAms` class additions (in `DevFilaSystem.h`)
