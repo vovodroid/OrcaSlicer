@@ -55,24 +55,38 @@ The feature spans three layers, matching the existing OrcaSlicer `DeviceCore/` p
 | `DeviceErrorDialog.cpp` | Update stop-drying to use `DevFilaSystem::CtrlAmsStopDrying()` |
 | `DeviceCore/CMakeLists.txt` | Register new source files |
 
-### New image assets (~14)
+### New image assets (14)
 
-Humidity level icons (5), drying status per AMS type (8: heating/dehumidifying/error/cooling × N3F/N3S), heating icon, enable/disable indicators, guide image.
+| Asset | Purpose |
+|-------|---------|
+| `hum_level1_no_num_light.svg` – `hum_level5_no_num_light.svg` | 5 humidity level icons |
+| `dev_ams_dry_ctr_n3f_heating.png`, `_dehumidifying.png`, `_error.png`, `_cooling.png` | 4 N3F drying state images |
+| `dev_ams_dry_ctr_n3s_heating.png`, `_dehumidifying.png`, `_error.png`, `_cooling.png` | 4 N3S drying state images |
+| `dev_ams_dry_ctr_heating_icon.svg` | Animated heating indicator |
+| `dev_ams_dry_ctr_filament_in_chamber.png` | Guide page illustration |
+| `dev_ams_dry_ctr_enable.svg`, `dev_ams_dry_ctr_disable.svg` | Filament tray status icons |
+
+Additionally, OrcaSlicer already has `ams_drying.svg` and `ams_is_drying.svg`.
 
 ## Data Model
 
 ### `DevDefs.h` — Global `DevAmsType` enum
 
-Promoted from `DevAms::AmsType` (currently local to the class) to a global enum so `DevFilamentDryingPreset` and `DevUtilBackend` can reference it without depending on `DevAms`:
+Promoted from `DevAms::AmsType` (currently local to the class) to a global enum in `DevDefs.h` so `DevFilamentDryingPreset` and `DevUtilBackend` can reference it without depending on `DevAms`. `DevAms::AmsType` is updated to be a typedef for `DevAmsType`, and all existing references to `DevAms::AmsType` remain valid (it's the same type):
 
 ```cpp
+// DevDefs.h — global enum using OrcaSlicer's existing names (same integer values as before)
 enum DevAmsType : int {
-    EXT_SPOOL = 0,
+    DUMMY = 0,
     AMS = 1,
     AMS_LITE = 2,
     N3F = 3,    // AMS 2 Pro
     N3S = 4,    // AMS HT
 };
+
+// DevFilaSystem.h — DevAms class updated:
+// Replace "enum AmsType { DUMMY=0, AMS=1, AMS_LITE=2, N3F=3, N3S=4 }"
+// with "using AmsType = DevAmsType;" (keeps existing code compiling)
 ```
 
 ### `DevAms` class additions (in `DevFilaSystem.h`)
@@ -260,7 +274,7 @@ In `AMSControl.cpp`, the `EVT_AMS_SHOW_HUMIDITY_TIPS` handler currently shows ei
 
 1. Lazily create `AMSDryCtrWin*` member on `AMSControl` (like `m_percent_humidity_dry_popup` today)
 2. Call `set_ams_id()` and `update(fila_system, obj)` before showing
-3. Show the dialog modally or modelessly
+3. Show the dialog modally via `ShowModal()` (matching BambuStudio behavior)
 
 ### Periodic updates
 
