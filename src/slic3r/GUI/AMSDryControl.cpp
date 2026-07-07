@@ -1615,7 +1615,7 @@ int AMSDryCtrWin::update_filament_list(DevAms* dev_ams, MachineObject* obj)
                     }
 
                     filament_id_set.insert(filament_it->filament_id);
-                    auto filament_alias = filament_it->alias;
+                    auto filament_alias = filaments.get_preset_alias(*filament_it, true);
                     if (!filament_alias.empty()) {
                         auto opt_info = preset_bundle->get_filament_by_filament_id(filament_it->filament_id);
                         if (opt_info.has_value()) {

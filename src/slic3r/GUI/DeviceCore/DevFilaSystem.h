@@ -104,10 +104,11 @@ public:
 
     std::string get_display_filament_type() const;
     std::string get_filament_type();
-    std::optional<DevFilamentDryingPreset> get_ams_drying_preset() const;
 
     // static
     static wxColour decode_color(const std::string& color);
+
+    std::optional<DevFilamentDryingPreset> get_ams_drying_preset() const;
 };
 
 /**
@@ -228,7 +229,7 @@ public:
     int   GetHumidityLevel() const { return m_humidity_level; }
     int   GetHumidityPercent() const { return m_humidity_percent; }
 
-    bool  SupportDrying() const { return m_ams_type == N3F || m_ams_type == N3S; }
+    bool  SupportDrying() const { return m_ams_type == DevAmsType::N3F || m_ams_type == DevAmsType::N3S; }
     int   GetLeftDryTime() const { return m_left_dry_time; }
 
     // remote drying control
@@ -333,6 +334,8 @@ public:
 public:
     // ctrls
     int  CtrlAmsReset() const;
+
+    // crtl
     int  CtrlAmsStartDryingHour(int ams_id, std::string filament_type, int tag_temp, int tag_duration_hour, bool rotate_tray, int cooling_temp, bool close_power_conflict = false) const;
     int  CtrlAmsStopDrying(int ams_id) const;
 

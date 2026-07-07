@@ -15,13 +15,13 @@
 #include <wx/dynarray.h>
 
 #include "slic3r/GUI/DeviceCore/DevExtruderSystem.h"
+#include "slic3r/GUI/AMSDryControl.hpp"
 
 
 namespace Slic3r { namespace GUI {
 
 //Previous definitions
 class uiAmsPercentHumidityDryPopup;
-class AMSDryCtrWin;
 
 class AMSControl : public wxSimplebook
 {
@@ -119,7 +119,7 @@ protected:
 
     AmsHumidityTipPopup m_Humidity_tip_popup;
     uiAmsPercentHumidityDryPopup* m_percent_humidity_dry_popup;
-    AMSDryCtrWin* m_dry_ctr_win{nullptr};
+    AMSDryCtrWin* m_ams_dry_ctr_win;
 
     std::string m_last_ams_id = "";
     std::string m_last_tray_id = "";
@@ -158,6 +158,7 @@ public:
     void CreateAmsDoubleNozzle(const std::string &series_name, const std::string& printer_type);
     void CreateAmsSingleNozzle(const std::string &series_name, const std::string &printer_type);
     void ClearAms();
+    void UpdateAmsDryControl(MachineObject* obj);
     void UpdateAms(const std::string   &series_name,
                    const std::string   &printer_type,
                    std::vector<AMSinfo> ams_info,
