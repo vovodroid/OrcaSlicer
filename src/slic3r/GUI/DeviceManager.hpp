@@ -254,6 +254,7 @@ public:
     bool is_tunnel_mqtt = false;
 
     //AmsTray vt_tray;                        // virtual tray
+    bool  is_support_remote_dry = false;
     long  ams_exist_bits = 0;
     long  tray_exist_bits = 0;
     long  tray_is_bbl_bits = 0;

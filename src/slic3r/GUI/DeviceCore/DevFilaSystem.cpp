@@ -6,6 +6,7 @@
 #include "slic3r/GUI/I18N.hpp"
 
 #include "DevUtil.h"
+#include "DevUtilBackend.h"
 
 using namespace nlohmann;
 
@@ -99,6 +100,12 @@ std::string DevAmsTray::get_filament_type()
 }
 
 
+std::optional<DevFilamentDryingPreset> DevAmsTray::get_ams_drying_preset() const
+{
+    return DevUtilBackend::GetFilamentDryingPreset(setting_id);
+}
+
+
 DevAms::DevAms(const std::string& ams_id, int extruder_id, AmsType type)
 {
     m_ams_id = ams_id;
@@ -187,6 +194,27 @@ DevAmsTray* DevAms::GetTray(const std::string& tray_id) const
     }
 
     return nullptr;
+}
+
+bool DevAms::IsSupportRemoteDry(const MachineObject* obj) const
+{
+    if (obj && obj->is_support_remote_dry) {
+        return SupportDrying();
+    }
+
+    return false;
+}
+
+bool DevAms::AmsIsDrying()
+{
+    if (!GetDryStatus().has_value()) {
+        return false;
+    }
+
+    return GetDryStatus().value() == DevAms::DryStatus::Checking
+        || GetDryStatus().value() == DevAms::DryStatus::Drying
+        || GetDryStatus().value() == DevAms::DryStatus::Error
+        || GetDryStatus().value() == DevAms::DryStatus::CannotStopHeatOutofControl;
 }
 
 DevFilaSystem::~DevFilaSystem()
@@ -429,6 +457,30 @@ void DevFilaSystemParser::ParseV1_0(const json& jj, MachineObject* obj, DevFilaS
                     if (it->contains("dry_time") && (*it)["dry_time"].is_number())
                     {
                         curr_ams->m_left_dry_time = (*it)["dry_time"].get<int>();
+                    }
+
+                    // Drying status — only parse if printer supports remote drying
+                    if (obj->is_support_remote_dry) {
+                        if (it->contains("info")) {
+                            const std::string& info = (*it)["info"].get<std::string>();
+                            curr_ams->m_dry_status = (DevAms::DryStatus)DevUtil::get_flag_bits(info, 4, 4);
+                            curr_ams->m_dry_fan1_status = (DevAms::DryFanStatus)DevUtil::get_flag_bits(info, 18, 2);
+                            curr_ams->m_dry_fan2_status = (DevAms::DryFanStatus)DevUtil::get_flag_bits(info, 20, 2);
+                            curr_ams->m_dry_sub_status = (DevAms::DrySubStatus)DevUtil::get_flag_bits(info, 22, 2);
+                        }
+
+                        if (it->contains("dry_setting")) {
+                            const auto& j_dry_settings = (*it)["dry_setting"];
+                            DevAms::DrySettings dry_settings;
+                            DevJsonValParser::ParseVal(j_dry_settings, "dry_filament", dry_settings.dry_filament);
+                            DevJsonValParser::ParseVal(j_dry_settings, "dry_temperature", dry_settings.dry_temp);
+                            DevJsonValParser::ParseVal(j_dry_settings, "dry_duration", dry_settings.dry_hour);
+                            curr_ams->m_dry_settings = dry_settings;
+                        }
+
+                        if (it->contains("dry_sf_reason")) {
+                            curr_ams->m_dry_cannot_reasons = DevJsonValParser::GetVal<std::vector<DevAms::CannotDryReason>>((*it), "dry_sf_reason");
+                        }
                     }
 
                     if (it->contains("humidity"))
