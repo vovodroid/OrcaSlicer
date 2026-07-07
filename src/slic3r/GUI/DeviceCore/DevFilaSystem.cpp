@@ -111,7 +111,7 @@ DevAms::DevAms(const std::string& ams_id, int nozzle_id, int type)
     m_ams_id = ams_id;
     m_ext_id = nozzle_id;
     m_ams_type = (AmsType)type;
-    assert(DUMMY < type && m_ams_type <= N3S);
+    assert(EXT_SPOOL < type && m_ams_type <= N3S);
 }
 
 DevAms::~DevAms()

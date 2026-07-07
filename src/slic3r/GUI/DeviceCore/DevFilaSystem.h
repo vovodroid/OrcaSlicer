@@ -130,14 +130,12 @@ class DevAms
 {
     friend class DevFilaSystemParser;
 public:
-    enum AmsType : int
-    {
-        DUMMY = 0,
-        AMS = 1,      // AMS
-        AMS_LITE = 2, // AMS-Lite
-        N3F = 3,      // N3F
-        N3S = 4,      // N3S
-    };
+    using AmsType = DevAmsType;
+    static constexpr AmsType EXT_SPOOL = DevAmsType::EXT_SPOOL;
+    static constexpr AmsType AMS = DevAmsType::AMS;
+    static constexpr AmsType AMS_LITE = DevAmsType::AMS_LITE;
+    static constexpr AmsType N3F = DevAmsType::N3F;
+    static constexpr AmsType N3S = DevAmsType::N3S;
 
 public:
     DevAms(const std::string& ams_id, int extruder_id, AmsType type);
