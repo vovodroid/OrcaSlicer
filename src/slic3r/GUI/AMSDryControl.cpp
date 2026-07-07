@@ -86,7 +86,7 @@ FilamentItemPanel::FilamentItemPanel(wxWindow* parent, const wxString& text, con
     : wxPanel(parent, id)
     , m_icon_name(icon_name)
 {
-    SetBackgroundColour(wxColour("#F7F7F7")); // Light gray background
+    SetBackgroundColour(wxColour("#F0F0F1")); // Light gray background
     SetMinSize(wxSize(FromDIP(64), FromDIP(106))); // Width: 64, Height: 106
     SetSize(wxSize(FromDIP(64), FromDIP(106)));    // Fixed size
 
@@ -99,7 +99,7 @@ FilamentItemPanel::FilamentItemPanel(wxWindow* parent, const wxString& text, con
 
     m_text_label = new Label(this, text);
     m_text_label->SetForegroundColour(StateColor::darkModeColorFor(wxColour(*wxBLACK)));
-    m_text_label->SetBackgroundColour(StateColor::darkModeColorFor(wxColour("#F7F7F7")));
+    m_text_label->SetBackgroundColour(StateColor::darkModeColorFor(wxColour("#F0F0F1")));
     m_text_label->SetFont(Label::Body_12);
     m_text_label->Wrap(FromDIP(40));
     top_sizer->Add(m_text_label, 0, wxALIGN_CENTER_HORIZONTAL);
@@ -112,7 +112,7 @@ FilamentItemPanel::FilamentItemPanel(wxWindow* parent, const wxString& text, con
     bottom_sizer->AddStretchSpacer(1);
 
     m_icon_bitmap = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
-    m_icon_bitmap->SetBackgroundColour(StateColor::darkModeColorFor(wxColour("#F7F7F7")));
+    m_icon_bitmap->SetBackgroundColour(StateColor::darkModeColorFor(wxColour("#F0F0F1")));
     m_icon_bitmap->SetMinSize(wxSize(FromDIP(24), FromDIP(24)));
     m_icon_bitmap->SetMaxSize(wxSize(FromDIP(24), FromDIP(24)));
     bottom_sizer->Add(m_icon_bitmap, 0, wxALIGN_CENTER_HORIZONTAL);
@@ -170,7 +170,7 @@ void FilamentItemPanel::OnPaint(wxPaintEvent& event)
     wxSize size = GetSize();
 
     // bool is_dark_mode = wxGetApp().dark_mode();
-    wxColour backgroundColor = StateColor::darkModeColorFor(wxColour("#F7F7F7"));
+    wxColour backgroundColor = StateColor::darkModeColorFor(wxColour("#F0F0F1"));
     wxColour borderColor = StateColor::darkModeColorFor(wxColour("#DBDBDB"));
 
     // Draw white background rectangle with rounded corners inside the thick vertical lines
@@ -208,7 +208,7 @@ AMSFilamentPanel::AMSFilamentPanel(wxWindow* parent, const wxString& ams_name, w
 
     // Filament items section
     m_filament_container = new wxPanel(this);
-    m_filament_container->SetBackgroundColour(wxColour("#F7F7F7"));
+    m_filament_container->SetBackgroundColour(wxColour("#F0F0F1"));
     m_filament_sizer = new wxBoxSizer(wxHORIZONTAL);
     m_filament_container->SetSizer(m_filament_sizer);
 
