@@ -21,6 +21,7 @@ namespace Slic3r { namespace GUI {
 
 //Previous definitions
 class uiAmsPercentHumidityDryPopup;
+class AMSDryCtrWin;
 
 class AMSControl : public wxSimplebook
 {
@@ -118,6 +119,7 @@ protected:
 
     AmsHumidityTipPopup m_Humidity_tip_popup;
     uiAmsPercentHumidityDryPopup* m_percent_humidity_dry_popup;
+    AMSDryCtrWin* m_dry_ctr_win{nullptr};
 
     std::string m_last_ams_id = "";
     std::string m_last_tray_id = "";

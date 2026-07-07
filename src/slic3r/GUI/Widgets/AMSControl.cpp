@@ -6,6 +6,7 @@
 
 #include "slic3r/GUI/MsgDialog.hpp"
 #include "slic3r/GUI/DeviceTab/uiAmsHumidityPopup.h"
+#include "slic3r/GUI/AMSDryControl.hpp"
 
 #include "slic3r/GUI/DeviceCore/DevManager.h"
 #include "slic3r/GUI/DeviceCore/DevFilaSystem.h"
@@ -254,6 +255,24 @@ AMSControl::AMSControl(wxWindow *parent, wxWindowID id, const wxPoint &pos, cons
                 if (humidity_value > 0 && humidity_value <= 5) { m_Humidity_tip_popup.set_humidity_level(humidity_value); }
                 m_Humidity_tip_popup.Popup();
             }
+            else if (info->ams_type == AMSModel::N3F_AMS || info->ams_type == AMSModel::N3S_AMS)
+            {
+                // Open full drying control dialog for N3F/N3S AMS
+                if (!m_dry_ctr_win) {
+                    m_dry_ctr_win = new AMSDryCtrWin(this);
+                }
+                m_dry_ctr_win->set_ams_id(info->ams_id);
+
+                Slic3r::DeviceManager* dev = Slic3r::GUI::wxGetApp().getDeviceManager();
+                if (dev) {
+                    MachineObject *obj = dev->get_selected_machine();
+                    if (obj && obj->GetFilaSystem()) {
+                        std::shared_ptr<DevFilaSystem> fila_ptr(obj->GetFilaSystem(), [](DevFilaSystem*){});
+                        m_dry_ctr_win->update(fila_ptr, obj);
+                    }
+                }
+                m_dry_ctr_win->ShowModal();
+            }
             else
             {
                 m_percent_humidity_dry_popup->Update(info);
@@ -491,6 +510,10 @@ void AMSControl::msw_rescale()
 
     if (m_percent_humidity_dry_popup){
         m_percent_humidity_dry_popup->msw_rescale();
+    }
+
+    if (m_dry_ctr_win){
+        m_dry_ctr_win->msw_rescale();
     }
 
     m_Humidity_tip_popup.msw_rescale();
@@ -966,6 +989,19 @@ void AMSControl::UpdateAms(const std::string   &series_name,
                 humidity_info.current_temperature = the_info.current_temperature;
                 m_percent_humidity_dry_popup->Update(&humidity_info);
                 break;
+            }
+        }
+    }
+
+    /*update AMS dry control dialog*/
+    if (m_dry_ctr_win && m_dry_ctr_win->IsShown())
+    {
+        Slic3r::DeviceManager* dev = Slic3r::GUI::wxGetApp().getDeviceManager();
+        if (dev) {
+            MachineObject *obj = dev->get_selected_machine();
+            if (obj && obj->GetFilaSystem()) {
+                std::shared_ptr<DevFilaSystem> fila_ptr(obj->GetFilaSystem(), [](DevFilaSystem*){});
+                m_dry_ctr_win->update(fila_ptr, obj);
             }
         }
     }
