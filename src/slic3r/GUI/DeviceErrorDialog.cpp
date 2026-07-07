@@ -5,7 +5,6 @@
 #include "GUI_App.hpp"
 #include "MainFrame.hpp"
 #include "ReleaseNote.hpp"
-#include "DeviceCore/DevFilaSystem.h"
 
 namespace Slic3r {
 namespace GUI
@@ -450,11 +449,6 @@ void DeviceErrorDialog::on_button_click(ActionButton btn_id)
         break;
     }
     case DeviceErrorDialog::STOP_DRYING: {
-        // Use the canonical CtrlAmsStopDrying path
-        if (m_obj && m_obj->GetFilaSystem()) {
-            m_obj->GetFilaSystem()->CtrlAmsStopDrying(0);
-        }
-        // Fallback to the old command for backward compatibility
         m_obj->command_ams_drying_stop();
         break;
     }
