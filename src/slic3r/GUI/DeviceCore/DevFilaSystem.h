@@ -104,6 +104,7 @@ public:
 
     std::string get_display_filament_type() const;
     std::string get_filament_type();
+    std::optional<DevFilamentDryingPreset> get_ams_drying_preset() const;
 
     // static
     static wxColour decode_color(const std::string& color);
@@ -332,7 +333,9 @@ public:
 public:
     // ctrls
     int  CtrlAmsReset() const;
-     
+    int  CtrlAmsStartDryingHour(int ams_id, std::string filament_type, int tag_temp, int tag_duration_hour, bool rotate_tray, int cooling_temp, bool close_power_conflict = false) const;
+    int  CtrlAmsStopDrying(int ams_id) const;
+
 public:
     static bool IsBBL_Filament(std::string tag_uid);
 
@@ -365,6 +368,20 @@ class DevFilaSystemParser
 {
 public:
     static void ParseV1_0(const json& print_json, MachineObject* obj, DevFilaSystem* system, bool key_field_only);
+};
+
+struct DevFilamentDryingPreset
+{
+    std::string filament_id;
+
+    std::unordered_set<DevAmsType> ams_limitations; // only use ams types in the set
+    std::unordered_map<DevAmsType, float> filament_dev_ams_drying_time_on_idle; // hour
+    std::unordered_map<DevAmsType, float> filament_dev_ams_drying_temperature_on_idle;
+    std::unordered_map<DevAmsType, float> filament_dev_ams_drying_time_on_print; // hour
+    std::unordered_map<DevAmsType, float> filament_dev_ams_drying_temperature_on_print;
+    float filament_dev_drying_cooling_temperature = 0.0f;
+    float filament_dev_drying_softening_temperature = 0.0f;
+    float filament_dev_ams_drying_heat_distortion_temperature = 0.0f;
 };
 
 }// namespace Slic3r
