@@ -114,7 +114,7 @@ private:
     std::shared_ptr<DevExtensionTool> m_extension_tool;
     DevExtderSystem*  m_extder_system;
     DevNozzleSystem*  m_nozzle_system;
-    DevFilaSystem*    m_fila_system;
+    std::shared_ptr<DevFilaSystem> m_fila_system;
     DevFan*           m_fan;
     DevBed *          m_bed;
     DevStorage*       m_storage;
@@ -329,7 +329,7 @@ public:
 
     DevNozzleSystem* GetNozzleSystem() const { return m_nozzle_system;}
 
-    DevFilaSystem*   GetFilaSystem() const { return m_fila_system;}
+    std::shared_ptr<DevFilaSystem>   GetFilaSystem() const { return m_fila_system;}
     bool             HasAms() const;
 
     DevLamp*         GetLamp() const { return m_lamp; }
