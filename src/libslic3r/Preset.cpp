@@ -470,6 +470,8 @@ void Preset::normalize(DynamicPrintConfig &config)
                 continue;
             if (filament_options_with_variant.find(key) != filament_options_with_variant.end())
                 continue;
+            if (filament_dev_options.find(key) != filament_dev_options.end())
+                continue;
             auto *opt = config.option(key, false);
             /*assert(opt != nullptr);
             assert(opt->is_vector());*/
