@@ -241,6 +241,9 @@ void BackgroundSlicingProcess::process_fff()
 		//BBS: add plate index into render params
 		m_temp_output_path = this->get_current_plate()->get_tmp_gcode_path();
 		m_fff_print->export_gcode(m_temp_output_path, m_gcode_result, [this](const ThumbnailsParams& params) { return this->render_thumbnails(params); });
+		// Orca: BBL printers post-process the g-code in place here and never re-parse it into a fresh
+		// GCodeProcessorResult, so m_gcode_result->nozzle_group_result (consumed by the H2C print-dispatch
+		// nozzle mapping) survives post-processing. No preservation guard is needed on this path.
 		if(m_fff_print->is_BBL_printer())
 			run_post_process_scripts(m_temp_output_path, false, "File", m_temp_output_path, m_fff_print->full_print_config());
 

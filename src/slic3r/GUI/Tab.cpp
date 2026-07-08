@@ -1847,6 +1847,27 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
     if (opt_key == "enable_prime_tower") {
         auto timelapse_type = m_config->option<ConfigOptionEnum<TimelapseType>>("timelapse_type");
         bool timelapse_enabled = timelapse_type->value == TimelapseType::tlSmooth;
+        if (!boost::any_cast<bool>(value)) {
+            // Disabling the prime tower on a multi-nozzle printer degrades quality because nozzle changes rely
+            // on it. Gate on any extruder having extruder_max_nozzle_count > 1 so single-nozzle and dual-extruder
+            // (H2D, {1,1}) printers keep their exact existing behavior.
+            // Orca: gate on any_of(count > 1) rather than the sum of counts >= 2. The sum form would also fire for
+            // H2D ({1,1} sums to 2); any_of(>1) preserves H2D's current no-dialog behavior.
+            auto *max_nozzle_counts_opt = wxGetApp().preset_bundle->printers.get_edited_preset().config.option<ConfigOptionIntsNullable>("extruder_max_nozzle_count");
+            const bool has_multiple_nozzle = max_nozzle_counts_opt &&
+                std::any_of(max_nozzle_counts_opt->values.begin(), max_nozzle_counts_opt->values.end(),
+                            [](int v) { return v > 1 && v != ConfigOptionIntsNullable::nil_value(); });
+            if (has_multiple_nozzle) {
+                MessageDialog dlg(wxGetApp().plater(),
+                    _L("Prime tower is required for nozzle changing. There may be flaws on the model without prime tower. Are you sure you want to disable prime tower?"),
+                    _L("Warning"), wxICON_WARNING | wxYES | wxNO);
+                if (dlg.ShowModal() == wxID_NO) {
+                    DynamicPrintConfig new_conf = *m_config;
+                    new_conf.set_key_value("enable_prime_tower", new ConfigOptionBool(true));
+                    m_config_manipulation.apply(m_config, &new_conf);
+                }
+            }
+        }
         if (!boost::any_cast<bool>(value) && timelapse_enabled) {
             bool set_enable_prime_tower = false;
             MessageDialog dlg(wxGetApp().plater(), _L("A prime tower is required for smooth timelapse mode. There may be flaws on the model without a prime tower. Are you sure you want to disable the prime tower\?"),

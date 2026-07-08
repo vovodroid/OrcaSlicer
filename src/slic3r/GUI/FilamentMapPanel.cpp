@@ -1,5 +1,7 @@
 #include "FilamentMapPanel.hpp"
 #include "GUI_App.hpp"
+#include "Widgets/MultiNozzleSync.hpp" // manuallySetNozzleCount producer for extruder_nozzle_stats
+#include <algorithm>
 #include <wx/dcbuffer.h>
 #include <wx/utils.h>
 #include "wx/graphics.h"
@@ -71,6 +73,33 @@ FilamentMapManualPanel::FilamentMapManualPanel(wxWindow                       *p
     top_sizer->Add(m_tips, 0, wxALIGN_LEFT | wxLEFT, FromDIP(15));
 
     m_switch_btn->Bind(wxEVT_BUTTON, &FilamentMapManualPanel::OnSwitchFilament, this);
+
+    // Multi-nozzle: give the user a reachable way to declare, per extruder, how many
+    // physical nozzles of each volume type a multi-nozzle extruder carries. This is the
+    // fallback "manual" producer of the extruder_nozzle_stats config (the full device nozzle-rack
+    // auto-sync is deferred). Gated on the edited printer preset having an extruder with
+    // extruder_max_nozzle_count > 1, so the trigger is not even created for any single-nozzle or
+    // dual-extruder ({1,1}, H2D) printer - zero UI change for every existing profile.
+    auto *max_nozzle_counts_opt = wxGetApp().preset_bundle->printers.get_edited_preset().config.option<ConfigOptionIntsNullable>("extruder_max_nozzle_count");
+    // Skip nil entries: a nullable-int nil is INT_MAX (> 1) and would otherwise falsely pass the gate.
+    if (max_nozzle_counts_opt &&
+        std::any_of(max_nozzle_counts_opt->values.begin(), max_nozzle_counts_opt->values.end(),
+                    [](int v) { return v > 1 && v != ConfigOptionIntsNullable::nil_value(); })) {
+        auto *set_count_link = new Label(this, _L("Set the physical nozzle count..."));
+        set_count_link->SetFont(Label::Body_14);
+        set_count_link->SetForegroundColour(BorderSelectedColor);
+        set_count_link->SetCursor(wxCursor(wxCURSOR_HAND));
+        top_sizer->AddSpacer(FromDIP(8));
+        top_sizer->Add(set_count_link, 0, wxALIGN_LEFT | wxLEFT, FromDIP(15));
+        const std::vector<int> max_counts = max_nozzle_counts_opt->values;
+        set_count_link->Bind(wxEVT_LEFT_DOWN, [max_counts](wxMouseEvent &evt) {
+            for (int extruder_id = 0; extruder_id < (int) max_counts.size(); ++extruder_id) {
+                if (max_counts[extruder_id] > 1)
+                    GUI::manuallySetNozzleCount(extruder_id);
+            }
+            evt.Skip();
+        });
+    }
 
     SetSizer(top_sizer);
     Layout();

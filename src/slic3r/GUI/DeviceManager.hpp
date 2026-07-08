@@ -83,10 +83,12 @@ class DevExtensionTool;
 class DevExtderSystem;
 class DevFan;
 class DevFilaSystem;
+class DevFilaSwitch;
 class DevPrintOptions;
 class DevHMS;
 class DevLamp;
 class DevNozzleSystem;
+class DevNozzleMappingCtrl;
 class DeviceManager;
 class DevStorage;
 struct DevPrintTaskRatingInfo;
@@ -115,6 +117,7 @@ private:
     DevExtderSystem*  m_extder_system;
     DevNozzleSystem*  m_nozzle_system;
     DevFilaSystem*    m_fila_system;
+    DevFilaSwitch*    m_fila_switch;
     DevFan*           m_fan;
     DevBed *          m_bed;
     DevStorage*       m_storage;
@@ -130,6 +133,11 @@ private:
 
     /*Config*/
     DevConfig* m_config;
+
+    /* print-dispatch nozzle mapping (H2C hotend rack). Created unconditionally in the ctor so
+       get_nozzle_mapping_result() is always valid; stays empty (no result attached) for every
+       non-rack printer. */
+    std::shared_ptr<DevNozzleMappingCtrl> m_nozzle_mapping_ptr;
 
 public:
     MachineObject(DeviceManager* manager, NetworkAgent* agent, std::string name, std::string id, std::string ip);
@@ -329,7 +337,12 @@ public:
 
     DevNozzleSystem* GetNozzleSystem() const { return m_nozzle_system;}
 
+    /* print-dispatch nozzle mapping (H2C hotend rack); result stays empty for non-rack printers */
+    std::shared_ptr<DevNozzleMappingCtrl> get_nozzle_mapping_result() const { return m_nozzle_mapping_ptr; }
+    void clear_auto_nozzle_mapping();// defined in DevMappingNozzle.cpp
+
     DevFilaSystem*   GetFilaSystem() const { return m_fila_system;}
+    DevFilaSwitch*   GetFilaSwitch() const { return m_fila_switch;}
     bool             HasAms() const;
 
     DevLamp*         GetLamp() const { return m_lamp; }

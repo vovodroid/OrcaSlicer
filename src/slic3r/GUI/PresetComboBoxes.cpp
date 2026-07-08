@@ -1307,7 +1307,16 @@ void PlaterPresetComboBox::update()
     bool selected_in_ams = false;
     if (m_type == Preset::TYPE_FILAMENT) {
         set_replace_text("Bambu", "BambuStudioBlack");
-        selected_in_ams = add_ams_filaments(into_u8(selected_user_preset.empty() ? selected_system_preset : selected_user_preset), true);
+        // Orca: selected_system/user_preset hold the FULL preset name because Orca keys the maps above by
+        // full name to avoid alias collisions (BBS keys by alias). add_ams_filaments() compares against
+        // get_preset_name() which returns the alias, so resolve the selection back to its alias here.
+        // Without this, e.g. "Bambu PLA Basic @BBL H2C" never equals the AMS tray alias "Bambu PLA Basic",
+        // so the FROM_AMS flag is never set and update_sync_status() wipes the AMS sync check mark on the
+        // filament cards for connected Bambu printers.
+        wxString selected_full = selected_user_preset.empty() ? selected_system_preset : selected_user_preset;
+        auto     alias_it      = preset_aliases.find(selected_full);
+        wxString selected_alias = alias_it != preset_aliases.end() ? from_u8(alias_it->second) : selected_full;
+        selected_in_ams = add_ams_filaments(into_u8(selected_alias), true);
     }
 
     std::vector<std::string> filament_orders = {"Bambu PLA Basic", "Bambu PLA Matte", "Bambu PETG HF",    "Bambu ABS",      "Bambu PLA Silk", "Bambu PLA-CF",

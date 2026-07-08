@@ -138,7 +138,8 @@ FilamentMapDialog::FilamentMapDialog(wxWindow                       *parent,
 
     if (mode < fmmManual)
         m_page_type = PageType::ptAuto;
-    else if (mode == fmmManual)
+    else if (mode == fmmManual || mode == fmmNozzleManual)
+        // Orca: there is no dedicated nozzle-manual page, so treat an fmmNozzleManual plate as a manual variant and show the Custom page instead of misfiling it as "Same as Global".
         m_page_type = PageType::ptManual;
     else
         m_page_type = PageType::ptDefault;

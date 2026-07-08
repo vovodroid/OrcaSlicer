@@ -668,6 +668,12 @@ public:
                 this->filename  = part.filename;
                 this->texture   = part.texture;
             }
+            void update_pos(float xx, float yy, float ww, float hh) {
+                x = xx;
+                y = yy;
+                w = ww;
+                h = hh;
+            }
             void update_file(std::string file) {
                 filename = file;
             }

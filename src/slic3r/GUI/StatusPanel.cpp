@@ -34,6 +34,8 @@
 #include "DeviceCore/DevManager.h"
 #include "DeviceCore/DevPrintTaskInfo.h"
 
+#include "DeviceTab/wgtDeviceNozzleRack.h"
+
 
 
 #include "PrintOptionsDialog.hpp"
@@ -1611,13 +1613,26 @@ wxBoxSizer *StatusBasePanel::create_machine_control_page(wxWindow *parent)
     wxBoxSizer *bSizer_control = new wxBoxSizer(wxVERTICAL);
 
     auto temp_axis_ctrl_sizer = create_temp_axis_group(parent);
-    auto m_ams_ctrl_sizer = create_ams_group(parent);
     auto m_filament_load_sizer = create_filament_group(parent);
+
+    /* ams control box or live nozzle-rack panel (rack printers switch between the two) */
+    wxSizer *ams_rack_sizer = new wxBoxSizer(wxHORIZONTAL);
+    ams_rack_sizer->Add(create_ams_group(parent), 0, wxEXPAND | wxLEFT);
+
+    m_panel_nozzle_rack = new wgtDeviceNozzleRack(parent);
+    m_panel_nozzle_rack->Show(false);
+    ams_rack_sizer->Add(m_panel_nozzle_rack, 0, wxEXPAND | wxLEFT);
+
+    m_ams_rack_switch = new SwitchBoard(parent, _L("Filament"), _L("Hotends"), wxSize(FromDIP(126), FromDIP(26)));
+    m_ams_rack_switch->updateState("left");
+    m_ams_rack_switch->Hide();
+    m_ams_rack_switch->Bind(wxCUSTOMEVT_SWITCH_POS, &StatusBasePanel::on_ams_rack_switch, this);
 
     bSizer_control->Add(0, 0, 0, wxTOP, FromDIP(8));
     bSizer_control->Add(temp_axis_ctrl_sizer,   0, wxALIGN_CENTER|wxLEFT|wxRIGHT, FromDIP(8));
+    bSizer_control->Add(m_ams_rack_switch,      0, wxALIGN_CENTRE|wxTOP, FromDIP(6));
     bSizer_control->Add(0, 0, 0, wxTOP, FromDIP(6));
-    bSizer_control->Add(m_ams_ctrl_sizer,       0, wxALIGN_CENTER|wxLEFT|wxRIGHT, FromDIP(8));
+    bSizer_control->Add(ams_rack_sizer,         0, wxALIGN_CENTER|wxLEFT|wxRIGHT, FromDIP(8));
     bSizer_control->Add(0, 0, 0, wxTOP, FromDIP(6));
     bSizer_control->Add(m_filament_load_sizer,  0, wxALIGN_CENTER|wxLEFT|wxRIGHT, FromDIP(8));
     bSizer_control->Add(0, 0, 0, wxTOP, FromDIP(4));
@@ -2163,7 +2178,19 @@ void StatusBasePanel::expand_filament_loading(wxMouseEvent& e)
         else if (obj->is_series_o())
         {
             const auto& ext_system = obj->GetExtderSystem();
-            if (ext_system->GetTotalExtderCount() == 2)
+            // Prefer the config-driven filament-load image: H2C ships per-extruder bitmaps, and a printer
+            // fitted with an induction hotend rack picks the rack-specific set (filament_load_image_nozzle_rack).
+            // Printers whose profile carries no such key (e.g. H2D) get an empty name here and fall through to
+            // the generic O-series bitmaps below, so their monitor page stays byte-identical. Rack-driven, so
+            // there is no behavior change for any non-rack printer.
+            int  cur_ext_id      = (ext_system && ext_system->GetTotalExtderCount() > 1) ? ext_system->GetCurrentExtderId() : 0;
+            bool has_nozzle_rack = obj->GetNozzleSystem()->GetNozzleRack()->IsSupported();
+            std::string img_name = DevPrinterConfigUtil::get_filament_load_img(obj->printer_type, cur_ext_id, has_nozzle_rack);
+            if (!img_name.empty())
+            {
+                m_filament_load_img->SetBitmap(create_scaled_bitmap(img_name, this, load_img_size));
+            }
+            else if (ext_system->GetTotalExtderCount() == 2)
             {
                 int cur_extder_id = ext_system->GetCurrentExtderId();
                 if (cur_extder_id == MAIN_EXTRUDER_ID)
@@ -2202,6 +2229,10 @@ void StatusBasePanel::show_ams_group(bool show)
         wxGetApp().mainframe->m_monitor->Layout();
     }
 
+    // On rack printers, don't clobber the rack view when the user has the switch on "Hotends".
+    // Inert for every non-rack printer: the switch stays hidden, so this guard never triggers.
+    if (show && m_ams_rack_switch->IsShown() && (m_ams_rack_switch->switch_left != true)) { return; }
+
     if (m_ams_control_box->IsShown() != show) {
         m_ams_control_box->Show(show);
         m_ams_control->Layout();
@@ -2235,6 +2266,31 @@ void StatusBasePanel::show_filament_load_group(bool show)
         wxGetApp().mainframe->m_monitor->get_status_panel()->Layout();
         wxGetApp().mainframe->m_monitor->Layout();
     }
+}
+
+void StatusBasePanel::jump_to_Rack()
+{
+    if (obj && obj->GetNozzleSystem()->GetNozzleRack()->IsSupported()) {
+        m_ams_rack_switch->updateState("right");
+        m_ams_control_box->Show(false);
+        m_panel_nozzle_rack->Show(true);
+        Layout();
+    }
+}
+
+void StatusBasePanel::on_ams_rack_switch(wxCommandEvent &e)
+{
+    if (!m_ams_control_box->IsShown() && e.GetInt() == 1) {
+        m_ams_control_box->Show(e.GetInt() == 1);
+        m_panel_nozzle_rack->Show(e.GetInt() == 0);
+        Layout();
+    } else if (!m_panel_nozzle_rack->IsShown() && e.GetInt() == 0) {
+        m_ams_control_box->Show(e.GetInt() == 1);
+        m_panel_nozzle_rack->Show(e.GetInt() == 0);
+        Layout();
+    }
+
+    e.Skip();
 }
 
 void StatusPanel::update_camera_state(MachineObject* obj)
@@ -2777,6 +2833,8 @@ void StatusPanel::update(MachineObject *obj)
 
     update_ams(obj);
     update_cali(obj);
+
+    update_rack(obj);
 
     if (obj) {
         //nozzle ui
@@ -3412,7 +3470,14 @@ void StatusPanel::update_ams(MachineObject *obj)
                 int         tray_id_int = atoi(tray_id.c_str());
                 // new protocol
                 if (ams_id_int < 128) {
-                    if ((obj->tray_reading_bits & (1 << (ams_id_int * 4 + tray_id_int))) != 0) {
+                    if (ams_it->second->IsAmsLiteMixed()) {
+                        // Mixed AMS-Lite (A2L / N9) RFID-reading bits occupy positions 24..27.
+                        if ((obj->tray_reading_bits & (1 << (AMS_LITE_MIXED_TRAY_INDEX_OFFSET + tray_id_int))) != 0) {
+                            m_ams_control->PlayRridLoading(ams_id, tray_id);
+                        } else {
+                            m_ams_control->StopRridLoading(ams_id, tray_id);
+                        }
+                    } else if ((obj->tray_reading_bits & (1 << (ams_id_int * 4 + tray_id_int))) != 0) {
                         m_ams_control->PlayRridLoading(ams_id, tray_id);
                     } else {
                         m_ams_control->StopRridLoading(ams_id, tray_id);
@@ -5085,6 +5150,9 @@ void StatusPanel::set_default()
     m_ams_control->Hide();
     m_ams_control_box->Hide();
     m_ams_control->Reset();
+    m_ams_rack_switch->updateState("left");
+    m_ams_rack_switch->Hide();
+    m_panel_nozzle_rack->Hide();
     m_scale_panel->Hide();
     m_filament_load_box->Hide();
     m_filament_step->Hide();
@@ -5262,6 +5330,7 @@ void StatusPanel::msw_rescale()
     m_extruder_switching_status->msw_rescale();
 
     m_ams_control->msw_rescale();
+    m_panel_nozzle_rack->Rescale();
     // m_filament_step->Rescale();
 
 
@@ -5281,6 +5350,20 @@ void StatusPanel::msw_rescale()
 
     Layout();
     Refresh();
+}
+
+void StatusPanel::update_rack(MachineObject *obj)
+{
+    // Rack switch + live rack panel are shown only for printers whose nozzle system reports a rack
+    // (H2C). Every other Bambu printer keeps the switch hidden and the panel collapsed -> the AMS
+    // monitor page is unchanged for X1/P1/A1/H2D/H2S.
+    if (obj && obj->GetNozzleSystem()->GetNozzleRack()->IsSupported()) {
+        m_ams_rack_switch->Show();
+        m_panel_nozzle_rack->UpdateRackInfo(obj->GetNozzleSystem()->GetNozzleRack());
+    } else {
+        m_ams_rack_switch->Show(false);
+        m_panel_nozzle_rack->Show(false);
+    }
 }
 
 void StatusPanel::update_filament_loading_panel(MachineObject* obj)
