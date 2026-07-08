@@ -221,7 +221,7 @@ TEST_CASE("Changing slicing_pipeline_plugin invalidates posSlice", "[slicing_pip
 // §3.6 (Twistify design): Twistify's effect is a similarity transform (rotate + uniform
 // scale) applied to slices at Step.Slice. This C++ analogue rotates every region's slices a
 // fixed 45 deg about the object's base-footprint center -- the same seam and cascade that
-// Twistify.py drives through the pybind set_slices binding. Two end-to-end invariants after
+// Twistify.py drives through the slices.set() + Layer::make_slices() path. Two end-to-end invariants after
 // process() confirm the approach:
 //   (1) a pure rotation is a similarity with scale 1, so total fill area is preserved, and
 //   (2) the mutation genuinely cascaded into make_perimeters' fill_surfaces -- a 20mm square
@@ -299,7 +299,7 @@ TEST_CASE("Rotating slices at the Slice boundary cascades (area preserved, bbox 
 }
 
 // §3.6 (Twistify design): Twistify skips exact-identity layers entirely, but every transformed
-// layer invokes the set_slices write-back + make_perimeters re-run. This proves that write path
+// layer invokes the slices.set() write-back + make_perimeters re-run. This proves that write path
 // is lossless for already-normalized (CCW contour / CW hole) input -- an active hook that
 // re-sets every region's slices to their CURRENT geometry (the identity similarity transform)
 // produces output byte-identical to an active hook that mutates nothing. Both runs are active
@@ -425,8 +425,8 @@ TEST_CASE("fill_surfaces mutation cascades at PrepareInfill but not at Infill", 
 }
 
 // lslices (the layer's merged islands) are built once in slice() and never rebuilt by
-// make_perimeters, so mutating region slices leaves them stale. set_slices(refresh_lslices=True)
-// re-derives them via Layer::make_slices(); this C++ analogue proves the mechanism -- without the
+// make_perimeters, so mutating region slices leaves them stale. The slices.set() + Layer::make_slices()
+// path re-derives them; this C++ analogue proves the mechanism -- without the
 // refresh the islands keep the original 20mm footprint, with it they track the 18mm inset.
 TEST_CASE("refreshing lslices after a slice mutation makes islands track the geometry", "[slicing_pipeline]") {
     auto lslices_width = [](bool refresh) {
@@ -445,7 +445,7 @@ TEST_CASE("refreshing lslices after a slice mutation makes islands track the geo
                         }
                         r->slices.set(std::move(in));
                     }
-                    if (refresh)  // the load-bearing half of set_slices(refresh_lslices=True)
+                    if (refresh)  // the load-bearing half of the slices.set() + Layer::make_slices() path
                         l->make_slices();
                 }
             });

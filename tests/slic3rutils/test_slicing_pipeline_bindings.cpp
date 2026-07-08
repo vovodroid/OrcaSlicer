@@ -56,6 +56,23 @@ TEST_CASE("make_readonly_rows builds a read-only (N,2) int64 view", "[slicing_pi
     CHECK(r(0,0) == 10); CHECK(r(1,1) == 40);
 }
 
+TEST_CASE("make_writable_rows builds a writable (N,2) int64 view that aliases the buffer", "[slicing_pipeline]") {
+    ensure_python_initialized();
+    py::gil_scoped_acquire gil;
+    bool have_numpy = false;
+    try { py::module_::import("numpy"); have_numpy = true; }
+    catch (const py::error_already_set&) { have_numpy = false; }
+    if (!have_numpy) SKIP("numpy unavailable in unit-test interpreter");
+
+    static Slic3r::Points pts = { Slic3r::Point(10, 20), Slic3r::Point(30, 40) };
+    py::capsule keepalive(&pts, [](void*){});
+    py::array a = Slic3r::make_writable_rows<coord_t, 2>(keepalive, pts.front().data(), (py::ssize_t)pts.size());
+    CHECK(a.writeable());
+    // Writing through the view mutates the C++ buffer (zero-copy alias).
+    a.attr("__setitem__")(py::make_tuple(0, 0), py::int_(99));
+    CHECK(pts.front().x() == 99);
+}
+
 TEST_CASE("orca.slicing module: Step enum, context, and a Python capability can execute", "[slicing_pipeline]") {
     ensure_python_initialized();
     import_orca_module(); // forces PythonPluginBridge::instance() (see test_plugin_host_api.cpp:32-40)
@@ -187,41 +204,138 @@ TEST_CASE("orca.host leaf geometry: Surface/ExPolygon/Polygon raw bindings", "[s
     CHECK(exv.attr("contour").attr("size")().cast<size_t>() == 0);
 }
 
-TEST_CASE("orca.host Polygon.points() is a read-only int64 (N,2) view in scaled coords", "[slicing_pipeline]") {
+TEST_CASE("orca.host Surface/SurfaceCollection: construct, writable members, set()", "[slicing_pipeline]") {
+    using Catch::Matchers::WithinRel;
     ensure_python_initialized();
     import_orca_module();
     py::gil_scoped_acquire gil;
+    py::object host = py::module_::import("orca").attr("host");
+    py::object ST = host.attr("SurfaceType");
+    const coord_t s = (coord_t) scale_(10.0);
+
+    // Build an ExPolygon (Point idiom) and a Surface from it.
+    py::object P = host.attr("Polygon")();
+    P.attr("append")(host.attr("Point")(0, 0));
+    P.attr("append")(host.attr("Point")(s, 0));
+    P.attr("append")(host.attr("Point")(s, s));
+    P.attr("append")(host.attr("Point")(0, s));
+    py::object ex = host.attr("ExPolygon")(P);
+    py::object surf = host.attr("Surface")(ST.attr("stTop"), ex);
+    CHECK(surf.attr("surface_type").cast<Slic3r::SurfaceType>() == Slic3r::stTop);
+    CHECK(surf.attr("is_top")().cast<bool>());
+    CHECK_THAT(surf.attr("area")().cast<double>(), WithinRel((double) s * (double) s, 1e-9));
+    surf.attr("thickness") = py::float_(0.3);
+    CHECK_THAT(surf.attr("thickness").cast<double>(), WithinRel(0.3, 1e-9));
+
+    // SurfaceCollection.set(expolys, type) — the faithful replacement for set_slices' body.
+    Slic3r::SurfaceCollection coll;
+    py::object cv = py::cast(&coll, py::return_value_policy::reference);
+    py::list expolys; expolys.append(ex);
+    cv.attr("set")(expolys, ST.attr("stInternalSolid"));
+    REQUIRE(coll.surfaces.size() == 1);
+    CHECK(coll.surfaces.front().surface_type == Slic3r::stInternalSolid);
+    CHECK(cv.attr("has")(ST.attr("stInternalSolid")).cast<bool>());
+    cv.attr("clear")();
+    CHECK(coll.surfaces.empty());
+}
+
+TEST_CASE("orca.host Point: construct, read/write coords, arithmetic", "[slicing_pipeline]") {
+    ensure_python_initialized();
+    import_orca_module();
+    py::gil_scoped_acquire gil;
+    py::object host = py::module_::import("orca").attr("host");
+    REQUIRE(py::hasattr(host, "Point"));
+    py::object p = host.attr("Point")(3, 4);
+    CHECK(p.attr("x").cast<coord_t>() == 3);
+    CHECK(p.attr("y").cast<coord_t>() == 4);
+    p.attr("x") = py::int_(7);
+    CHECK(p.attr("x").cast<coord_t>() == 7);
+    py::object q = host.attr("Point")(1, 2);
+    py::object sum = p.attr("__add__")(q);
+    CHECK(sum.attr("x").cast<coord_t>() == 8);
+    CHECK(sum.attr("y").cast<coord_t>() == 6);
+
+    // __mul__ must scale as a double, not truncate to int64 before multiplying.
+    py::object h = host.attr("Point")(10, 20).attr("__mul__")(py::float_(0.5));
+    CHECK(h.attr("x").cast<coord_t>() == 5);
+    CHECK(h.attr("y").cast<coord_t>() == 10);
+}
+
+TEST_CASE("orca.host Polygon: writable as_array aliases buffer; Point refs; set_points; offset", "[slicing_pipeline]") {
+    using Catch::Matchers::WithinRel;
+    ensure_python_initialized();
+    import_orca_module();
+    py::gil_scoped_acquire gil;
+    py::object host = py::module_::import("orca").attr("host");
+
+    const coord_t s = (coord_t) scale_(10.0);
+    Slic3r::Polygon poly;
+    poly.points = { Slic3r::Point(0, 0), Slic3r::Point(s, 0), Slic3r::Point(s, s), Slic3r::Point(0, s) };
+    py::object pv = py::cast(&poly, py::return_value_policy::reference);
+
+    // Non-array surface works without numpy.
+    CHECK(pv.attr("size")().cast<size_t>() == 4);
+    CHECK(pv.attr("is_counter_clockwise")().cast<bool>());
+    CHECK_THAT(pv.attr("area")().cast<double>(), WithinRel((double) s * (double) s, 1e-9));
+    // Point-object idiom: editing a returned Point ref mutates the buffer in place.
+    py::list pts = pv.attr("points").cast<py::list>();
+    REQUIRE(pts.size() == 4);
+    pts[0].attr("x") = py::int_(5);
+    CHECK(poly.points[0].x() == 5);
+    poly.points[0].x() = 0; // restore
+
+    // offset() returns new geometry (ClipperUtils bound as a method).
+    py::list shrunk = pv.attr("offset")(py::int_(-(coord_t)scale_(1.0))).cast<py::list>();
+    CHECK(shrunk.size() >= 1);
 
     bool have_numpy = false;
     try { py::module_::import("numpy"); have_numpy = true; }
     catch (const py::error_already_set&) { have_numpy = false; }
-    if (!have_numpy) SKIP("numpy unavailable in unit-test interpreter");
+    if (!have_numpy) SKIP("numpy unavailable: array-backed assertions skipped");
 
+    py::module_ np = py::module_::import("numpy");
+    py::array a = pv.attr("as_array")().cast<py::array>();
+    CHECK(a.dtype().kind() == 'i');
+    CHECK(a.itemsize() == 8);
+    CHECK(a.shape(0) == 4);
+    CHECK(a.shape(1) == 2);
+    CHECK(a.writeable());                              // writable now
+    a.attr("__setitem__")(py::make_tuple(0, 0), py::int_(123));
+    CHECK(poly.points[0].x() == 123);                 // in-place bulk edit
+    // set_points replaces contents (count-changing).
+    py::object i64 = np.attr("int64");
+    py::list rows;
+    rows.append(py::make_tuple(0, 0)); rows.append(py::make_tuple(s, 0)); rows.append(py::make_tuple(s, s));
+    pv.attr("set_points")(np.attr("array")(rows, py::arg("dtype") = i64));
+    CHECK(poly.points.size() == 3);
+}
+
+TEST_CASE("orca.host ExPolygon: construct, writable contour/holes, transforms, boolean ops", "[slicing_pipeline]") {
+    using Catch::Matchers::WithinRel;
+    ensure_python_initialized();
+    import_orca_module();
+    py::gil_scoped_acquire gil;
+    py::object host = py::module_::import("orca").attr("host");
     const coord_t s = (coord_t) scale_(10.0);
-    Slic3r::ExPolygon ex;
-    ex.contour.points = { Slic3r::Point(0, 0), Slic3r::Point(s, 0),
-                          Slic3r::Point(s, s), Slic3r::Point(0, s) };
-    Slic3r::Polygon hole;
-    hole.points = { Slic3r::Point(1, 1), Slic3r::Point(2, 1), Slic3r::Point(2, 2) };
-    ex.holes = { hole };
 
-    py::object view = py::cast(&ex, py::return_value_policy::reference);
-    py::array c = view.attr("contour").attr("points")().cast<py::array>();
-    CHECK(c.dtype().kind() == 'i');
-    CHECK(c.itemsize() == 8);           // int64
-    CHECK(c.shape(0) == 4);
-    CHECK(c.shape(1) == 2);
-    CHECK_FALSE(c.writeable());
-    auto rc = c.cast<py::array_t<coord_t>>().unchecked<2>();
-    CHECK(rc(0, 0) == 0);
-    CHECK(rc(1, 0) == s);
-    CHECK(rc(2, 1) == s);
+    // Construct from Polygon objects (Point idiom, no numpy).
+    py::object P = host.attr("Polygon")();
+    P.attr("append")(host.attr("Point")(0, 0));
+    P.attr("append")(host.attr("Point")(s, 0));
+    P.attr("append")(host.attr("Point")(s, s));
+    P.attr("append")(host.attr("Point")(0, s));
+    py::object ex = host.attr("ExPolygon")(P);
+    CHECK_THAT(ex.attr("area")().cast<double>(), WithinRel((double) s * (double) s, 1e-9));
+    CHECK(ex.attr("num_contours")().cast<size_t>() == 1);
+    CHECK(ex.attr("contour").attr("size")().cast<size_t>() == 4);
 
-    py::list holes = view.attr("holes").cast<py::list>();
-    REQUIRE(holes.size() == 1);
-    py::array h0 = holes[0].attr("points")().cast<py::array>();
-    CHECK(h0.shape(0) == 3);
-    CHECK_FALSE(h0.writeable());
+    // In-place transform mutates the geometry.
+    ex.attr("translate")(py::float_(1000.0), py::float_(0.0));
+    // Boolean op returns new geometry: A minus a smaller inset of A is a non-empty ring set.
+    py::list inset = ex.attr("offset")(py::int_(-(coord_t)scale_(1.0))).cast<py::list>();
+    REQUIRE(inset.size() >= 1);
+    py::list ring = ex.attr("diff_ex")(inset[0]).cast<py::list>();
+    CHECK(ring.size() >= 1);
 }
 
 namespace {
@@ -354,34 +468,29 @@ TEST_CASE("orca.host graph classes: LayerRegion/Layer raw traversal; Print/Print
     CHECK(ly.attr("lower_layer").is_none());
 }
 
-TEST_CASE("orca.host mutators: registration, ValueError on garbage, empty-clears", "[slicing_pipeline]") {
+TEST_CASE("orca.host: plugin-only mutators are gone; class-API editing works", "[slicing_pipeline]") {
     ensure_python_initialized();
     import_orca_module();
     py::gil_scoped_acquire gil;
     py::object host = py::module_::import("orca").attr("host");
-    CHECK(py::hasattr(host.attr("LayerRegion"), "set_slices"));
-    CHECK(py::hasattr(host.attr("LayerRegion"), "set_fill_surfaces"));
-    CHECK(py::hasattr(host.attr("Layer"), "set_lslices"));
 
+    // The three plugin-only mutators were removed in the raw-API realignment.
+    CHECK_FALSE(py::hasattr(host.attr("LayerRegion"), "set_slices"));
+    CHECK_FALSE(py::hasattr(host.attr("LayerRegion"), "set_fill_surfaces"));
+    CHECK_FALSE(py::hasattr(host.attr("Layer"), "set_lslices"));
+    // The faithful surface is present.
+    CHECK(py::hasattr(host.attr("SurfaceCollection"), "set"));
+    CHECK(py::hasattr(host.attr("Layer"), "make_slices"));
+
+    // clear() via the collection on a hand-built region (null owning layer is null-safe).
     TestLayerRegion region;
     region.slices.surfaces.emplace_back(Slic3r::Surface(Slic3r::stInternal));
-    py::object lr = py::cast(static_cast<Slic3r::LayerRegion*>(&region),
-                             py::return_value_policy::reference);
-
-    auto raises_value_error = [](py::object callable, py::object arg) {
-        try { callable(arg); return false; }
-        catch (py::error_already_set& e) { return e.matches(PyExc_ValueError); }
-    };
-    CHECK(raises_value_error(lr.attr("set_slices"), py::int_(42)));       // not a sequence
-    CHECK(raises_value_error(lr.attr("set_slices"), py::str("nope")));    // string rejected
-    CHECK(region.slices.surfaces.size() == 1);                            // failures mutate nothing
-    // G7: an empty list is legal and clears the region (refresh_lslices defaults True;
-    // the null owning-layer on this hand-built region exercises the null guard).
-    lr.attr("set_slices")(py::list());
+    py::object lr = py::cast(static_cast<Slic3r::LayerRegion*>(&region), py::return_value_policy::reference);
+    lr.attr("slices").attr("clear")();
     CHECK(region.slices.surfaces.empty());
 }
 
-TEST_CASE("orca.host set_slices/set_lslices: ndarray input mutates geometry (read back both ways)", "[slicing_pipeline]") {
+TEST_CASE("orca.host: SurfaceCollection.set mutates geometry; lslices via make_slices", "[slicing_pipeline]") {
     using Catch::Matchers::WithinRel;
     ensure_python_initialized();
     import_orca_module();
@@ -394,64 +503,106 @@ TEST_CASE("orca.host set_slices/set_lslices: ndarray input mutates geometry (rea
     py::object host = py::module_::import("orca").attr("host");
     py::module_ np = py::module_::import("numpy");
     py::object  i64 = np.attr("int64");
+    py::object  ST  = host.attr("SurfaceType");
     const coord_t s = (coord_t) scale_(10.0);
-    auto make_arr = [&](std::initializer_list<std::pair<coord_t,coord_t>> pts) {
-        py::list rows;
-        for (auto& p : pts) rows.append(py::make_tuple(p.first, p.second));
+    auto arr = [&](std::initializer_list<std::pair<coord_t,coord_t>> pts) {
+        py::list rows; for (auto& p : pts) rows.append(py::make_tuple(p.first, p.second));
         return np.attr("array")(rows, py::arg("dtype") = i64);
     };
 
-    // set_slices: CW input normalized CCW; surface_type carried forward; readable back raw.
+    // Build an ExPolygon from a CW ndarray; the ctor normalizes to CCW.
+    py::object ex = host.attr("ExPolygon")(arr({ {0,0}, {0,s}, {s,s}, {s,0} }));
+    CHECK(ex.attr("contour").attr("is_counter_clockwise")().cast<bool>());
+
     TestLayerRegion region;
-    region.slices.surfaces.emplace_back(Slic3r::Surface(Slic3r::stInternalSolid));
-    py::object lr = py::cast(static_cast<Slic3r::LayerRegion*>(&region),
-                             py::return_value_policy::reference);
-    py::list polys;
-    polys.append(make_arr({ {0,0}, {0,s}, {s,s}, {s,0} }));   // clockwise winding
-    lr.attr("set_slices")(polys);
+    py::object lr = py::cast(static_cast<Slic3r::LayerRegion*>(&region), py::return_value_policy::reference);
+    py::list expolys; expolys.append(ex);
+    lr.attr("slices").attr("set")(expolys, ST.attr("stInternalSolid"));
     REQUIRE(region.slices.surfaces.size() == 1);
     const Slic3r::Surface& out = region.slices.surfaces.front();
     CHECK(out.surface_type == Slic3r::stInternalSolid);
-    CHECK(out.expolygon.contour.is_counter_clockwise());
     CHECK_THAT(out.expolygon.area(), WithinRel((double) s * (double) s, 1e-9));
-    py::list sl = lr.attr("slices").attr("surfaces").cast<py::list>();
-    REQUIRE(sl.size() == 1);
-    py::array c = sl[0].attr("expolygon").attr("contour").attr("points")().cast<py::array>();
+    // Read geometry back through the class API.
+    py::array c = lr.attr("slices").attr("surfaces").cast<py::list>()[0]
+                    .attr("expolygon").attr("contour").attr("as_array")().cast<py::array>();
     CHECK(c.shape(0) == 4);
 
-    // G9: per-entry SurfaceType override via [contour, holes, SurfaceType] triple.
-    py::list entry;
-    entry.append(make_arr({ {0,0}, {s,0}, {s,s}, {0,s} }));
-    entry.append(py::list());
-    entry.append(host.attr("SurfaceType").attr("stTop"));
-    py::list polys2; polys2.append(entry);
-    lr.attr("set_slices")(polys2, py::bool_(false));           // refresh_lslices=False path
-    REQUIRE(region.slices.surfaces.size() == 1);
-    CHECK(region.slices.surfaces.front().surface_type == Slic3r::stTop);
-
-    // Negative: a valid contour paired with a non-list holes slot must raise ValueError.
-    // (Regression guard for a malformed holes slot; the retired view-layer suite covered
-    // this, and the raw layer needs a numpy-built valid contour to exercise the same path.)
-    {
-        py::list bad_entry;
-        bad_entry.append(make_arr({ {0,0}, {s,0}, {s,s}, {0,s} }));  // valid contour
-        bad_entry.append(py::int_(42));                              // holes slot is not a list
-        py::list bad_polys; bad_polys.append(bad_entry);
-        bool raised = false;
-        try { lr.attr("set_slices")(bad_polys); }
-        catch (py::error_already_set& e) { raised = e.matches(PyExc_ValueError); }
-        CHECK(raised);
-    }
-
-    // Layer.set_lslices round-trip on a hand-built layer (empty regions -> null-safe).
+    // lslices are derived: make_slices() re-derives them + refreshes the bbox cache.
     TestLayer layer;
-    py::object ly = py::cast(static_cast<Slic3r::Layer*>(&layer),
+    py::object ly = py::cast(static_cast<Slic3r::Layer*>(&layer), py::return_value_policy::reference);
+    // (A hand-built layer has no regions, so make_slices() yields empty lslices — still null-safe.)
+    ly.attr("make_slices")();
+    CHECK(layer.lslices_bboxes.size() == layer.lslices.size());
+}
+
+TEST_CASE("orca.host ExPolygon in-place transforms + SurfaceCollection.append (sample ops)", "[slicing_pipeline]") {
+    using Catch::Matchers::WithinRel;
+    ensure_python_initialized();
+    import_orca_module();
+    py::gil_scoped_acquire gil;
+    py::object host = py::module_::import("orca").attr("host");
+    const coord_t s = (coord_t) scale_(10.0);
+    auto make_square = [&]() {
+        py::object P = host.attr("Polygon")();
+        P.attr("append")(host.attr("Point")(0, 0));
+        P.attr("append")(host.attr("Point")(s, 0));
+        P.attr("append")(host.attr("Point")(s, s));
+        P.attr("append")(host.attr("Point")(0, s));
+        return host.attr("ExPolygon")(P);
+    };
+    const double area0 = (double) s * (double) s;
+
+    // rotate about the square's center preserves area
+    py::object ex = make_square();
+    py::object center = host.attr("Point")(s / 2, s / 2);
+    ex.attr("rotate")(py::float_(1.5707963267948966), center);   // pi/2
+    CHECK_THAT(ex.attr("area")().cast<double>(), WithinRel(area0, 1e-6));
+
+    // uniform scale by 2 quadruples area (scale is about the origin)
+    py::object ex2 = make_square();
+    ex2.attr("scale")(py::float_(2.0));
+    CHECK_THAT(ex2.attr("area")().cast<double>(), WithinRel(4.0 * area0, 1e-6));
+
+    // translate preserves area
+    py::object ex3 = make_square();
+    ex3.attr("translate")(py::float_(1000.0), py::float_(-500.0));
+    CHECK_THAT(ex3.attr("area")().cast<double>(), WithinRel(area0, 1e-6));
+
+    // SurfaceCollection.append accumulates surfaces of a second type (the sample write-back path)
+    Slic3r::SurfaceCollection coll;
+    py::object cv = py::cast(&coll, py::return_value_policy::reference);
+    py::list g1; g1.append(make_square());
+    cv.attr("set")(g1, host.attr("SurfaceType").attr("stInternalSolid"));
+    py::list g2; g2.append(make_square());
+    cv.attr("append")(g2, host.attr("SurfaceType").attr("stTop"));
+    REQUIRE(coll.surfaces.size() == 2);
+    CHECK(coll.surfaces[0].surface_type == Slic3r::stInternalSolid);
+    CHECK(coll.surfaces[1].surface_type == Slic3r::stTop);
+}
+
+TEST_CASE("orca.host: in-place edit of surface.expolygon through a live collection persists to C++", "[slicing_pipeline]") {
+    using Catch::Matchers::WithinRel;
+    ensure_python_initialized();
+    import_orca_module();
+    py::gil_scoped_acquire gil;
+
+    const coord_t s = (coord_t) scale_(10.0);
+    // Live LayerRegion holding one surface (a 10mm square at the origin).
+    TestLayerRegion region;
+    Slic3r::ExPolygon sq;
+    sq.contour.points = { Slic3r::Point(0, 0), Slic3r::Point(s, 0),
+                          Slic3r::Point(s, s), Slic3r::Point(0, s) };
+    region.slices.surfaces.emplace_back(Slic3r::Surface(Slic3r::stInternal, sq));
+    py::object lr = py::cast(static_cast<Slic3r::LayerRegion*>(&region),
                              py::return_value_policy::reference);
-    py::list islands;
-    islands.append(make_arr({ {0,0}, {s,0}, {s,s}, {0,s} }));
-    ly.attr("set_lslices")(islands);
-    REQUIRE(layer.lslices.size() == 1);
-    CHECK(layer.lslices.front().contour.is_counter_clockwise());
-    REQUIRE(layer.lslices_bboxes.size() == 1);                 // bbox cache refreshed
-    CHECK(ly.attr("lslices")().cast<py::list>().size() == 1);
+
+    // Twistify's path: get the Surface through the live collection, mutate its expolygon in place.
+    py::object surf = lr.attr("slices").attr("surfaces").cast<py::list>()[0];
+    surf.attr("expolygon").attr("translate")(py::float_(1000.0), py::float_(0.0));
+
+    // The C++-side surface geometry reflects the Python in-place edit (proves the live ref).
+    const Slic3r::Surface& out = region.slices.surfaces.front();
+    CHECK(out.expolygon.contour.points[0].x() == 1000);   // was 0
+    CHECK(out.expolygon.contour.points[0].y() == 0);
+    CHECK_THAT(out.expolygon.area(), WithinRel((double) s * (double) s, 1e-9));  // translate preserves area
 }

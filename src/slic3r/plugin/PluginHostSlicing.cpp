@@ -3,6 +3,7 @@
 
 #include "libslic3r/libslic3r.h"    // unscale<>, scale_
 #include "libslic3r/BoundingBox.hpp"
+#include "libslic3r/ClipperUtils.hpp"  // offset/offset_ex/union_ex/diff_ex/intersection_ex
 #include "libslic3r/ExPolygon.hpp"
 #include "libslic3r/Surface.hpp"
 #include "libslic3r/SurfaceCollection.hpp"
@@ -13,7 +14,6 @@
 
 #include <pybind11/stl.h>
 #include <memory>
-#include <optional>
 #include <vector>
 
 namespace py = pybind11;
@@ -51,87 +51,14 @@ static Polygon parse_polygon(py::handle h, const char* who)
     return poly;
 }
 
-// One Python entry -> ExPolygon. Accepts a bare (N,2) ndarray (contour only), a
-// [contour, [hole, ...]] sequence, or (G9) a [contour, [hole, ...], SurfaceType] triple whose
-// third element overrides the surface type for set_slices/set_fill_surfaces. When `out_type` is
-// null (geometry-only consumers such as set_lslices) any third element is ignored. Orientation
-// is normalized (contour CCW, holes CW) so downstream area/offset math is correct regardless of
-// the caller's winding.
-static ExPolygon parse_expolygon(py::handle entry, const char* who,
-                                 std::optional<SurfaceType>* out_type = nullptr)
+// Accept a bound orca.host.Polygon (copied) or an (N,2) int64 ndarray. Used by the ExPolygon
+// binding, whose constructor/contour-setter/set_holes must accept the Polygon it itself hands
+// out (e.g. `ExPolygon(some_polygon_ref)`) in addition to the ndarray-only parse_polygon() path.
+static Polygon as_polygon(py::handle h, const char* who)
 {
-    ExPolygon ex;
-    if (py::isinstance<py::array>(entry)) {
-        ex.contour = parse_polygon(entry, who);
-    } else if (py::isinstance<py::sequence>(entry) && !py::isinstance<py::str>(entry)) {
-        py::sequence seq = py::reinterpret_borrow<py::sequence>(entry);
-        if (py::len(seq) < 1)
-            throw py::value_error(std::string(who) + ": a [contour, holes] entry needs a contour");
-        ex.contour = parse_polygon(seq[0], who);
-        if (py::len(seq) >= 2) {
-            // Type-check the holes element up front: a non-sequence (e.g. an int) would otherwise
-            // reach reinterpret_borrow<py::sequence> and raise a bare Python TypeError on iteration,
-            // whereas the API contract is ValueError for malformed input (str is excluded because it
-            // is iterable but never a valid holes container).
-            py::object holes_obj = seq[1];
-            if (!py::isinstance<py::sequence>(holes_obj) || py::isinstance<py::str>(holes_obj))
-                throw py::value_error(std::string(who) + ": the holes element must be a list of (N,2) int64 ndarrays");
-            for (py::handle hh : py::reinterpret_borrow<py::sequence>(holes_obj)) {
-                Polygon hole = parse_polygon(hh, who);
-                hole.make_clockwise();
-                ex.holes.emplace_back(std::move(hole));
-            }
-        }
-        // G9: optional third element -> per-surface SurfaceType override (None keeps the
-        // carried-forward type). A wrong type raises ValueError, matching the API contract.
-        if (out_type != nullptr && py::len(seq) >= 3) {
-            py::object t = seq[2];
-            if (!t.is_none()) {
-                try { *out_type = t.cast<SurfaceType>(); }
-                catch (const py::cast_error&) {
-                    throw py::value_error(std::string(who) + ": the third entry element must be an orca.host.SurfaceType");
-                }
-            }
-        }
-    } else {
-        throw py::value_error(std::string(who) + ": each entry must be an (N,2) ndarray or a [contour, holes] pair");
-    }
-    ex.contour.make_counter_clockwise();
-    return ex;
-}
-
-// A Python list of entries -> ExPolygons (each entry parsed + oriented). G7: an empty list is
-// legal and means "no geometry" (clears the target collection). Per-entry types are ignored
-// here (geometry-only consumers such as set_lslices).
-static ExPolygons parse_expolygon_list(py::handle list_h, const char* who)
-{
-    if (!py::isinstance<py::sequence>(list_h) || py::isinstance<py::str>(list_h))
-        throw py::value_error(std::string(who) + ": expected a list of polygons");
-    ExPolygons out;
-    for (py::handle entry : py::reinterpret_borrow<py::sequence>(list_h))
-        out.emplace_back(parse_expolygon(entry, who));
-    return out;
-}
-
-// Build Surfaces from a Python list, carrying surface_type (and the other per-surface
-// attributes) forward from the collection being replaced, or defaulting to stInternal when the
-// region had none. G9: a per-entry SurfaceType (optional third element) overrides that default.
-// G7: an empty list is legal and yields an empty Surfaces (clears the collection).
-static Surfaces surfaces_from_py(py::handle list_h, const SurfaceCollection& replaced, const char* who)
-{
-    if (!py::isinstance<py::sequence>(list_h) || py::isinstance<py::str>(list_h))
-        throw py::value_error(std::string(who) + ": expected a list of polygons");
-    const Surface tmpl = replaced.surfaces.empty() ? Surface(stInternal) : replaced.surfaces.front();
-    Surfaces out;
-    for (py::handle entry : py::reinterpret_borrow<py::sequence>(list_h)) {
-        std::optional<SurfaceType> type;
-        ExPolygon e = parse_expolygon(entry, who, &type);
-        Surface s(tmpl, std::move(e));
-        if (type)
-            s.surface_type = *type;
-        out.emplace_back(std::move(s));
-    }
-    return out;
+    if (py::isinstance<Polygon>(h))
+        return h.cast<Polygon>();
+    return parse_polygon(h, who);
 }
 
 // Flatten an extrusion graph into a list of leaf ExtrusionPath* while walking the
@@ -164,6 +91,17 @@ static void collect_extrusion_paths(const ExtrusionEntity* ee, std::vector<const
         out.push_back(path);
     }
 }
+
+// Rebuild a layer's per-island bbox cache from lslices — the same inline pattern
+// every C++ call site uses (PrintObjectSlice.cpp, Print.cpp, TreeSupport.cpp); no
+// libslic3r helper exists to reuse.
+static void refresh_lslices_bboxes(Layer& l)
+{
+    l.lslices_bboxes.clear();
+    l.lslices_bboxes.reserve(l.lslices.size());
+    for (const ExPolygon& island : l.lslices)
+        l.lslices_bboxes.emplace_back(get_extents(island));
+}
 } // namespace
 
 void PluginHostSlicing::RegisterBindings(py::module_& host)
@@ -177,10 +115,10 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
     // out below is a non-owning reference into the live slicing graph owned by
     // the Print. References — and every numpy view they hand out — are valid
     // only while the plugin hook (execute(ctx)) runs, and a container-replacing
-    // mutator (LayerRegion.set_slices / set_fill_surfaces, Layer.set_lslices)
-    // invalidates previously obtained references into that container, exactly
-    // as std::vector operations invalidate C++ iterators. Do not stash
-    // references or arrays across execute() calls; copy what you need.
+    // mutator (SurfaceCollection.set / append / clear, Polygon.set_points / append,
+    // ExPolygon.set_holes) invalidates previously obtained references into that
+    // container, exactly as std::vector operations invalidate C++ iterators. Do
+    // not stash references or arrays across execute() calls; copy what you need.
     // ------------------------------------------------------------------
 
     py::enum_<SurfaceType>(host, "SurfaceType")
@@ -197,52 +135,203 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
         .value("stCount", stCount)
         .export_values();
 
-    py::class_<Polygon, std::unique_ptr<Polygon, py::nodelete>>(host, "Polygon")
+    // Point: a constructible value type (default holder, so Python-owned instances
+    // are freed). Returned-by-reference from Polygon.points, it aliases the buffer;
+    // x()/y() are Eigen lvalues, so the properties are read/write. p+q / p-q go
+    // through Eigen expression templates, wrapped back into a Point.
+    py::class_<Point>(host, "Point")
+        .def(py::init([](coord_t x, coord_t y) { return Point(x, y); }), py::arg("x"), py::arg("y"))
+        .def_property("x", [](const Point& p) { return p.x(); },
+                           [](Point& p, coord_t v) { p.x() = v; })
+        .def_property("y", [](const Point& p) { return p.y(); },
+                           [](Point& p, coord_t v) { p.y() = v; })
+        .def("__add__", [](const Point& a, const Point& b) { return Point(a + b); }, py::is_operator())
+        .def("__sub__", [](const Point& a, const Point& b) { return Point(a - b); }, py::is_operator())
+        .def("__mul__", [](const Point& a, double s) { return Point(a.x() * s, a.y() * s); }, py::is_operator())
+        .def("__repr__", [](const Point& p) {
+            return "orca.host.Point(" + std::to_string(p.x()) + ", " + std::to_string(p.y()) + ")";
+        });
+
+    py::class_<Polygon>(host, "Polygon")
+        .def(py::init<>())
         .def("size", [](const Polygon& p) { return p.points.size(); })
+        .def("is_valid", [](const Polygon& p) { return p.is_valid(); })
         .def("is_counter_clockwise", [](const Polygon& p) { return p.is_counter_clockwise(); })
-        .def("points", [](py::object self) {
-            const Polygon& p = self.cast<const Polygon&>();
+        .def("is_clockwise", [](const Polygon& p) { return p.is_clockwise(); })
+        .def("make_counter_clockwise", [](Polygon& p) { return p.make_counter_clockwise(); },
+             "Reorient to CCW in place. Returns True if it reversed the winding.")
+        .def("make_clockwise", [](Polygon& p) { return p.make_clockwise(); })
+        .def("area", [](const Polygon& p) { return p.area(); })
+        .def("centroid", [](const Polygon& p) { return p.centroid(); })
+        .def("contains", [](const Polygon& p, const Point& pt) { return p.contains(pt); }, py::arg("point"))
+        .def("translate", [](Polygon& p, double x, double y) { p.translate(x, y); }, py::arg("x"), py::arg("y"))
+        .def("rotate", [](Polygon& p, double angle) { p.rotate(angle); }, py::arg("angle"))
+        .def("rotate", [](Polygon& p, double angle, const Point& c) { p.rotate(angle, c); },
+             py::arg("angle"), py::arg("center"))
+        .def("douglas_peucker", [](Polygon& p, double tol) { p.douglas_peucker(tol); }, py::arg("tolerance"))
+        .def("simplify", [](const Polygon& p, double tol) { return p.simplify(tol); }, py::arg("tolerance"),
+             "Return simplified geometry as a list of Polygon (may split into several).")
+        .def("offset", [](const Polygon& p, coord_t delta) { return offset(p, (float) delta); }, py::arg("delta"),
+             "Clipper offset by `delta` scaled units (negative shrinks). Returns [Polygon].")
+        // --- Point-object idiom: references into the buffer (in-place element edit). ---
+        .def_property_readonly("points", [](py::object self) {
+            Polygon& p = self.cast<Polygon&>();
+            py::list out;
+            for (Point& pt : p.points)
+                out.append(py::cast(&pt, py::return_value_policy::reference_internal, self));
+            return out;
+        }, "Vertices as [Point] references into this polygon. Editing a Point mutates the "
+           "buffer in place. Structural changes (count) go through set_points/append, which "
+           "invalidate previously returned Point refs and array views (C++ vector semantics).")
+        .def("append", [](Polygon& p, const Point& pt) { p.points.push_back(pt); }, py::arg("point"),
+             "Append a vertex. Structural change (count): invalidates previously returned "
+             "Point refs and array views into this polygon (C++ vector semantics).")
+        // --- numpy idiom: writable zero-copy (N,2) view (bulk affine edits). ---
+        .def("as_array", [](py::object self) {
+            Polygon& p = self.cast<Polygon&>();
             return with_numpy([&] {
-                return py::object(make_readonly_rows<coord_t, 2>(
+                return py::object(make_writable_rows<coord_t, 2>(
                     self, p.points.empty() ? nullptr : p.points.front().data(),
                     (py::ssize_t) p.points.size()));
             });
-        }, "Vertices as a read-only int64 (N,2) numpy view in scaled coords. "
-           "Valid only during the execute(ctx) call. Requires numpy.");
+        }, "Vertices as a WRITABLE int64 (N,2) numpy view in scaled coords, aliasing the "
+           "buffer. Count-preserving in-place edits only; valid during execute(ctx). Requires numpy.")
+        .def("set_points", [](Polygon& p, py::handle src) { p = parse_polygon(src, "Polygon.set_points"); },
+             py::arg("points"),
+             "Replace all vertices from an (N,2) int64 ndarray (scaled coords). Count-changing; "
+             "invalidates prior Point refs and array views. Raises ValueError on malformed input.");
 
-    py::class_<ExPolygon, std::unique_ptr<ExPolygon, py::nodelete>>(host, "ExPolygon")
-        .def_property_readonly("contour", [](ExPolygon& e) -> Polygon& { return e.contour; },
+    // ExPolygon: default holder (Python-owned instances are freed) so plugins can construct
+    // their own geometry, not just navigate the live slicing graph. contour/holes accessors
+    // still use reference_internal, so refs into a graph-owned ExPolygon stay non-owning views
+    // tied to that owner's lifetime, same as Polygon/Surface above.
+    py::class_<ExPolygon>(host, "ExPolygon")
+        .def(py::init([](py::handle contour, py::handle holes) {
+            // Accept bound Polygons or (N,2) ndarrays for both contour and each hole.
+            ExPolygon ex;
+            ex.contour = as_polygon(contour, "ExPolygon.contour");
+            if (!holes.is_none()) {
+                if (!py::isinstance<py::sequence>(holes) || py::isinstance<py::str>(holes))
+                    throw py::value_error("ExPolygon: holes must be a list of Polygon or (N,2) ndarrays");
+                for (py::handle h : py::reinterpret_borrow<py::sequence>(holes)) {
+                    Polygon hole = as_polygon(h, "ExPolygon.hole");
+                    hole.make_clockwise();
+                    ex.holes.emplace_back(std::move(hole));
+                }
+            }
+            ex.contour.make_counter_clockwise();
+            return ex;
+        }), py::arg("contour"), py::arg("holes") = py::none(),
+            "Construct from a Polygon/ndarray contour and optional list of hole Polygons/ndarrays. "
+            "Orientation is normalized (contour CCW, holes CW).")
+        .def_property("contour",
+            [](ExPolygon& e) -> Polygon& { return e.contour; },
+            [](ExPolygon& e, py::handle v) { e.contour = as_polygon(v, "ExPolygon.contour"); },
             py::return_value_policy::reference_internal,
-            "Outer contour (CCW) as a Polygon.")
+            "Outer contour (CCW). Read returns a live Polygon ref; assign a Polygon/ndarray to replace it.")
         .def_property_readonly("holes", [](py::object self) {
             ExPolygon& e = self.cast<ExPolygon&>();
             py::list out;
             for (Polygon& h : e.holes)
                 out.append(py::cast(&h, py::return_value_policy::reference_internal, self));
             return out;
-        }, "Hole contours (CW) as [Polygon].");
+        }, "Hole contours (CW) as [Polygon] references (in-place editable). set_holes replaces them.")
+        .def("set_holes", [](ExPolygon& e, py::handle holes) {
+            ExPolygon tmp;
+            if (!py::isinstance<py::sequence>(holes) || py::isinstance<py::str>(holes))
+                throw py::value_error("set_holes: expected a list of Polygon or (N,2) ndarrays");
+            for (py::handle h : py::reinterpret_borrow<py::sequence>(holes)) {
+                Polygon hole = as_polygon(h, "ExPolygon.set_holes");
+                hole.make_clockwise();
+                tmp.holes.emplace_back(std::move(hole));
+            }
+            e.holes = std::move(tmp.holes);
+        }, py::arg("holes"), "Replace all holes. Invalidates prior hole refs (C++ vector semantics).")
+        .def("translate", [](ExPolygon& e, double x, double y) { e.translate(x, y); }, py::arg("x"), py::arg("y"))
+        .def("rotate", [](ExPolygon& e, double a) { e.rotate(a); }, py::arg("angle"))
+        .def("rotate", [](ExPolygon& e, double a, const Point& c) { e.rotate(a, c); },
+             py::arg("angle"), py::arg("center"))
+        .def("scale", [](ExPolygon& e, double f) { e.scale(f); }, py::arg("factor"))
+        .def("douglas_peucker", [](ExPolygon& e, double t) { e.douglas_peucker(t); }, py::arg("tolerance"))
+        .def("area", [](const ExPolygon& e) { return e.area(); })
+        .def("is_valid", [](const ExPolygon& e) { return e.is_valid(); })
+        .def("contains", [](const ExPolygon& e, const Point& p) { return e.contains(p); }, py::arg("point"))
+        .def("num_contours", [](const ExPolygon& e) { return e.num_contours(); })
+        .def("simplify", [](const ExPolygon& e, double t) { return e.simplify(t); }, py::arg("tolerance"),
+             "Return simplified geometry as [ExPolygon].")
+        .def("offset", [](const ExPolygon& e, coord_t delta) { return offset_ex(e, (float) delta); },
+             py::arg("delta"), "Clipper offset by `delta` scaled units (negative shrinks). Returns [ExPolygon].")
+        .def("union_ex", [](const ExPolygon& a, const ExPolygon& b) {
+            return union_ex(ExPolygons{ a, b });
+        }, py::arg("other"), "Union with another ExPolygon. Returns [ExPolygon].")
+        .def("diff_ex", [](const ExPolygon& a, const ExPolygon& b) {
+            return diff_ex(ExPolygons{ a }, ExPolygons{ b });
+        }, py::arg("other"), "This minus `other`. Returns [ExPolygon].")
+        .def("intersection_ex", [](const ExPolygon& a, const ExPolygon& b) {
+            return intersection_ex(ExPolygons{ a }, ExPolygons{ b });
+        }, py::arg("other"), "Intersection with `other`. Returns [ExPolygon].");
 
-    py::class_<Surface, std::unique_ptr<Surface, py::nodelete>>(host, "Surface")
+    // Surface: default holder (Python-owned instances are freed), so plugins can construct
+    // their own Surface(surface_type, expolygon) — not just navigate the live slicing graph.
+    // expolygon is a reference_internal property, same idiom as Polygon/ExPolygon above.
+    py::class_<Surface>(host, "Surface")
+        .def(py::init([](SurfaceType t, const ExPolygon& e) { return Surface(t, e); }),
+             py::arg("surface_type"), py::arg("expolygon"))
+        .def(py::init([](SurfaceType t) { return Surface(t); }), py::arg("surface_type"))
         .def_readwrite("surface_type", &Surface::surface_type,
-            "This surface's SurfaceType. Writable: assigning reclassifies the "
-            "surface in place on the live slicing graph (geometry unchanged).")
-        .def_readonly("thickness", &Surface::thickness)
-        .def_readonly("bridge_angle", &Surface::bridge_angle)
-        .def_readonly("extra_perimeters", &Surface::extra_perimeters)
-        .def_property_readonly("expolygon", [](Surface& s) -> ExPolygon& { return s.expolygon; },
+            "This surface's SurfaceType. Assigning reclassifies it in place (geometry unchanged).")
+        .def_readwrite("thickness", &Surface::thickness)
+        .def_readwrite("bridge_angle", &Surface::bridge_angle)
+        .def_readwrite("extra_perimeters", &Surface::extra_perimeters)
+        .def_property("expolygon",
+            [](Surface& s) -> ExPolygon& { return s.expolygon; },
+            [](Surface& s, const ExPolygon& e) { s.expolygon = e; },
             py::return_value_policy::reference_internal,
-            "This surface's geometry.");
+            "This surface's geometry. Read returns a live ExPolygon ref; assign to replace it.")
+        .def("area", [](const Surface& s) { return s.area(); })
+        .def("is_top", [](const Surface& s) { return s.is_top(); })
+        .def("is_bottom", [](const Surface& s) { return s.is_bottom(); })
+        .def("is_bridge", [](const Surface& s) { return s.is_bridge(); })
+        .def("is_internal", [](const Surface& s) { return s.is_internal(); })
+        .def("is_external", [](const Surface& s) { return s.is_external(); })
+        .def("is_solid", [](const Surface& s) { return s.is_solid(); });
 
+    // SurfaceCollection: kept on py::nodelete — it is only ever a reference into the live
+    // slicing graph (LayerRegion::slices/fill_surfaces), never constructed by a plugin.
     py::class_<SurfaceCollection, std::unique_ptr<SurfaceCollection, py::nodelete>>(host, "SurfaceCollection")
         .def("size", [](const SurfaceCollection& c) { return c.surfaces.size(); })
+        .def("empty", [](const SurfaceCollection& c) { return c.empty(); })
+        .def("clear", [](SurfaceCollection& c) { c.clear(); })
+        .def("has", [](const SurfaceCollection& c, SurfaceType t) { return c.has(t); }, py::arg("surface_type"))
+        .def("set_type", [](SurfaceCollection& c, SurfaceType t) { c.set_type(t); }, py::arg("surface_type"))
+        .def("set", [](SurfaceCollection& c, const std::vector<ExPolygon>& src, SurfaceType t) { c.set(src, t); },
+             py::arg("expolygons"), py::arg("surface_type"),
+             "Replace all surfaces from a list of ExPolygon, all tagged `surface_type`. "
+             "This is the faithful replacement for the retired set_slices().")
+        .def("set", [](SurfaceCollection& c, const std::vector<Surface>& src) { c.set(src); },
+             py::arg("surfaces"), "Replace all surfaces from a list of Surface (types preserved per surface).")
+        .def("append", [](SurfaceCollection& c, const std::vector<ExPolygon>& src, SurfaceType t) { c.append(src, t); },
+             py::arg("expolygons"), py::arg("surface_type"))
+        .def("filter_by_type", [](py::object self, SurfaceType t) {
+            SurfaceCollection& c = self.cast<SurfaceCollection&>();
+            py::list out;
+            // SurfacesPtr (SurfaceCollection::filter_by_type's return type) is
+            // std::vector<const Surface*> (see Surface.hpp); the brief's note describing it
+            // as std::vector<Surface*> does not match the header, so this iterates by const
+            // pointer (py::cast accepts `const itype*` directly, see cast.h cast(const itype*)).
+            for (const Surface* s : c.filter_by_type(t))
+                out.append(py::cast(s, py::return_value_policy::reference_internal, self));
+            return out;
+        }, py::arg("surface_type"), "Surfaces of a given type as [Surface] refs. Invalidated by "
+           "set()/append()/clear() on this collection (C++ vector semantics), same as .surfaces.")
         .def_property_readonly("surfaces", [](py::object self) {
             SurfaceCollection& c = self.cast<SurfaceCollection&>();
             py::list out;
             for (Surface& s : c.surfaces)
                 out.append(py::cast(&s, py::return_value_policy::reference_internal, self));
             return out;
-        }, "Surfaces as [Surface] references into the live collection. Invalidated "
-           "by set_slices/set_fill_surfaces on the owning region (C++ vector semantics).");
+        }, "Surfaces as [Surface] references into the live collection. Invalidated by "
+           "set()/append()/clear() on this collection (C++ vector semantics).");
 
     // --- Extrusion tree (read-only in v1). Registered polymorphically: when a returned
     // ExtrusionEntity*'s dynamic type IS one of the classes registered below, pybind
@@ -324,14 +413,15 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
     auto layer_region = py::class_<LayerRegion, std::unique_ptr<LayerRegion, py::nodelete>>(host, "LayerRegion");
     layer_region
         .def_readonly("slices", &LayerRegion::slices,
-            "Sliced, typed surfaces (SurfaceCollection). At Step.Slice this is the "
-            "primary mutation target via set_slices().")
+            "Sliced, typed surfaces (SurfaceCollection). Edit in place, or replace with "
+            "slices.set(expolygons, surface_type). At Step.Slice this is the primary mutation "
+            "target; the split slice loop runs make_perimeters() afterward so edits cascade downstream.")
         .def_readonly("fill_surfaces", &LayerRegion::fill_surfaces,
-            "Surfaces prepared for infill (SurfaceCollection).")
+            "Surfaces prepared for infill (SurfaceCollection). Edit in place or via fill_surfaces.set(...).")
         .def_readonly("perimeters", &LayerRegion::perimeters,
-            "Perimeter toolpaths (ExtrusionEntityCollection).")
+            "Perimeter toolpaths (ExtrusionEntityCollection, read-only in v1).")
         .def_readonly("fills", &LayerRegion::fills,
-            "Infill toolpaths (ExtrusionEntityCollection).")
+            "Infill toolpaths (ExtrusionEntityCollection, read-only in v1).")
         .def("layer", [](LayerRegion& r) -> py::object {
             Layer* l = r.layer();
             if (l == nullptr)
@@ -344,58 +434,7 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
         .def("config_value", [](const LayerRegion& r, const std::string& key) {
             return config_value_or_none(r.region().config(), key);
         }, py::arg("key"),
-           "Serialized value of this region's resolved config option, or None if absent.")
-        // MUTATOR (G1/G3/G9). Replace this region's sliced surfaces. `polygons` is a list of
-        // (N,2) int64 ndarrays (scaled coords), [contour, [holes...]] pairs, or (G9)
-        // [contour, [holes...], SurfaceType] triples; orientation is normalized (contour CCW,
-        // holes CW) and surface_type is carried forward from the replaced surfaces (else
-        // stInternal) unless a per-entry type is given.
-        .def("set_slices", [](LayerRegion& region, py::object polygons, bool refresh_lslices) {
-            region.slices.set(surfaces_from_py(polygons, region.slices, "set_slices"));
-            // G1: rebuild the owning layer's merged islands (lslices) + bbox cache from the
-            // mutated region slices so downstream consumers (detect_surfaces_type neighbor
-            // diffs, overhang/bridge detection, brim/skirt/support) see coherent islands.
-            // Skipped when the region has no owning layer (unit-test regions).
-            if (refresh_lslices) {
-                if (Layer* layer = region.layer()) {
-                    layer->make_slices();
-                    layer->lslices_bboxes.clear();
-                    layer->lslices_bboxes.reserve(layer->lslices.size());
-                    for (const ExPolygon& island : layer->lslices)
-                        layer->lslices_bboxes.emplace_back(get_extents(island));
-                }
-            }
-        }, py::arg("polygons"), py::arg("refresh_lslices") = true,
-           "Replace this region's sliced surfaces from a list of (N,2) int64 ndarrays (scaled "
-           "coords), [contour, [holes...]] pairs, or [contour, [holes...], SurfaceType] triples "
-           "(orientation normalized: contour CCW / holes CW; surface_type carried forward from the "
-           "replaced surfaces, else stInternal, unless a per-entry SurfaceType is supplied). An "
-           "empty list clears this region's slices.\n"
-           "MUTATION-CASCADE: at the Slice boundary this is the primary, fully-supported entry "
-           "point -- the split slice loop runs make_perimeters() afterward, so the change cascades "
-           "into perimeters and everything downstream (final G-code).\n"
-           "LSLICES (G1): refresh_lslices=True (default) re-derives the owning layer's merged "
-           "islands and bbox cache from the new slices so overhang/bridge/skirt/support stay "
-           "coherent; pass False only if you manage lslices yourself via Layer.set_lslices.\n"
-           "PERSISTENCE (G3): the Slice hook re-snapshots raw_slices after it returns, so the "
-           "mutation survives a later perimeter-only re-run (restore_untyped_slices) instead of "
-           "silently reverting; it still does not persist across a full re-slice unless the hook "
-           "re-fires (re-select the plugin, or any posSlice-invalidating change).\n"
-           "DUPLICATES: identical objects share Layer*, so the mutation on the object that slices "
-           "is automatically seen by its duplicates; objects that must mutate independently must "
-           "not be identical.\n"
-           "Raises ValueError on malformed input. Valid only during the execute(ctx) call.")
-        // MUTATOR. Replace this region's fill (infill-prep) surfaces; identical input format and
-        // validation to set_slices.
-        .def("set_fill_surfaces", [](LayerRegion& region, py::object polygons) {
-            region.fill_surfaces.set(surfaces_from_py(polygons, region.fill_surfaces, "set_fill_surfaces"));
-        }, py::arg("polygons"),
-           "Replace this region's fill (infill-prep) surfaces; same input format/validation as "
-           "set_slices (per-entry SurfaceType supported; an empty list clears them).\n"
-           "MUTATION-CASCADE: at the PrepareInfill boundary (G4) make_fills runs afterward, so this "
-           "cascades into the generated infill. At the Infill boundary it changes the stored "
-           "surfaces but does NOT regenerate the already-built `fills` toolpaths (v1).\n"
-           "Raises ValueError on malformed input. Valid only during the execute(ctx) call.");
+           "Serialized value of this region's resolved config option, or None if absent.");
 
     auto layer = py::class_<Layer, std::unique_ptr<Layer, py::nodelete>>(host, "Layer");
     layer
@@ -417,38 +456,19 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
                 out.append(py::cast(r, py::return_value_policy::reference_internal, self));
             return out;
         }, "Per-region data as [LayerRegion].")
+        .def("make_slices", [](Layer& l) {
+            l.make_slices();
+            refresh_lslices_bboxes(l);
+        }, "Re-derive lslices (merged islands) from the region slices and refresh the bbox "
+           "cache — the C++ invariant-maintenance call after in-place slice edits.")
         .def("lslices", [](py::object self) {
             Layer& l = self.cast<Layer&>();
             py::list out;
             for (ExPolygon& e : l.lslices)
                 out.append(py::cast(&e, py::return_value_policy::reference_internal, self));
             return out;
-        }, "Merged per-layer islands as [ExPolygon] references. Invalidated by "
-           "set_lslices/make_slices (C++ vector semantics).")
-        .def("make_slices", [](Layer& l) {
-            l.make_slices();
-            l.lslices_bboxes.clear();
-            l.lslices_bboxes.reserve(l.lslices.size());
-            for (const ExPolygon& island : l.lslices)
-                l.lslices_bboxes.emplace_back(get_extents(island));
-        }, "Re-derive lslices (merged islands) from the region slices and refresh the "
-           "bbox cache — the C++ invariant-maintenance call after in-place geometry edits. "
-           "set_slices(refresh_lslices=True) runs this for you.")
-        // MUTATOR. Replace this layer's merged islands (lslices) and refresh the cache-invariant
-        // `lslices_bboxes` (one BoundingBox per island via get_extents). Same input format and
-        // validation as LayerRegion.set_slices.
-        .def("set_lslices", [](Layer& l, py::object islands) {
-            l.lslices = parse_expolygon_list(islands, "set_lslices");
-            l.lslices_bboxes.clear();
-            l.lslices_bboxes.reserve(l.lslices.size());
-            for (const ExPolygon& island : l.lslices)
-                l.lslices_bboxes.emplace_back(get_extents(island));
-        }, py::arg("islands"),
-           "Replace this layer's merged islands (lslices) from a list of (N,2) int64 ndarrays "
-           "(scaled coords) or [contour, [holes...]] pairs, and refresh lslices_bboxes (one "
-           "bounding box per island via get_extents) so the bbox cache stays consistent. Same "
-           "input format/validation as LayerRegion.set_slices. Raises ValueError on malformed "
-           "input. Valid only during the execute(ctx) call.");
+        }, "Merged per-layer islands as [ExPolygon] refs (in-place editable). Derived from the "
+           "region slices; call make_slices() to re-derive after edits. Invalidated by make_slices().");
 
     py::class_<PrintObject, std::unique_ptr<PrintObject, py::nodelete>>(host, "PrintObject")
         .def("id", [](const PrintObject& o) { return o.id().id; },

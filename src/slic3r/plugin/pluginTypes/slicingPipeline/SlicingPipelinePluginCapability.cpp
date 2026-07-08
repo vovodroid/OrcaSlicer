@@ -17,8 +17,8 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
         .value("Slice", SlicingPipelineStep::Slice)
         .value("Perimeters", SlicingPipelineStep::Perimeters)
         .value("EstimateCurledExtrusions", SlicingPipelineStep::EstimateCurledExtrusions)
-        .value("PrepareInfill", SlicingPipelineStep::PrepareInfill) // after prepare_infill, before make_fills: set_fill_surfaces here CASCADES
-        .value("Infill", SlicingPipelineStep::Infill)          // after make_fills: set_fill_surfaces here does NOT regenerate fills (v1)
+        .value("PrepareInfill", SlicingPipelineStep::PrepareInfill) // after prepare_infill, before make_fills: editing fill_surfaces here CASCADES
+        .value("Infill", SlicingPipelineStep::Infill)          // after make_fills: editing fill_surfaces here does NOT regenerate fills (v1)
         .value("Ironing", SlicingPipelineStep::Ironing)
         .value("Contouring", SlicingPipelineStep::Contouring)
         .value("SupportMaterial", SlicingPipelineStep::SupportMaterial)

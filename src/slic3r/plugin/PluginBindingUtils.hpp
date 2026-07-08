@@ -53,6 +53,23 @@ pybind11::array make_readonly_rows(pybind11::handle base, const T* data, pybind1
     return std::move(arr);
 }
 
+// Zero-copy, WRITABLE (rows, N) numpy view over `data`, lifetime tied to `base`.
+// Twin of make_readonly_rows: a base-carrying pybind array is writable by default,
+// so we simply do not clear the write flag. Writing through the view mutates the
+// underlying C++ buffer in place. rows == 0 / null data yields a fresh empty (0, N)
+// array (writable, no base).
+template<typename T, int N>
+pybind11::array make_writable_rows(pybind11::handle base, T* data, pybind11::ssize_t rows)
+{
+    namespace py = pybind11;
+    if (rows == 0 || data == nullptr)
+        return py::array_t<T>(std::vector<py::ssize_t>{ 0, (py::ssize_t) N });
+    return py::array_t<T>(
+        { rows, (py::ssize_t) N },
+        { (py::ssize_t)(N * sizeof(T)), (py::ssize_t) sizeof(T) },
+        data, base);
+}
+
 // Serialize one config key to a Python string, or None if the key is absent.
 // Works on any ConfigBase (resolved DynamicPrintConfig snapshots,
 // PrintObjectConfig, PrintRegionConfig, preset configs).
