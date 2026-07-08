@@ -2506,9 +2506,14 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             auto map_mode = get_filament_map_mode();
             // get recommended filament map
             if (map_mode < FilamentMapMode::fmmManual) {
-                filament_maps = ToolOrdering::get_recommended_filament_maps(all_filaments, this, map_mode, physical_unprintables, geometric_unprintables);
-                std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) { return value + 1; });
-                update_filament_maps_to_config(filament_maps);
+                // Grouping returns a nozzle-aware result; the 1-based extruder map
+                // for the by-object path is derived from it.
+                auto grouping_result = ToolOrdering::get_recommended_filament_maps(all_filaments, this, map_mode, physical_unprintables, geometric_unprintables);
+                auto derived_maps = grouping_result.get_extruder_map(false);
+                if (!derived_maps.empty()) {
+                    filament_maps = derived_maps;
+                    update_filament_maps_to_config(filament_maps);
+                }
             }
             // check map valid both in auto and mannual mode
             std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) {return value - 1; });
@@ -2658,8 +2663,14 @@ std::string Print::export_gcode(const std::string& path_template, GCodeProcessor
     gcode.do_export(this, path.c_str(), result, thumbnail_cb);
     gcode.export_layer_filaments(result);
     //BBS
-    if (result != nullptr)
+    if (result != nullptr) {
         result->conflict_result = m_conflict_result;
+        // Surface the slicer's per-filament nozzle grouping onto the post-slice result
+        // the device GUI reads. This is the static L/R + rack subset the multi-nozzle path computes;
+        // null for single-nozzle prints where nothing computes it. It is assigned after g-code
+        // generation and read by no emitter, so it does not affect the emitted g-code.
+        result->nozzle_group_result = this->get_layered_nozzle_group_result();
+    }
     return path.c_str();
 }
 
@@ -3306,6 +3317,47 @@ size_t Print::get_extruder_id(unsigned int filament_id) const
     return 0;
 }
 
+// Region reachable by every extruder = intersection of all per-extruder printable areas.
+// For single-nozzle printers, or whenever extruder_printable_area is unpopulated / degenerate (all
+// current single/dual profiles), fall back to the full printable_area so the wipe-tower-center clamp
+// is identical to the previous full-bed clamp.
+Polygons Print::get_extruder_shared_printable_polygon() const
+{
+    const std::vector<Vec2ds>& extruder_printable_areas = m_config.extruder_printable_area.values;
+    if (m_config.nozzle_diameter.size() < 2 || extruder_printable_areas.empty())
+        return {Polygon::new_scale(m_config.printable_area.values)};
+    for (const Vec2ds& area : extruder_printable_areas)
+        if (area.size() < 3)
+            return {Polygon::new_scale(m_config.printable_area.values)};
+
+    Polygons shared_printable_polys = {Polygon::new_scale(extruder_printable_areas.front())};
+    for (size_t i = 1; i < extruder_printable_areas.size(); ++i)
+        shared_printable_polys = intersection(shared_printable_polys, Polygons{Polygon::new_scale(extruder_printable_areas[i])});
+    return shared_printable_polys;
+}
+
+// Narrow the stored grouping result to the layer-aware type the slicing pipeline uses.
+std::shared_ptr<MultiNozzleUtils::LayeredNozzleGroupResult> Print::get_layered_nozzle_group_result() const
+{
+    return std::dynamic_pointer_cast<MultiNozzleUtils::LayeredNozzleGroupResult>(m_nozzle_group_result);
+}
+
+// Dynamic (per-layer selector) regroup predicate.
+// Orca: enable_filament_dynamic_map is a develop-only config key registered in the ConfigDef but NOT
+// a static PrintConfig member, so it is read from the applied full config; it is absent for every
+// shipping printer/profile -> nullptr -> false, which keeps the static grouping path (identical
+// output) the only one the current fleet takes. There is no mixed-colour-filament guard (mixed-colour
+// filaments are not supported). The remaining gates (auto-for-flush mode, multi-extruder machine)
+// read the static PrintConfig members.
+bool Print::is_dynamic_group_reorder() const
+{
+    const auto *opt     = m_full_print_config.option<ConfigOptionBool>("enable_filament_dynamic_map");
+    const bool  enabled = opt && opt->value;
+    if (!enabled || m_config.filament_map_mode != FilamentMapMode::fmmAutoForFlush || m_config.nozzle_diameter.size() <= 1)
+        return false;
+    return true;
+}
+
 // Wipe tower support.
 bool Print::has_wipe_tower() const
 {
@@ -3466,6 +3518,14 @@ void Print::_make_wipe_tower()
                              m_wipe_tower_data.tool_ordering.empty() ? 0.f : m_wipe_tower_data.tool_ordering.back().print_z, m_wipe_tower_data.tool_ordering.all_extruders());
         wipe_tower.set_has_tpu_filament(this->has_tpu_filament());
         wipe_tower.set_filament_map(this->get_filament_maps());
+        // Feed the has_filament_switcher device flag (develop-only dynamic key, read defensively from
+        // the full config — no shipping profile sets it) and the shared printable bed used by the PETG
+        // pre-extrusion offset clamp. Both are inert unless has_filament_switcher is set.
+        {
+            const ConfigOptionBool* hfs = m_full_print_config.option<ConfigOptionBool>("has_filament_switcher");
+            wipe_tower.set_has_filament_switcher(hfs && hfs->value);
+        }
+        wipe_tower.set_shared_print_bed(this->get_extruder_shared_printable_polygon());
         // Set the extruder & material properties at the wipe tower object.
         for (size_t i = 0; i < number_of_extruders; ++i)
             wipe_tower.set_extruder(i, m_config);
@@ -3517,7 +3577,10 @@ void Print::_make_wipe_tower()
                 float volume_to_purge = 0;
                 if (pre_filament_id != (unsigned int)(-1) && pre_filament_id != filament_id) {
                     volume_to_purge = multi_extruder_flush[nozzle_id][pre_filament_id][filament_id];
-                    volume_to_purge *= m_config.flush_multiplier.get_at(nozzle_id);
+                    // Fast purge mode uses flush_multiplier_fast; Default is inert.
+                    float flush_multiplier = (m_config.prime_volume_mode == PrimeVolumeMode::pvmFast) ? m_config.flush_multiplier_fast.get_at(nozzle_id)
+                                                                                                      : m_config.flush_multiplier.get_at(nozzle_id);
+                    volume_to_purge *= flush_multiplier;
                     volume_to_purge = pre_filament_id == -1 ? 0 :
                         layer_tools.wiping_extrusions().mark_wiping_extrusions(*this, current_filament_id, filament_id, volume_to_purge);
                 }
@@ -3526,8 +3589,10 @@ void Print::_make_wipe_tower()
                 float grab_purge_volume = m_config.grab_length.get_at(nozzle_id) * 2.4; //(diameter/2)^2*PI=2.4
                 volume_to_purge = std::max(0.f, volume_to_purge - grab_purge_volume);
 
+                // Saving mode reduces the prime volume to 15 mm3; Default is inert.
+                float prime_volume = (m_config.prime_volume_mode == PrimeVolumeMode::pvmSaving) ? 15.f : (float) m_config.prime_volume;
                 wipe_tower.plan_toolchange((float)layer_tools.print_z, (float)layer_tools.wipe_tower_layer_height, current_filament_id, filament_id,
-                    m_config.prime_volume, volume_to_purge);
+                    prime_volume, volume_to_purge);
                 current_filament_id = filament_id;
                 nozzle_cur_filament_ids[nozzle_id] = filament_id;
             }

@@ -38,6 +38,7 @@ class SupportLayer;
 class TreeSupportData;
 class TreeSupport;
 class ExtrusionLayers;
+namespace MultiNozzleUtils { class NozzleGroupResultBase; class LayeredNozzleGroupResult; }
 
 #define MAX_OUTER_NOZZLE_DIAMETER   4
 // BBS: move from PrintObjectSlice.cpp
@@ -1012,6 +1013,25 @@ public:
     // get the group label of filament
     size_t get_extruder_id(unsigned int filament_id) const;
 
+    // The region every extruder can reach,
+    // i.e. the intersection of all per-extruder printable areas. Falls back to the full printable_area
+    // for single-nozzle printers and whenever extruder_printable_area is not populated (all current
+    // single/dual profiles), so the wipe-tower-center clamp is byte-identical to full-bed clamping there.
+    Polygons get_extruder_shared_printable_polygon() const;
+
+    // Logical (extruder, nozzle) grouping result produced by ToolOrdering during reorder.
+    // Consumed by GCode via get_layered_nozzle_group_result()->get_nozzle_id(filament, layer) etc.
+    void set_nozzle_group_result(std::shared_ptr<MultiNozzleUtils::NozzleGroupResultBase> result) { m_nozzle_group_result = result; }
+    std::shared_ptr<MultiNozzleUtils::NozzleGroupResultBase> get_nozzle_group_result() const { return m_nozzle_group_result; }
+    std::shared_ptr<MultiNozzleUtils::LayeredNozzleGroupResult> get_layered_nozzle_group_result() const;
+
+    // True only when the printer opts into the per-layer filament selector
+    // (enable_filament_dynamic_map) in auto-for-flush mode on a multi-extruder machine. Gates the
+    // dynamic (per-layer) regroup branch in ToolOrdering::reorder_extruders_for_minimum_flush_volume.
+    // Closed for every current profile, so the static grouping path (byte-identical output) is the
+    // only one taken by the shipping fleet.
+    bool is_dynamic_group_reorder() const;
+
     const std::vector<std::vector<DynamicPrintConfig>>& get_extruder_filament_info() const { return m_extruder_filament_info; }
     void set_extruder_filament_info(const std::vector<std::vector<DynamicPrintConfig>>& filament_info) { m_extruder_filament_info = filament_info; }
 
@@ -1175,6 +1195,9 @@ private:
     Points                                  m_skirt_convex_hull;
 
     std::vector<std::vector<DynamicPrintConfig>> m_extruder_filament_info;
+
+    // Logical (extruder, nozzle) grouping result, set by ToolOrdering during reorder.
+    std::shared_ptr<MultiNozzleUtils::NozzleGroupResultBase> m_nozzle_group_result;
 
     // Following section will be consumed by the GCodeGenerator.
     ToolOrdering 							m_tool_ordering;

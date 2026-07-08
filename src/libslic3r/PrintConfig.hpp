@@ -46,6 +46,14 @@ enum GCodeFlavor : unsigned char {
     gcfNoExtrusion
 };
 
+// How a filament is used across the model. Part of the multi-nozzle grouping data; not yet
+// read by the shipping slicer — the nozzle-centric FilamentGroup engine consumes it.
+enum FilamentUsageType {
+    SupportOnly,
+    ModelOnly,
+    Hybrid
+};
+
 
 enum class FuzzySkinType {
     None,
@@ -418,14 +426,27 @@ enum ExtruderType {
 enum NozzleVolumeType {
     nvtStandard = 0,
     nvtHighFlow,
-    nvtMaxNozzleVolumeType = nvtHighFlow
+    nvtHybrid,       // match-any / mixed sentinel; hidden from user selectors, kept out of the shipping slicer
+    nvtTPUHighFlow,  // physical variant, used on H2D/H2DP 0.4 nozzles only
+    // Integer values are serialized as raw ints in 3mf plate metadata and device MQTT, so they MUST stay stable.
+    nvtMaxNozzleVolumeType = nvtTPUHighFlow
 };
 
 enum FilamentMapMode {
     fmmAutoForFlush,
     fmmAutoForMatch,
     fmmManual,
+    fmmNozzleManual, // Fully-manual filament->physical-nozzle mapping (filament_nozzle_map). Kept ordered right after fmmManual so every `< fmmManual` "is-auto" check stays correct.
     fmmDefault
+};
+
+// Dual-extruder purge control. Default reproduces the current
+// per-extruder flush_multiplier + filament_prime_volume behaviour, so absent/default is inert.
+//   Saving -> reduce prime volume to 15 mm3;  Fast -> use flush_multiplier_fast + filament_flush_temp_fast.
+enum PrimeVolumeMode {
+    pvmDefault = 0,
+    pvmSaving,
+    pvmFast
 };
 
 extern std::string get_extruder_variant_string(ExtruderType extruder_type, NozzleVolumeType nozzle_volume_type);
@@ -434,8 +455,8 @@ static std::set<NozzleVolumeType> get_valid_nozzle_volume_type() {
     std::set<NozzleVolumeType> type;
     for (int i = 0; i <= nvtMaxNozzleVolumeType; ++i) {
         auto t = static_cast<NozzleVolumeType>(i);
-        // TODO: Orca: Support hybrid
-        //if (t == nvtHybrid) continue;
+        // Hybrid is a "match-any / mixed" sentinel, never a user-selectable physical type.
+        if (t == nvtHybrid) continue;
         type.insert(t);
     }
     return type;
@@ -521,10 +542,16 @@ static std::string get_bed_temp_1st_layer_key(const BedType type)
 }
 
 extern const std::vector<std::string> filament_extruder_override_keys;
+// Full override-key check incl. filament_retract_length_nc (defined outside the generator list).
+extern bool is_filament_extruder_override_key(const std::string &opt_key);
 
 // for parse extruder_ams_count
 extern std::vector<std::map<int, int>> get_extruder_ams_count(const std::vector<std::string> &strs);
 extern std::vector<std::string> save_extruder_ams_count_to_string(const std::vector<std::map<int, int>> &extruder_ams_count);
+
+// for parse extruder_nozzle_stats (per-extruder physical nozzle inventory by volume type)
+extern std::vector<std::map<NozzleVolumeType, int>> get_extruder_nozzle_stats(const std::vector<std::string> &strs);
+extern std::vector<std::string> save_extruder_nozzle_stats_to_string(const std::vector<std::map<NozzleVolumeType, int>> &extruder_nozzle_stats);
 
 #define CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(NAME) \
     template<> const t_config_enum_names& ConfigOptionEnum<NAME>::get_enum_names(); \
@@ -1297,6 +1324,12 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionFloats,               machine_min_travel_rate))
     // M205 S... [mm/sec]
     ((ConfigOptionFloats,               machine_min_extruding_rate))
+    // Bedslinger mass/force model: drive the per-layer Y-axis
+    // acceleration limit (curr_y_acceleration_limit) and the printed-mass check.
+    // Default 0 => inactive for every existing printer (mass model reads them as disabled).
+    ((ConfigOptionFloat,                machine_max_force_Y))
+    ((ConfigOptionFloat,                machine_bed_mass_Y))
+    ((ConfigOptionFloat,                machine_max_printed_mass))
 
     //resonance avoidance ported from qidi slicer
     ((ConfigOptionBool,                 resonance_avoidance))
@@ -1351,6 +1384,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionStrings,             filament_vendor))
     ((ConfigOptionBools,               filament_is_support))
     ((ConfigOptionInts,                filament_printable))
+    ((ConfigOptionInts,                filament_extruder_compatibility))
     ((ConfigOptionFloats,              filament_change_length))
     ((ConfigOptionFloats,              filament_cost))
     ((ConfigOptionStrings,             default_filament_colour))
@@ -1367,6 +1401,8 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionIntsNullable,        nozzle_flush_dataset))
     ((ConfigOptionFloatsNullable,      filament_flush_volumetric_speed))
     ((ConfigOptionIntsNullable,        filament_flush_temp))
+    // Fast-purge flush temperature; consumed only when prime_volume_mode==pvmFast.
+    ((ConfigOptionIntsNullable,        filament_flush_temp_fast))
     // BBS
     ((ConfigOptionBool,                scan_first_layer))
     ((ConfigOptionEnum<PowerLossRecoveryMode>, enable_power_loss_recovery))
@@ -1428,11 +1464,13 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionInt,                 nozzle_hrc))
     ((ConfigOptionBool,                auxiliary_fan))
     ((ConfigOptionBool,                support_air_filtration))
+    ((ConfigOptionBool,                cooling_filter_enabled))
     ((ConfigOptionEnum<PrinterStructure>,printer_structure))
     ((ConfigOptionBool,                support_chamber_temp_control))
     ((ConfigOptionEnumsGeneric,        extruder_type))
     ((ConfigOptionEnumsGeneric,        nozzle_volume_type))
     ((ConfigOptionStrings,             extruder_ams_count))
+    ((ConfigOptionStrings,             extruder_nozzle_stats))
     ((ConfigOptionInts,                printer_extruder_id))
     ((ConfigOptionInt,                 master_extruder_id))
     ((ConfigOptionStrings,             printer_extruder_variant))
@@ -1490,6 +1528,26 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionStrings,              small_area_infill_flow_compensation_model))
 
     ((ConfigOptionBool,                has_scarf_joint_seam))
+
+    // Multi-nozzle + pre-heating + nozzle-change (nc) keys. Defaults are no-ops for existing
+    // single-nozzle printers; new slicing paths gate on extruder_max_nozzle_count > 1.
+    ((ConfigOptionFloat,               machine_hotend_change_time))
+    ((ConfigOptionFloat,               machine_prepare_compensation_time))
+    ((ConfigOptionBool,                enable_pre_heating))
+    ((ConfigOptionFloatsNullable,      hotend_cooling_rate))
+    ((ConfigOptionFloatsNullable,      hotend_heating_rate))
+    ((ConfigOptionFloats,              filament_change_length_nc))
+    ((ConfigOptionFloatsNullable,      filament_ramming_travel_time))
+    ((ConfigOptionIntsNullable,        filament_pre_cooling_temperature))
+    ((ConfigOptionFloatsNullable,      filament_ramming_volumetric_speed))
+    ((ConfigOptionFloatsNullable,      filament_ramming_travel_time_nc))
+    ((ConfigOptionIntsNullable,        filament_pre_cooling_temperature_nc))
+    ((ConfigOptionFloatsNullable,      filament_ramming_volumetric_speed_nc))
+    ((ConfigOptionFloatsNullable,      filament_retract_length_nc))
+    ((ConfigOptionIntsNullable,        extruder_max_nozzle_count))
+    // Printer flag: whether the printer offers the fast-purge mode selector.
+    // Default false; no shipping profile sets it, so the fast-purge UI stays hidden.
+    ((ConfigOptionBool,                support_fast_purge_mode))
 )
 
 // This object is mapped to Perl as Slic3r::Config::Print.
@@ -1636,7 +1694,15 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
 
     // BBS: wipe tower is only used for priming
     ((ConfigOptionFloat,              prime_volume))
+    // Nozzle-change (nc) prime volume + pre-heat delta
+    ((ConfigOptionFloats,             filament_prime_volume_nc))
+    ((ConfigOptionFloatsNullable,     filament_preheat_temperature_delta))
     ((ConfigOptionFloats,             flush_multiplier))
+    // Fast-purge mode. Kept out of the g-code config block (banned_keys in
+    // GCode::append_full_config) so registering them leaves the shipping fleet's g-code byte-identical;
+    // consumed only on the prime_volume_mode==pvmFast / pvmSaving branch (default pvmDefault = inert).
+    ((ConfigOptionEnum<PrimeVolumeMode>, prime_volume_mode))
+    ((ConfigOptionFloats,             flush_multiplier_fast))
     ((ConfigOptionFloat,              z_offset))
     // BBS: project filaments
     ((ConfigOptionFloats,             filament_colour_new))
@@ -1644,6 +1710,8 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionFloatsNullable,     nozzle_volume))
     ((ConfigOptionPoints,             start_end_points))
     ((ConfigOptionEnum<TimelapseType>,    timelapse_type))
+    // Corexy farthest-point timelapse (default false → inert for existing printers)
+    ((ConfigOptionBool,               farthest_point_timelapse))
     ((ConfigOptionString,             thumbnails))
     // BBS: move from PrintObjectConfig
     ((ConfigOptionBool, independent_support_layer_height))

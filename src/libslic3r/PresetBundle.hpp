@@ -72,6 +72,25 @@ struct FilamentBaseInfo
     bool is_support{ false };
     bool is_system{ true };
     int  filament_printable = 3;
+
+    // filament_extruder_compatibility packs one compatibility level per extruder into a single
+    // 32-bit int, 3 bits per extruder (up to 10 extruders). Levels: 0 = printable, 1 = error,
+    // 2 = critical warning, 3 = warning (4-7 reserved). extruder_id is 0-based.
+    int get_extruder_compatibility(int extruder_id) const {
+        constexpr int bits_per_extruder  = 3;
+        constexpr int extruder_mask      = (1 << bits_per_extruder) - 1; // 0x7
+        constexpr int max_extruder_count = 32 / bits_per_extruder;       // 10
+
+        if (extruder_id < 0 || extruder_id >= max_extruder_count)
+            return 0;
+        return (m_filament_extruder_compatibility >> (bits_per_extruder * extruder_id)) & extruder_mask;
+    }
+
+    void set_filament_extruder_compatibility(int value) { m_filament_extruder_compatibility = value; }
+    int  get_filament_extruder_compatibility() const    { return m_filament_extruder_compatibility; }
+
+private:
+    int  m_filament_extruder_compatibility = 0;
 };
 
 enum BundleType{
@@ -367,6 +386,11 @@ public:
     DynamicPrintConfig          full_config(bool apply_extruder = true, std::optional<std::vector<int>>filament_maps = std::nullopt) const;
     // full_config() with the some "useless" config removed.
     DynamicPrintConfig          full_config_secure(std::optional<std::vector<int>>filament_maps = std::nullopt) const;
+
+    // Per-extruder flush matrix [extruder_id][from_filament][to_filament] in mm^3, optionally scaled
+    // by the per-extruder flush_multiplier (or flush_multiplier_fast when prime_volume_mode==Fast).
+    // Used by the print-dispatch nozzle-mapping flush-weight estimate.
+    std::vector<std::vector<std::vector<float>>> get_full_flush_matrix(bool with_multiplier = true) const;
 
     //BBS: add some functions for multiple extruders
     int get_printer_extruder_count() const;

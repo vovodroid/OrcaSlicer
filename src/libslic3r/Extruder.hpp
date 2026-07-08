@@ -51,6 +51,10 @@ public:
     double retracted() const { return m_retracted; }
     // Get extra retraction planned after
     double restart_extra() const { return m_restart_extra; }
+    // Share-aware retracted-length readers (for extruders shared between filaments), consumed by GCodeWriter::get_extruder_retracted_length.
+    bool   is_share_extruder() const { return m_share_extruder; }
+    double get_single_retracted_length() const { return m_retracted; }
+    double get_share_retracted_length() const { return m_share_retracted[extruder_id()]; }
     // Setters for the PlaceholderParser.
     // Set current extruder position. Only applicable with absolute extruder addressing.
     void   set_position(double e) { m_E = e; }

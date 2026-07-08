@@ -632,6 +632,25 @@ std::string GCodeWriter::toolchange(unsigned int filament_id)
     return gcode.str();
 }
 
+// Current parked-retract length of the filament's extruder, share-aware. m_filament_extruders is
+// sorted by id (see toolchange), so a lower_bound lookup finds the entry; unknown filament ids
+// degrade to 0 rather than dereferencing end().
+double GCodeWriter::get_extruder_retracted_length(const int filament_id)
+{
+    double res = 0.0;
+    auto filament_extruder_iter = Slic3r::lower_bound_by_predicate(m_filament_extruders.begin(), m_filament_extruders.end(),
+        [filament_id](const Extruder &e) { return (int) e.id() < filament_id; });
+    if (filament_extruder_iter == m_filament_extruders.end() || (int) filament_extruder_iter->id() != filament_id)
+        return res;
+
+    if (filament_extruder_iter->is_share_extruder())
+        res = filament_extruder_iter->get_share_retracted_length();
+    else
+        res = filament_extruder_iter->get_single_retracted_length();
+
+    return res;
+}
+
 std::string GCodeWriter::set_speed(double F, const std::string &comment, const std::string &cooling_marker)
 {
     assert(F > 0.);
@@ -1101,7 +1120,7 @@ std::string GCodeWriter::_retract(double length, double restart_extra, const std
     return gcode;
 }
 
-std::string GCodeWriter::unretract()
+std::string GCodeWriter::unretract(float extra_retract)
 {
     std::string gcode;
 
@@ -1117,7 +1136,9 @@ std::string GCodeWriter::unretract()
             //BBS
             // use G1 instead of G0 because G0 will blend the restart with the previous travel move
             GCodeG1Formatter w;
-            w.emit_e(filament()->E());
+            // extra_retract over-extrudes for the PETG pre-extrusion; 0 by
+            // default -> identical to the plain deretract E position.
+            w.emit_e(filament()->E() + extra_retract);
             w.emit_f(filament()->deretract_speed() * 60.);
             //BBS
             w.emit_comment(GCodeWriter::full_gcode_comment, " ; unretract");
