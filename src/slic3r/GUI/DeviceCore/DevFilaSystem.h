@@ -137,6 +137,7 @@ public:
         AMS_LITE = 2, // AMS-Lite
         N3F = 3,      // N3F
         N3S = 4,      // N3S
+        AMS_LITE_MIXED = 5, // AMS-Lite mixed (A2L / N9). Presents as AMS_LITE to generic callers; see GetAmsType()/IsAmsLiteMixed().
     };
 
 public:
@@ -150,10 +151,15 @@ public:
 
     void     SetAmsType(int type) { m_ams_type = (AmsType)type; }
     void     SetAmsType(AmsType type) { m_ams_type = type; }
-    AmsType  GetAmsType() const { return m_ams_type; }
+    // AMS-Lite-mixed (N9) is a variant of AMS-Lite: report AMS_LITE to generic callers so all
+    // existing AMS_LITE handling applies. Mixed-specific code uses IsAmsLiteMixed().
+    AmsType  GetAmsType() const { return m_ams_type == AMS_LITE_MIXED ? AMS_LITE : m_ams_type; }
 
     // exist or not
     bool  IsExist() const { return m_exist; }
+
+    // AMS-Lite-mixed for N9 (A2L)
+    bool  IsAmsLiteMixed() const { return m_ams_type == AMS_LITE_MIXED; }
 
     // slots
     int   GetSlotCount() const;
@@ -170,7 +176,9 @@ public:
     int   GetHumidityLevel() const { return m_humidity_level; }
     int   GetHumidityPercent() const { return m_humidity_percent; }
 
-    bool  SupportDrying() const { return m_ams_type > AMS_LITE; }
+    // Only N3F/N3S dry. Written explicitly (not `> AMS_LITE`) so the new AMS_LITE_MIXED (N9) is
+    // excluded; identical to the old expression for every pre-existing type.
+    bool  SupportDrying() const { return (m_ams_type == N3F) || (m_ams_type == N3S); }
     int   GetLeftDryTime() const { return m_left_dry_time; }
 
 private:
@@ -241,8 +249,15 @@ public:
     DevAmsTray* GetAmsTray(const std::string& ams_id, const std::string& tray_id) const;
     void        CollectAmsColors(std::vector<wxColour>& ams_colors) const;
 
+    // Map a linear tray index -> {ams_id, slot_id}. Includes the two virtual (external-spool) trays,
+    // N3S single-slot units, and the A2L/N9 AMS-Lite-mixed layout (trays 24-27).
+    std::map<int, DevAmsSlotId> GetTrayIndexMap();
+
     // extruder
     int  GetExtruderIdByAmsId(const std::string& ams_id) const;
+
+    // nozzle: untranslated flow-type string of the extruder bound to this ams (for blacklist matching)
+    std::string GetNozzleFlowStringByAmsId(const std::string& ams_id) const;
 
     /* AMS settings*/
     DevAmsSystemSetting& GetAmsSystemSetting() { return m_ams_system_setting; }

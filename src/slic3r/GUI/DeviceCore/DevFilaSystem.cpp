@@ -1,5 +1,6 @@
 #include <nlohmann/json.hpp>
 #include "DevFilaSystem.h"
+#include "DevNozzleSystem.h" // DevNozzle / DevNozzleSystem for GetNozzleFlowStringByAmsId
 
 // TODO: remove this include
 #include "slic3r/GUI/DeviceManager.hpp"
@@ -111,7 +112,7 @@ DevAms::DevAms(const std::string& ams_id, int nozzle_id, int type)
     m_ams_id = ams_id;
     m_ext_id = nozzle_id;
     m_ams_type = (AmsType)type;
-    assert(DUMMY < type && m_ams_type <= N3S);
+    assert(DUMMY < type && m_ams_type <= AMS_LITE_MIXED);
 }
 
 DevAms::~DevAms()
@@ -137,7 +138,8 @@ static unordered_map<int, wxString> s_ams_display_formats = {
 wxString DevAms::GetDisplayName() const
 {
     wxString ams_display_format;
-    auto iter = s_ams_display_formats.find(m_ams_type);
+    // GetAmsType() maps AMS_LITE_MIXED -> AMS_LITE so N9 shows the AMS-Lite name.
+    auto iter = s_ams_display_formats.find(GetAmsType());
     if (iter != s_ams_display_formats.end()) 
     {
         ams_display_format = iter->second;
@@ -166,11 +168,13 @@ wxString DevAms::GetDisplayName() const
 
 int DevAms::GetSlotCount() const
 {
-    if (m_ams_type == AMS || m_ams_type == AMS_LITE || m_ams_type == N3F)
+    // GetAmsType() maps AMS_LITE_MIXED -> AMS_LITE, so N9 reports 4 slots like AMS-Lite.
+    auto ams_type = GetAmsType();
+    if (ams_type == AMS || ams_type == AMS_LITE || ams_type == N3F)
     {
         return 4;
     }
-    else if (m_ams_type == N3S)
+    else if (ams_type == N3S)
     {
         return 1;
     }
@@ -256,6 +260,44 @@ int DevFilaSystem::GetExtruderIdByAmsId(const std::string& ams_id) const
 
     assert(false && __FUNCTION__);
     return 0; // not found
+}
+
+std::string DevFilaSystem::GetNozzleFlowStringByAmsId(const std::string& ams_id) const
+{
+    auto extruder_id = GetExtruderIdByAmsId(ams_id);
+    auto nozzle      = GetOwner()->GetNozzleSystem()->GetExtNozzle(extruder_id);
+    return DevNozzle::GetNozzleFlowTypeString(nozzle.GetNozzleFlowType());
+}
+
+std::map<int, DevAmsSlotId> DevFilaSystem::GetTrayIndexMap()
+{
+    std::map<int, DevAmsSlotId> tray_id_map;
+    tray_id_map[VIRTUAL_TRAY_MAIN_ID]   = DevAmsSlotId{VIRTUAL_TRAY_MAIN_ID, 0};
+    tray_id_map[VIRTUAL_TRAY_DEPUTY_ID] = DevAmsSlotId{VIRTUAL_TRAY_DEPUTY_ID, 0};
+
+    for (auto& [ams_id, ams_item] : GetAmsList()) {
+        for (auto &[slot_id, slot_item] : ams_item->GetTrays()) {
+            if (ams_item && slot_item) {
+                try {
+                    int ams_id_int  = stoi(ams_id);
+                    int slot_id_int = stoi(slot_id);
+                    int tray_index  = -1;
+                    if (ams_item->GetAmsType() == DevAms::N3S) {
+                        tray_index = ams_id_int;
+                    } else if(ams_item->GetAmsType() == DevAms::AMS_LITE && ams_item->IsAmsLiteMixed()) {
+                        tray_index = 24 + slot_id_int;
+                    } else {
+                        tray_index = (ams_id_int * 4 + slot_id_int);
+                    }
+                    tray_id_map[tray_index] = {ams_id_int, slot_id_int};
+                } catch(...) {
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << "invalid ams id: " << ams_id << " or slot id: " << slot_id;
+                }
+            }
+        }
+    }
+
+    return  tray_id_map;
 }
 
 bool DevFilaSystem::IsAmsSettingUp() const
@@ -414,6 +456,11 @@ void DevFilaSystemParser::ParseV1_0(const json& jj, MachineObject* obj, DevFilaS
                             if (type_id < 4)
                             {
                                 curr_ams->m_exist = (obj->ams_exist_bits & (1 << ams_id_int)) != 0 ? true : false;
+                            }
+                            else if (type_id == DevAms::AMS_LITE_MIXED)
+                            {
+                                // Mixed AMS-Lite (A2L / N9) exist flag lives at bit 12.
+                                curr_ams->m_exist = DevUtil::get_flag_bits(obj->ams_exist_bits, 12);
                             }
                             else
                             {
@@ -627,6 +674,11 @@ void DevFilaSystemParser::ParseV1_0(const json& jj, MachineObject* obj, DevFilaS
                                     if (type_id < 4)
                                     {
                                         curr_tray->is_exists = (obj->tray_exist_bits & (1 << (ams_id_int * 4 + tray_id_int))) != 0 ? true : false;
+                                    }
+                                    else if (type_id == DevAms::AMS_LITE_MIXED)
+                                    {
+                                        // Mixed AMS-Lite (A2L / N9) trays occupy tray-exist bits 24..27.
+                                        curr_tray->is_exists = DevUtil::get_flag_bits(obj->tray_exist_bits, AMS_LITE_MIXED_TRAY_INDEX_OFFSET + tray_id_int);
                                     }
                                     else
                                     {
