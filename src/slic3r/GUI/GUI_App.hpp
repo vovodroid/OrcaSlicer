@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <string>
+#include "ActionRegistry.hpp"
 #include "ImGuiWrapper.hpp"
 #include "ConfigWizard.hpp"
 #include "OpenGLManager.hpp"
@@ -554,6 +555,7 @@ public:
     PresetBundleDialog* m_preset_bundle_dlg{nullptr};
     PluginsDialog* m_plugins_dlg{nullptr};
     TerminalDialog* m_terminal_dlg{nullptr};
+    ActionRegistry  m_action_registry;
 
 
     void            start_http_server(const std::string& provider = ORCA_CLOUD_PROVIDER);
@@ -625,6 +627,7 @@ public:
     void            open_plugins_dialog(size_t open_on_tab = 0, const std::string& highlight_option = std::string());
     void            open_terminal_dialog();
     void            open_speed_dial();
+    ActionRegistry& action_registry() { return m_action_registry; }
     void            open_exportpresetbundledialog(size_t open_on_tab = 0, const std::string& highlight_option = std::string());
     virtual bool OnExceptionInMainLoop() override;
     // Calls wxLaunchDefaultBrowser if user confirms in dialog.
