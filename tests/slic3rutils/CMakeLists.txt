@@ -5,6 +5,7 @@ add_executable(${_TEST_NAME}_tests
     test_plugin_capability_identifier.cpp
     test_plugin_install.cpp
     test_plugin_sort.cpp
+    test_speed_dial_action_id.cpp
     )
 
 if (MSVC)
