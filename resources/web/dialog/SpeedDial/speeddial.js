@@ -18,7 +18,7 @@ function NormChar(ch) {
 }
 
 // element handles, assigned in OnInit (kept null so load-time touches no DOM)
-var qEl = null, listEl = null, favEl = null, clearEl = null, eyeEl = null;
+var qEl = null, listEl = null, favEl = null, clearEl = null, eyeEl = null, countEl = null;
 
 // ---- pure helpers (no DOM; unit-tested) -------------------------------------
 function fuzzyRanges(text, query) {
@@ -239,15 +239,21 @@ function renderList() {
   // non-empty query with zero hits earns the "No actions match" message.
   if (!q) {
     listEl.className = "dial-list empty";
+    if (countEl) countEl.hidden = true;
     return;
   }
   listEl.className = "dial-list" + (!arr.length ? " empty" : "");
   if (!arr.length) {
+    if (countEl) countEl.hidden = true;
     var empty = document.createElement("div");
     empty.className = "dial-empty";
-    empty.textContent = "No actions match";
+    empty.textContent = "No actions match (Total: " + ACTIONS.length + ")";
     listEl.appendChild(empty);
     return;
+  }
+  if (countEl) {
+    countEl.hidden = false;
+    countEl.textContent = "Showing " + arr.length + " of " + ACTIONS.length + " actions";
   }
   arr.forEach(function (a, i) {
     var on = FAVS.indexOf(a.id) !== -1;
@@ -361,7 +367,7 @@ function focusInput() { setTimeout(function () { qEl.focus(); }, 0); }
 
 // ---- init --------------------------------------------------------------------
 function OnInit() {
-  qEl = $("q"); listEl = $("list"); favEl = $("favBar"); clearEl = $("clear"); eyeEl = $("favEyebrow");
+  qEl = $("q"); listEl = $("list"); favEl = $("favBar"); clearEl = $("clear"); eyeEl = $("favEyebrow"); countEl = $("count");
   syncClearButton();
 
   $("clear").onclick = function () {
