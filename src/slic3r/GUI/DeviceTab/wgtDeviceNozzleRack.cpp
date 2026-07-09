@@ -33,7 +33,7 @@
 static const wxColour WGT_GREY200 = wxColour(248, 248, 248);
 static const wxColour WGT_GREY300 = wxColour(238, 238, 238);
 
-static wxColour s_hgreen_clr("#00AE42");
+static wxColour s_hgreen_clr("#009688");
 
 namespace Slic3r::GUI
 {

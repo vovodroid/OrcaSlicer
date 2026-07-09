@@ -22,7 +22,7 @@
 #define WGT_RACK_NOZZLE_SIZE WX_DIP_SIZE(88, 100)
 
 static wxColour s_gray_clr("#B0B0B0");
-static wxColour s_hgreen_clr("#00AE42");
+static wxColour s_hgreen_clr("#009688");
 static wxColour s_red_clr("#D01B1B");
 
 wxDEFINE_EVENT(EVT_NOZZLE_RACK_NOZZLE_ITEM_SELECTED, wxCommandEvent);

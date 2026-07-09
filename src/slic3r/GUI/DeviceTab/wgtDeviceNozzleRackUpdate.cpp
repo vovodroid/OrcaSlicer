@@ -612,7 +612,7 @@ void wgtDeviceNozzleRackHotendUpdate::UpdateInfo(const DevNozzle& nozzle)
         m_used_time->Show(true);
         m_status_label->Show(true);
         m_status_bitmap->Show(true);
-        m_status_label->SetForegroundColour(wxColour("#00AE42"));
+        m_status_label->SetForegroundColour(wxColour("#009688"));
         m_status_label->SetLabel(_L("Refresh"));
         m_status_bitmap->SetBitmap(m_refresh_icon->bmp());
         m_status_bitmap->Refresh();
