@@ -52,12 +52,19 @@ inline bool check_constraints(const FilamentGroupContext& ctx,
         }
     }
 
-    // 3. max_group_size per extruder (only check when theoretically feasible)
+    // 3. max_group_size per extruder. This cap is an invariant of the flush-partition
+    //    modes only: those solvers partition the filaments across extruders subject to
+    //    each extruder's capacity. MatchMode instead maps every filament to the extruder
+    //    holding the nearest-color loaded AMS filament and does not partition by capacity
+    //    (its solver capacity is the filament count, not max_group_size), so a legitimate
+    //    match may place more than max_group_size filaments on one extruder. Enforce the
+    //    cap only for the partition modes, and only when the instance is feasible.
     int total_capacity = 0;
     for (auto sz : ctx.machine_info.max_group_size)
         total_capacity += sz;
 
-    if (total_capacity >= (int)used_filaments.size()) {
+    if (ctx.group_info.mode != FGMode::MatchMode &&
+        total_capacity >= (int)used_filaments.size()) {
         std::map<int, int> extruder_count;
         for (auto fil : used_filaments) {
             if (fil >= filament_map.size()) continue;
