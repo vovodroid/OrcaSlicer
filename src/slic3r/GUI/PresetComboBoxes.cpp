@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <vector>
 #include <string>
+#include <set>
+#include <utility>
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
 
@@ -510,8 +512,14 @@ bool PresetComboBox::add_ams_filaments(std::string selected, bool alias_name)
     bool selected_in_ams      = false;
     bool is_bbl_vendor_preset = m_preset_bundle->is_bbl_vendor();
     if (is_bbl_vendor_preset && !m_preset_bundle->filament_ams_list.empty()) {
+        // When a filament track switch is installed and calibrated, every AMS filament is reachable
+        // from both extruders, so present one deduplicated group instead of the Left/Right split.
+        bool fila_switch_ready = wxGetApp().sidebar().is_fila_switch_ready();
         bool dual_extruder   = (m_preset_bundle->filament_ams_list.begin()->first & 0x10000) == 0;
-        set_label_marker(Append(dual_extruder ? _L("Left filaments") : _L("AMS filament"), wxNullBitmap, DD_ITEM_STYLE_SPLIT_ITEM));
+        if (fila_switch_ready)
+            set_label_marker(Append(_L("AMS filaments"), wxNullBitmap, DD_ITEM_STYLE_SPLIT_ITEM));
+        else
+            set_label_marker(Append(dual_extruder ? _L("Left filaments") : _L("AMS filament"), wxNullBitmap, DD_ITEM_STYLE_SPLIT_ITEM));
         m_first_ams_filament = GetCount();
         auto &filaments      = m_collection->get_presets();
 
@@ -523,8 +531,12 @@ bool PresetComboBox::add_ams_filaments(std::string selected, bool alias_name)
                 icon_width = 32;
         }
 
+        // Deduplicate by (tray_name, filament_id) so a filament shared by both extruders is
+        // listed once when the switch is ready. Uses Orca's tray naming/lookup, not BBS's.
+        std::set<std::pair<std::string, std::string>> added_filaments;
+
         for (auto &entry : m_preset_bundle->filament_ams_list) {
-            if (dual_extruder && (entry.first & 0x10000)) {
+            if (!fila_switch_ready && dual_extruder && (entry.first & 0x10000)) {
                 dual_extruder = false;
                 set_label_marker(Append(_L("Right filaments"), wxNullBitmap, DD_ITEM_STYLE_SPLIT_ITEM));
             }
@@ -534,6 +546,13 @@ bool PresetComboBox::add_ams_filaments(std::string selected, bool alias_name)
             if (filament_id.empty()) {
                 BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(":  %1% 's filament_id is empty.") % name;
                 continue;
+            }
+            if (fila_switch_ready) {
+                // skip the external spool and collapse duplicates shared across both extruders
+                if (name == "Ext")
+                    continue;
+                if (!added_filaments.insert(std::make_pair(name, filament_id)).second)
+                    continue;
             }
             auto iter = std::find_if(filaments.begin(), filaments.end(),
                 [&filament_id, this](auto &f) { return f.is_compatible && m_collection->get_preset_base(f) == &f && f.filament_id == filament_id; });

@@ -244,6 +244,9 @@ public:
     bool        m_has_unmatch_filament {false};
     int         m_current_filament_id;
     ShowType    m_show_type{ShowType::RIGHT};
+    // Orca: set from update() — true when a Filament Track Switch is installed, which makes the
+    // external-spool slots un-pickable (false on any printer without a switch, so behavior is unchanged).
+    bool        m_fila_switch_installed{false};
     std::string m_tag_material;
     wxBoxSizer *m_sizer_main{nullptr};
     wxBoxSizer *m_sizer_ams{nullptr};

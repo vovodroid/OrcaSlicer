@@ -22,6 +22,7 @@
 #include "Plater.hpp"
 #include "BitmapCache.hpp"
 #include "BindDialog.hpp"
+#include "slic3r/GUI/DeviceCore/DevFilaSwitch.h"
 
 #include "DeviceCore/DevFilaSystem.h"
 #include "DeviceCore/DevNozzleRack.h"
@@ -974,6 +975,8 @@ void AmsMapingPopup::on_left_down(wxMouseEvent &evt)
         auto left = item->GetSize();
 
         if (pos.x > p_rect.x && pos.y > p_rect.y && pos.x < (p_rect.x + item->GetSize().x) && pos.y < (p_rect.y + item->GetSize().y)) {
+            // Orca: the external spool is un-pickable while a Filament Track Switch is installed (Apple hit-tests here).
+            if (m_fila_switch_installed && (item->m_ams_id == VIRTUAL_TRAY_MAIN_ID || item->m_ams_id == VIRTUAL_TRAY_DEPUTY_ID)) { return; }
             if (item->m_tray_data.type == TrayType::NORMAL) {
                 if (!m_ext_mapping_filatype_check && (item->m_ams_id == VIRTUAL_TRAY_MAIN_ID || item->m_ams_id == VIRTUAL_TRAY_DEPUTY_ID)) {
                     // Do nothing
@@ -1168,6 +1171,11 @@ void AmsMapingPopup::update(MachineObject* obj, const std::vector<FilamentInfo>&
 
     if (!obj) {return;}
     m_ams_remain_detect_flag = obj->GetFilaSystem()->IsDetectRemainEnabled();
+
+    // Orca: with a Filament Track Switch installed, filament routes through the switch and the external
+    // spool cannot be used, so its mapping slots are rendered greyed-out and un-pickable. Inert (false)
+    // on any printer without a switch — GetFilaSwitch()->IsInstalled() defaults to false.
+    m_fila_switch_installed = obj->GetFilaSwitch()->IsInstalled();
 
     for (auto& ams_container : m_amsmapping_container_list) {
         ams_container->Destroy();
@@ -1546,6 +1554,20 @@ void AmsMapingPopup::add_ext_ams_mapping(TrayData tray_data, MappingItem* item)
 #ifdef __APPLE__
     m_mapping_item_list.push_back(item);
 #endif
+
+    // Orca: a Filament Track Switch cannot route the external spool, so grey the ext slot out and make it
+    // un-pickable, with a tooltip explaining why (the click below is disabled; on_left_down also skips it).
+    if (m_fila_switch_installed) {
+        const wxString disp_name = (tray_data.type == THIRD) ? wxString("?")
+                                 : (tray_data.type == EMPTY) ? wxString("-")
+                                                             : wxString(tray_data.name);
+        item->set_data(m_tag_material, wxColour(0xEE, 0xEE, 0xEE), disp_name, false, tray_data, true);
+        item->SetToolTip(_L("External spools is not supported since Filament Track Switch has been installed. If you want to use external spool, please uninstall it."));
+        item->Bind(wxEVT_LEFT_DOWN, [](wxMouseEvent&) { /* un-pickable while the switch is installed */ });
+        item->set_tray_index(_L("Ext"));
+        return;
+    }
+
     // set button
     if (tray_data.type == NORMAL) {
         if (is_match_material(tray_data.filament_type)) {

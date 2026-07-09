@@ -57,7 +57,12 @@ static std::vector<std::string> s_project_options {
     "prime_volume_mode",
     "nozzle_volume_type",
     "filament_map_mode",
-    "filament_map"
+    "filament_map",
+    // Filament Track Switch device state: whether the switch is installed and ready, and
+    // whether dynamic per-nozzle filament mapping is active. Persisted with the project and
+    // restored from a saved 3mf; reset to false on load and set true only by live device sync.
+    "has_filament_switcher",
+    "enable_filament_dynamic_map"
 };
 
 //Orca: add custom as default
@@ -4322,6 +4327,10 @@ void PresetBundle::load_config_file_config(const std::string &name_or_path, bool
         }
     };
     clear_compatible_printers(config);
+
+    // Dynamic per-nozzle filament mapping reflects live device state, not a stored setting;
+    // drop it from any imported config so it only comes from the connected printer.
+    config.erase("enable_filament_dynamic_map");
 
 #if 0
     size_t num_extruders = (printer_technology == ptFFF) ?

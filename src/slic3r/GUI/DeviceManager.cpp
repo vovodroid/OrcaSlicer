@@ -869,6 +869,7 @@ void MachineObject::clear_version_info()
     laser_version_info = DevFirmwareVersionInfo();
     cutting_module_version_info = DevFirmwareVersionInfo();
     extinguish_version_info = DevFirmwareVersionInfo();
+    filatrack_version_info = DevFirmwareVersionInfo();
     module_vers.clear();
     // Drop cached rack-hotend (WTM) firmware alongside the module list.
     // Inert for non-rack printers (rack firmware map is empty).
@@ -890,6 +891,8 @@ void MachineObject::store_version_info(const DevFirmwareVersionInfo& info)
         // the rack upgrade UI can read per-nozzle versions. isWTM() is false for every non-rack
         // printer's modules, so this branch never fires outside H2C.
         m_nozzle_system->AddFirmwareInfoWTM(info);
+    } else if (info.isFilaTrackSwitch()) {
+        filatrack_version_info = info;
     }
 
     module_vers.emplace(info.name, info);
@@ -1572,7 +1575,7 @@ int MachineObject::check_resume_condition()
     }
     return 0;
 }
-int MachineObject::command_ams_change_filament(bool load, std::string ams_id, std::string slot_id, int old_temp, int new_temp)
+int MachineObject::command_ams_change_filament(bool load, std::string ams_id, std::string slot_id, int old_temp, int new_temp, std::optional<int> extruder_id)
 {
     json j;
     try {
@@ -1602,6 +1605,13 @@ int MachineObject::command_ams_change_filament(bool load, std::string ams_id, st
             }
 
             j["print"]["slot_id"] = atoi(slot_id.c_str());
+        }
+
+        // Filament Track Switch: route the load to the chosen extruder. Only present when the
+        // caller supplied a value (FTS-installed+ready path), so every other caller is unchanged.
+        if (extruder_id.has_value())
+        {
+            j["print"]["extruder_id"] = *extruder_id;
         }
 
     } catch (const std::exception &) {}
@@ -5085,6 +5095,7 @@ void MachineObject::parse_new_info(json print)
     // fun2 may have infinite length, use get_flag_bits_no_border
     if (!fun2.empty()) {
         is_support_print_with_emmc = get_flag_bits_no_border(fun2, 0) == 1;
+        is_support_check_track_switch_match_slice_printer = get_flag_bits_no_border(fun2, 19) == 1;
     }
 
     /*aux*/

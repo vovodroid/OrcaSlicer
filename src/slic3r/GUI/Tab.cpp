@@ -5636,6 +5636,18 @@ void TabPrinter::on_preset_loaded()
         if (use_default_nozzle_volume_type) {
             m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type")->values = current_printer.config.option<ConfigOptionEnumsGeneric>("default_nozzle_volume_type")->values;
         }
+
+        // Changing printer model drops any Filament Track Switch context from the previous
+        // printer; clear both device-derived flags so a switch-less printer never inherits a
+        // stale installed/active state (re-derived by device sync when a printer is connected).
+        if (auto* has_switcher = m_preset_bundle->project_config.opt<ConfigOptionBool>("has_filament_switcher"))
+            has_switcher->value = false;
+        if (auto* dynamic_map = m_preset_bundle->project_config.opt<ConfigOptionBool>("enable_filament_dynamic_map"))
+            dynamic_map->value = false;
+        // Orca: also clear the sidebar switcher status icon on printer-model change (mirrors BBS's
+        // reset_fila_switch on machine change); it re-derives from device sync once a printer connects.
+        if (wxGetApp().plater())
+            wxGetApp().plater()->sidebar().reset_fila_switch();
     }
 }
 

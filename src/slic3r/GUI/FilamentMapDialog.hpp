@@ -15,6 +15,7 @@ namespace GUI {
 class DragDropPanel;
 class Plater;
 class PartPlate;
+class SmartFilamentPanel;
 
 /**
  * @brief Try to pop up the filament map dialog before slicing.
@@ -78,6 +79,9 @@ private:
     Button* m_ok_btn;
     Button* m_cancel_btn;
     CheckBox* m_checkbox;
+    SmartFilamentPanel* m_smart_filament{nullptr};
+
+    bool m_fila_switch_ready{false};
 
     PageType m_page_type;
 

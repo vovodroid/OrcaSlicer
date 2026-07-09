@@ -346,6 +346,15 @@ void DevFilaSystemParser::ParseV1_0(const json& jj, MachineObject* obj, DevFilaS
 
             if (!key_field_only)
             {
+                // Newer firmware sends the exact filament-change step sequence in ams.cfs, so the
+                // client no longer hardcodes the steps per model. Absent on current firmware, which
+                // keeps the list empty and the legacy hardcoded/ams_status_sub step path in effect.
+                if (jj["ams"].contains("cfs")) {
+                    system->m_filament_change_steps = DevJsonValParser::GetVal<std::vector<DevFilamentStep>>(jj["ams"], "cfs");
+                } else {
+                    system->m_filament_change_steps.clear();
+                }
+
                 if (jj["ams"].contains("tray_read_done_bits"))
                 {
                     obj->tray_read_done_bits = stol(jj["ams"]["tray_read_done_bits"].get<std::string>(), nullptr, 16);
@@ -403,17 +412,43 @@ void DevFilaSystemParser::ParseV1_0(const json& jj, MachineObject* obj, DevFilaS
                     int type_id = 1;   // 0:dummy 1:ams 2:ams-lite 3:n3f 4:n3s
 
                     /*ams info*/
+                    std::set<int> binded_extruder_set;
+                    std::optional<DevFilaSwitch::SwitchPos> binded_switcher_pos;
                     if (it->contains("info")) {
                         const std::string& info = (*it)["info"].get<std::string>();
                         type_id = DevUtil::get_flag_bits(info, 0, 4);
                         extuder_id = DevUtil::get_flag_bits(info, 8, 4);
+                        if (extuder_id == 0xE && obj->GetFilaSwitch()->IsInstalled()) {
+                            int bind_switch_in = DevUtil::get_flag_bits(info, 24, 4);
+                            if (bind_switch_in == 0 || bind_switch_in == 1) {
+                                binded_extruder_set = { MAIN_EXTRUDER_ID, DEPUTY_EXTRUDER_ID };
+                            }
+
+                            if (bind_switch_in == 0) {
+                                binded_switcher_pos = DevFilaSwitch::SwitchPos::POS_IN_B;
+                            } else if (bind_switch_in == 1) {
+                                binded_switcher_pos = DevFilaSwitch::SwitchPos::POS_IN_A;
+                            }
+
+                            // Orca: the switch feeds every AMS to both extruders; pin a deterministic
+                            // single-extruder id so legacy GetExtruderId() consumers keep a valid value
+                            // while switch-aware code reads the binding set instead.
+                            extuder_id = MAIN_EXTRUDER_ID;
+                        } else if (extuder_id != 0xE) {
+                            binded_extruder_set = { extuder_id };
+                        }
                     } else {
                         if (!obj->is_enable_ams_np && obj->get_printer_ams_type() == "f1") {
                             type_id = DevAms::AMS_LITE;
                         }
+                        binded_extruder_set = { MAIN_EXTRUDER_ID };
                     }
 
                     /*AMS without initialization*/
+                    // Orca: an AMS reporting extruder 0xE without a Filament Track Switch installed has
+                    // no usable extruder binding; drop it, preserving the existing display for
+                    // half-initialized printers. With the switch installed the 0xE case is remapped
+                    // above to both extruders and falls through to normal handling.
                     if (extuder_id == 0xE)
                     {
                         ams_id_set.erase(ams_id);
@@ -444,6 +479,13 @@ void DevFilaSystemParser::ParseV1_0(const json& jj, MachineObject* obj, DevFilaS
 
                     /*set ams type flag*/
                     curr_ams->SetAmsType(type_id);
+
+                    // Refresh the switch-aware extruder binding on every push (both create and
+                    // update paths) so it can't go stale after an AMS is re-homed to another
+                    // extruder. Without the switch the set holds the single bound extruder and
+                    // the track position stays empty.
+                    curr_ams->m_binded_extruder_set = binded_extruder_set;
+                    curr_ams->m_binded_switcher_pos = binded_switcher_pos;
 
 
                     /*set ams exist flag*/

@@ -28,6 +28,7 @@ static const std::unordered_map<wxString, wxString> ACCESSORY_DISPLAY_STR = {
     {"O2L_ACM", "Active Cutting Module"},
     {"O2L_UCM", "Ultrasonic Cutting Module"},
     {"O2L-AFP", L("Auto Fire Extinguishing System")},
+    {"O2L-FTS", L("Filament Track Switch")},
 };
 
 enum FIRMWARE_STASUS
@@ -217,6 +218,7 @@ MachineInfoPanel::MachineInfoPanel(wxWindow* parent, wxWindowID id, const wxPoin
     createLaserWidgets(m_main_left_sizer);
     createAirPumpWidgets(m_main_left_sizer);
     createExtinguishWidgets(m_main_left_sizer);
+    createFilaTrackSwitchWidgets(m_main_left_sizer);
 
     // nozzle rack widgets (H2C induction hotend rack; hidden unless GetNozzleRack()->IsSupported())
     createNozzleRackWidgets(m_main_left_sizer);
@@ -406,6 +408,27 @@ void MachineInfoPanel::createExtinguishWidgets(wxBoxSizer* main_left_sizer)
     main_left_sizer->Add(m_extinguish_sizer, 0, wxEXPAND, 0);
 }
 
+void MachineInfoPanel::createFilaTrackSwitchWidgets(wxBoxSizer* main_left_sizer)
+{
+    m_filatrack_line_above = new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxLI_HORIZONTAL);
+    m_filatrack_line_above->SetBackgroundColour(wxColour(206, 206, 206));
+    main_left_sizer->Add(m_filatrack_line_above, 0, wxEXPAND | wxLEFT, FromDIP(40));
+
+    m_filatrack_img = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap, wxDefaultPosition, wxSize(FromDIP(200), FromDIP(200)));
+    m_filatrack_img->SetBitmap(m_img_filatrack.bmp());
+
+    wxBoxSizer* content_sizer = new wxBoxSizer(wxVERTICAL);
+    content_sizer->Add(0, 40, 0, wxEXPAND, FromDIP(5));
+    m_filatrack_version = new uiDeviceUpdateVersion(this, wxID_ANY);
+    content_sizer->Add(m_filatrack_version, 0, wxEXPAND, 0);
+
+    m_filatrack_sizer = new wxBoxSizer(wxHORIZONTAL);
+    m_filatrack_sizer->Add(m_filatrack_img, 0, wxALIGN_TOP | wxALL, FromDIP(5));
+    m_filatrack_sizer->Add(content_sizer, 1, wxEXPAND, 0);
+
+    main_left_sizer->Add(m_filatrack_sizer, 0, wxEXPAND, 0);
+}
+
 void MachineInfoPanel::msw_rescale()
 {
     rescale_bitmaps();
@@ -435,6 +458,7 @@ void MachineInfoPanel::init_bitmaps()
         m_img_laser          = ScalableBitmap(this, "laser", 160);
         m_img_cutting        = ScalableBitmap(this, "cut", 160);
         m_img_extinguish     = ScalableBitmap(this, "extinguish", 160);
+        m_img_filatrack      = ScalableBitmap(this, "filament_track_switch", 160);
         m_img_nozzle_rack    = ScalableBitmap(this, "nozzle_rack", 160);
 
         upgrade_green_icon   = ScalableBitmap(this, "monitor_upgrade_online", 5);
@@ -544,6 +568,7 @@ void MachineInfoPanel::update(MachineObject* obj)
         update_cut(obj);
         update_laszer(obj);
         update_extinguish(obj);
+        update_filatrack(obj);
         update_nozzle_rack(obj);
 
         //update progress
@@ -1129,6 +1154,19 @@ void MachineInfoPanel::update_extinguish(MachineObject* obj)
     }
 }
 
+void MachineInfoPanel::update_filatrack(MachineObject* obj)
+{
+    if (obj && obj->filatrack_version_info.isValid())
+    {
+        m_filatrack_version->UpdateInfo(obj->filatrack_version_info);
+        show_filatrack(true);
+    }
+    else
+    {
+        show_filatrack(false);
+    }
+}
+
 void MachineInfoPanel::show_status(int status, std::string upgrade_status_str)
 {
     if (last_status == status && last_status_str == upgrade_status_str) return;
@@ -1260,6 +1298,16 @@ void MachineInfoPanel::show_extinguish(bool show)
         m_extinguish_img->Show(show);
         m_extinguish_line_above->Show(show);
         m_extinguish_version->Show(show);
+    }
+}
+
+void MachineInfoPanel::show_filatrack(bool show)
+{
+    if (m_filatrack_version->IsShown() != show)
+    {
+        m_filatrack_img->Show(show);
+        m_filatrack_line_above->Show(show);
+        m_filatrack_version->Show(show);
     }
 }
 

@@ -41,6 +41,31 @@ enum AmsStatusMain
     AMS_STATUS_MAIN_UNKNOWN = 0xFF,
 };
 
+// Device-numbered filament-change step codes. Newer firmware reports the exact change-step
+// sequence through the AMS (ams.cfs), keyed by these codes, instead of the client hardcoding
+// steps per model. Distinct from the legacy GUI-side Slic3r::GUI::FilamentStep enum.
+// STEP_CHECK_POSITION and STEP_CONFIRM_EXTRUDED share code 0x08 by device design.
+enum DevFilamentStep
+{
+    STEP_IDLE = 0x00,
+    STEP_PAUSE = 0x01,
+    STEP_HEAT_NOZZLE = 0x02,
+    STEP_CUT_FILAMENT = 0x03,
+    STEP_PULL_CURR_FILAMENT = 0x04,
+    STEP_PUSH_NEW_FILAMENT = 0x05,
+    STEP_GRAB_NEW_FILAMENT = 0x06,
+    STEP_PURGE_OLD_FILAMENT = 0x07,
+    STEP_CHECK_POSITION = 0x08,
+    STEP_SWITCH_EXTRUDER = 0x09,
+    STEP_SWITCH_HOTEND = 0x0A,
+    STEP_AMS_FILA_COOLING = 0x0B,
+    STEP_PUSH_SWITCHER_FILA = 0x0C,
+    STEP_PULL_SWITCHER_FILA = 0x0D,
+    STEP_SWITCHER_SWITCH = 0x0E,
+    STEP_CONFIRM_EXTRUDED = 0x08,
+    STEP_COUNT,
+};
+
 // Slots and Tray
 #define VIRTUAL_TRAY_MAIN_ID    255
 #define VIRTUAL_TRAY_DEPUTY_ID  254

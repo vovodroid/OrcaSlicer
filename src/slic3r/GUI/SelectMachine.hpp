@@ -526,6 +526,12 @@ public:
     bool CheckErrorSyncNozzleMappingResultV0(MachineObject* obj_);
     void clear_nozzle_mapping();
     bool use_dynamic_nozzle_map() const;
+
+    // Filament Track Switch: warn when the sliced switch state doesn't match the installed
+    // hardware, and (for dynamic nozzle mapping) block Send when the switch is missing or not
+    // set up. slicing_with_fila_switch() reports whether the file was sliced assuming a switch.
+    bool slicing_with_fila_switch() const;
+    bool CheckErrorDynamicSwitchNozzle(MachineObject* obj_);
     void on_flow_cali_option_changed();
 
     PrintFromType get_print_type() {return m_print_type;};

@@ -18656,3 +18656,69 @@ msgstr ""
 #, possible-c-format, possible-boost-format
 msgid "The current nozzle mapping may produce an extra %0.2f g of waste."
 msgstr ""
+
+msgid ""
+"Filament switcher detected. All AMS filaments are now available for both "
+"extruders. The slicer will auto-assign for optimal printing. "
+msgstr ""
+
+msgid ""
+"A filament switcher is detected but not calibrated and thus currently "
+"unavailable. Please calibrate it on the printer and synchronize before use. "
+msgstr ""
+
+msgid ""
+"The Filament Track Switch installed on the printer does not match the slicing "
+"file. Please re-slice to avoid print quality issues."
+msgstr ""
+
+msgid "This print requires a Filament Track Switch. Please install it first."
+msgstr ""
+
+msgid "The Filament Track Switch has not been setup. Please setup it first."
+msgstr ""
+
+msgid "\"Load\" or \"Unload\" is not supported for external spool while using Filament Track Switch."
+msgstr ""
+
+msgid "The Filament Track Switch has not been setup. Please setup on printer."
+msgstr ""
+
+msgid "Load %s to "
+msgstr ""
+
+msgid "AMS filaments"
+msgstr ""
+
+msgid "Fila Saving"
+msgstr ""
+
+msgid "Enable smart filament assign: Assign one filament to multiple nozzles to maximize savings"
+msgstr ""
+
+msgid "Filament Track Switch"
+msgstr ""
+
+msgid "AMS has not been initialized. Please initialize it before use."
+msgstr ""
+
+msgid "External spools is not supported since Filament Track Switch has been installed. If you want to use external spool, please uninstall it."
+msgstr ""
+
+msgid "Switch"
+msgstr ""
+
+msgid "hotend"
+msgstr ""
+
+msgid "Wait for AMS cooling"
+msgstr ""
+
+msgid "Switch current filament at Filament Track Switch"
+msgstr ""
+
+msgid "Pull back current filament at Filament Track Switch"
+msgstr ""
+
+msgid "Switch track at Filament Track Switch"
+msgstr ""

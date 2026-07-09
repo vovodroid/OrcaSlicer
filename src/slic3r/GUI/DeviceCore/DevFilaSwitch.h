@@ -49,6 +49,11 @@ public:
 public:
     bool IsInstalled() const { return m_is_installed; };
 
+    // Ready once installed and every AMS has resolved both its extruder binding and its
+    // switcher track position from the device. The send dialog and sidebar sync UX only
+    // treat the switch as usable when this is true.
+    bool IsReady() const;
+
     std::optional<bool> IsInA_HasFilament() const { return m_in_a_has_filament; };
     std::optional<bool> IsInB_HasFilament() const { return m_in_b_has_filament; };
 
@@ -66,12 +71,6 @@ public:
 
     void Reset();
     void ParseFilaSwitchInfo(const nlohmann::json& print_jj);
-
-    // NOTE: an IsReady() accessor is intentionally omitted. It would walk
-    // GetFilaSystem()->GetAmsList() calling GetBindedExtruderSet()/GetSwitcherPos(),
-    // AMS filament-switch binding accessors Orca's DevFilaSystem does not yet carry.
-    // It is unused by the filament blacklist; port it alongside the filament-switch
-    // device-sync UI that needs those accessors.
 
 private:
     MachineObject* m_owner;

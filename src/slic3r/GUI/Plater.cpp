@@ -564,6 +564,9 @@ struct Sidebar::priv
     ScalableButton* m_printer_setting = nullptr;
     wxStaticText *  m_text_printer_settings = nullptr;
     wxPanel* m_panel_printer_content = nullptr;
+    // Filament Track Switch status overlay: an icon floated over the left/single extruder AMS area,
+    // shown only when the switch is installed (green when ready, red when not calibrated).
+    wxStaticBitmap* extruder_separator_icon = nullptr;
 
     ObjectList          *m_object_list{ nullptr };
     ObjectSettings      *object_settings{ nullptr };
@@ -593,6 +596,19 @@ struct Sidebar::priv
     std::optional<NozzleOption> get_nozzle_options(MachineObject* obj, int extruder_count, bool support_multi_nozzle, bool is_manual);
     bool switch_diameter(bool single);
     void update_sync_status(const MachineObject* obj);
+
+    // Filament Track Switch (H2-family accessory): true only when the connected printer is the
+    // selected one, online, and reports the switch installed and calibrated.
+    bool is_fila_switch_ready();
+    // One-time info tip when the switch is ready, and a not-calibrated warning otherwise.
+    void show_filament_switcher_dialog(bool is_ready, bool is_manual);
+    void show_fila_switch_msg(bool ready);
+    bool fila_switch_warning_shown = false;
+    // Show/hide and reposition the switcher status icon; caches the last state to avoid churn.
+    void update_extruder_separator_icon(bool show, bool ready);
+    // Orca: BBS resets the switcher UI from DeviceManager::OnSelectedMachineChanged, which Orca lacks.
+    // Track the last-synced device id here so update_sync_status can detect a machine change.
+    std::string last_sync_dev_id;
 
 #ifdef _WIN32
     wxString btn_reslice_tip;
@@ -641,6 +657,18 @@ void Sidebar::priv::layout_printer(bool isBBL, bool isDual)
         extruder_dual_sizer->Add(left_extruder->sizer, 1, wxEXPAND, 0);
         extruder_dual_sizer->AddSpacer(FromDIP(4));
         extruder_dual_sizer->Add(right_extruder->sizer, 1, wxEXPAND, 0);
+
+        // Filament Track Switch status icon, floated over the extruder AMS area (positioned in
+        // update_extruder_separator_icon). Created hidden; a click re-shows the ready/not-ready tip.
+        if (!extruder_separator_icon) {
+            auto bitmap = ScalableBitmap(m_panel_printer_content, "fila_switch", 10);
+            extruder_separator_icon = new wxStaticBitmap(m_panel_printer_content, wxID_ANY, bitmap.bmp(), wxDefaultPosition, bitmap.GetBmpSize());
+            extruder_separator_icon->Hide();
+            extruder_separator_icon->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& evt) {
+                show_fila_switch_msg(is_fila_switch_ready());
+                evt.Skip();
+            });
+        }
 
         // single
         extruder_single_sizer = single_extruder->sizer;
@@ -1610,6 +1638,105 @@ std::optional<NozzleOption> Sidebar::priv::get_nozzle_options(MachineObject* obj
     return nozzle_option;
 }
 
+bool Sidebar::priv::is_fila_switch_ready()
+{
+    if (!wxGetApp().plater()->is_same_printer_for_connected_and_selected(false))
+        return false;
+    auto device_manager = wxGetApp().getDeviceManager();
+    if (device_manager == nullptr)
+        return false;
+    auto obj = device_manager->get_selected_machine();
+    if (obj == nullptr || !obj->is_online())
+        return false;
+    auto fila_switch = obj->GetFilaSwitch();
+    if (fila_switch == nullptr)
+        return false;
+    return fila_switch->IsInstalled() && fila_switch->IsReady();
+}
+
+void Sidebar::priv::show_fila_switch_msg(bool ready)
+{
+    wxString msg = ready ? _L("Filament switcher detected. All AMS filaments are now available for both extruders. "
+                              "The slicer will auto-assign for optimal printing. ") :
+                           _L("A filament switcher is detected but not calibrated and thus currently unavailable. "
+                              "Please calibrate it on the printer and synchronize before use. ");
+
+    long style = ready ? (wxICON_INFORMATION | wxOK) : (wxICON_WARNING | wxOK);
+    // Orca: drop the vendor "Learn more" tracking link; there is no Orca help page for the switch yet.
+    MessageDialog dlg(static_cast<wxWindow *>(wxGetApp().mainframe), msg, _L("Tips"), style);
+    dlg.CenterOnParent();
+    dlg.ShowModal();
+}
+
+void Sidebar::priv::show_filament_switcher_dialog(bool is_ready, bool is_manual)
+{
+    if (is_ready) {
+        // Show the "switch is ready" tip only once, ever.
+        if (wxGetApp().app_config->get("show_fila_switch_tips") == "true") {
+            wxGetApp().app_config->set("show_fila_switch_tips", "false");
+            show_fila_switch_msg(true);
+        }
+    } else {
+        // A manual sync always warns; an automatic update warns once per session.
+        if (is_manual || !fila_switch_warning_shown) {
+            fila_switch_warning_shown = true;
+            show_fila_switch_msg(false);
+        }
+    }
+}
+
+void Sidebar::priv::update_extruder_separator_icon(bool show, bool ready)
+{
+    if (!extruder_separator_icon)
+        return;
+    static bool last_show  = false;
+    static bool last_ready = false;
+    static bool first_call = true;
+
+    if (!first_call && last_show == show && last_ready == ready)
+        return;
+    first_call = false;
+    last_show  = show;
+    last_ready = ready;
+
+    // Never overlay the icon when the connected printer is not the selected preset.
+    if (!wxGetApp().plater()->is_same_printer_for_connected_and_selected(false)) {
+        extruder_separator_icon->Hide();
+        if (m_panel_printer_content)
+            m_panel_printer_content->Refresh();
+        return;
+    }
+
+    if (show && left_extruder && left_extruder->hsizer_ams && left_extruder->sizer) {
+        // Orca: center the icon over the seam between the two extruder cards, vertically aligned with
+        // the AMS row. left_extruder and the icon share m_panel_printer_content as parent, so
+        // left_extruder->GetPosition() and the icon position live in the same coordinate space.
+        wxPoint left_box_pos  = left_extruder->GetPosition();
+        wxPoint ams_local_pos = left_extruder->hsizer_ams->GetPosition();
+        wxSize  left_size     = left_extruder->sizer->GetSize();
+        wxSize  ams_size      = left_extruder->hsizer_ams->GetSize();
+        wxSize  icon_size     = extruder_separator_icon->GetSize();
+        int     ams_abs_y     = left_box_pos.y + ams_local_pos.y + FromDIP(4);
+        int     center_x      = left_size.GetWidth() + FromDIP(6);
+        int     center_y      = ams_abs_y + (ams_size.GetHeight() - icon_size.GetHeight()) / 2;
+        center_x -= icon_size.GetWidth() / 2;
+        center_y -= icon_size.GetHeight() / 2;
+        extruder_separator_icon->SetPosition(wxPoint(center_x, center_y));
+
+        auto normal_bitmap = ScalableBitmap(m_panel_printer_content, "fila_switch", 10);
+        auto error_bitmap  = ScalableBitmap(m_panel_printer_content, "fila_switch_error", 10);
+        extruder_separator_icon->SetBitmap(ready ? normal_bitmap.bmp() : error_bitmap.bmp());
+
+        extruder_separator_icon->Show();
+        extruder_separator_icon->Raise();
+    } else {
+        extruder_separator_icon->Hide();
+    }
+
+    if (m_panel_printer_content)
+        m_panel_printer_content->Refresh();
+}
+
 bool Sidebar::priv::sync_extruder_list(bool &only_external_material, bool is_manual)
 {
     MachineObject *obj = wxGetApp().getDeviceManager()->get_selected_machine();
@@ -1728,18 +1855,29 @@ bool Sidebar::priv::sync_extruder_list(bool &only_external_material, bool is_man
     }
 
     int deputy_4 = 0, main_4 = 0, deputy_1 = 0, main_1 = 0;
+    const bool switch_ready = is_fila_switch_ready();
     for (auto ams : obj->GetFilaSystem()->GetAmsList()) {
-        // Main (first) extruder at right
-        if (ams.second->GetExtruderId() == 0) {
-            if (ams.second->GetAmsType() == DevAms::N3S) // N3S
-                ++main_1;
-            else
-                ++main_4;
-        } else if (ams.second->GetExtruderId() == 1) {
-            if (ams.second->GetAmsType() == DevAms::N3S) // N3S
-                ++deputy_1;
-            else
-                ++deputy_4;
+        for (int extruder_id : ams.second->GetBindedExtruderSet()) {
+            // With the switch installed every AMS binds to both extruders; once it is ready, attribute
+            // each to the extruder its input track feeds so the per-extruder counts stay correct. Without
+            // a switch the binding set is the single extruder and the filter is skipped, matching the
+            // pre-switch counts.
+            if (switch_ready) {
+                auto switcher_pos = ams.second->GetSwitcherPos();
+                if (!switcher_pos)
+                    continue;
+                int switcher_id = obj->is_main_extruder_on_left() ? (1 - static_cast<int>(switcher_pos.value()))
+                                                                  : static_cast<int>(switcher_pos.value());
+                if (extruder_id != switcher_id)
+                    continue;
+            }
+            const bool is_n3s = ams.second->GetAmsType() == DevAms::N3S;
+            // Main (first) extruder is id 0, deputy is id 1.
+            if (extruder_id == 0) {
+                if (is_n3s) ++main_1; else ++main_4;
+            } else if (extruder_id == 1) {
+                if (is_n3s) ++deputy_1; else ++deputy_4;
+            }
         }
     }
     only_external_material = !obj->GetFilaSystem()->HasAms();
@@ -1774,6 +1912,22 @@ bool Sidebar::priv::sync_extruder_list(bool &only_external_material, bool is_man
         printer_tab->set_extruder_volume_type(idx, target_types[idx]);
     }
 
+    if (extruder_nums > 1) {
+        auto fila_switch = obj->GetFilaSwitch();
+        if (fila_switch->IsInstalled())
+            show_filament_switcher_dialog(fila_switch->IsReady(), is_manual);
+        else
+            fila_switch_warning_shown = false;
+    }
+
+    // Copy the live switch state into the project so slicing and the send dialog honor it. Both
+    // resolve to false unless the switch is installed and calibrated, so nothing changes without one.
+    auto &project_config = wxGetApp().preset_bundle->project_config;
+    if (auto *dynamic_filament = project_config.opt<ConfigOptionBool>("enable_filament_dynamic_map"))
+        dynamic_filament->value = is_fila_switch_ready();
+    if (auto *has_switcher = project_config.opt<ConfigOptionBool>("has_filament_switcher"))
+        has_switcher->value = is_fila_switch_ready();
+
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << __LINE__ << " finish sync_extruder_list";
     return true;
 }
@@ -1791,6 +1945,7 @@ void Sidebar::priv::update_sync_status(const MachineObject *obj)
         right_extruder->sync_ams(nullptr, {}, {});
         single_extruder->ShowBadge(false);
         single_extruder->sync_ams(nullptr, {}, {});
+        update_extruder_separator_icon(false, false);
         //btn_sync_printer->SetBorderColor(not_synced_colour);
         //btn_sync_printer->SetIcon("printer_sync");
         m_printer_bbl_sync->SetBitmap_("printer_sync_not");
@@ -1799,6 +1954,16 @@ void Sidebar::priv::update_sync_status(const MachineObject *obj)
     if (!obj || !obj->is_info_ready()) {
         clear_all_sync_status();
         return;
+    }
+
+    // Orca: replaces BBS's reset_fila_switch hook on DeviceManager::OnSelectedMachineChanged (absent
+    // in Orca). Selection/MQTT updates all funnel through here, so a change of the selected device id
+    // resets the switcher icon and the once-per-session not-ready warning for the new printer.
+    const std::string cur_dev_id = obj->get_dev_id();
+    if (cur_dev_id != last_sync_dev_id) {
+        last_sync_dev_id = cur_dev_id;
+        update_extruder_separator_icon(false, false);
+        fila_switch_warning_shown = false;
     }
 
     PresetBundle *preset_bundle = wxGetApp().preset_bundle;
@@ -1852,6 +2017,21 @@ void Sidebar::priv::update_sync_status(const MachineObject *obj)
     if (extruder_nums != obj->GetExtderSystem()->GetTotalExtderCount())
         return;
 
+    // Filament Track Switch: only ever surfaced on multi-extruder machines. When installed, tip/warn
+    // and show the status icon (green ready / red not-calibrated); when absent the icon stays hidden.
+    // Inert on any printer without a switch: GetFilaSwitch()->IsInstalled() is false.
+    const bool fila_switch_flag = is_fila_switch_ready();
+    if (extruder_nums > 1) {
+        auto fila_switch = obj->GetFilaSwitch();
+        if (fila_switch->IsInstalled()) {
+            show_filament_switcher_dialog(fila_switch->IsReady(), false);
+            update_extruder_separator_icon(true, fila_switch->IsReady());
+        } else {
+            update_extruder_separator_icon(false, false);
+            fila_switch_warning_shown = false;
+        }
+    }
+
     std::vector<ExtruderInfo> extruder_infos(extruder_nums);
     std::vector<int> nozzle_volume_types = wxGetApp().preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type")->values;
     //for (size_t i = 0; i < nozzle_volume_types.size(); ++i) {
@@ -1893,16 +2073,34 @@ void Sidebar::priv::update_sync_status(const MachineObject *obj)
         machine_extruder_infos[extruder.GetExtId()].diameter          = extruder.GetNozzleDiameter();
     }
     for (auto &item : obj->GetFilaSystem()->GetAmsList()) {
-        if (item.second->GetExtruderId() >= machine_extruder_infos.size())
+        int extruder_id;
+        // With the switch ready every AMS feeds both extruders, so attribute each to the extruder its
+        // input track feeds. Without a switch the binding is a single extruder
+        // (GetUniqueBindedExtruderId() == GetExtruderId()) and the switcher position is empty, so this
+        // yields the same attribution as before.
+        if (fila_switch_flag) {
+            auto switcher_pos = item.second->GetSwitcherPos();
+            if (!switcher_pos)
+                continue;
+            extruder_id = obj->is_main_extruder_on_left() ? (1 - static_cast<int>(switcher_pos.value()))
+                                                          : static_cast<int>(switcher_pos.value());
+        } else {
+            const auto &uniq_extruder_id = item.second->GetUniqueBindedExtruderId();
+            if (!uniq_extruder_id)
+                continue;
+            extruder_id = uniq_extruder_id.value();
+        }
+
+        if (extruder_id >= machine_extruder_infos.size())
             continue;
 
         if (item.second->GetAmsType() == DevAms::N3S)
         { // N3S
-            machine_extruder_infos[item.second->GetExtruderId()].ams_1++;
-            machine_extruder_infos[item.second->GetExtruderId()].ams_v1.push_back(item.second);
+            machine_extruder_infos[extruder_id].ams_1++;
+            machine_extruder_infos[extruder_id].ams_v1.push_back(item.second);
         } else {
-            machine_extruder_infos[item.second->GetExtruderId()].ams_4++;
-            machine_extruder_infos[item.second->GetExtruderId()].ams_v4.push_back(item.second);
+            machine_extruder_infos[extruder_id].ams_4++;
+            machine_extruder_infos[extruder_id].ams_v4.push_back(item.second);
         }
     }
 
@@ -1955,6 +2153,20 @@ void Sidebar::priv::update_sync_status(const MachineObject *obj)
     //    btn_sync_printer->SetBorderColor(not_synced_colour);
     //    btn_sync_printer->SetIcon("printer_sync");
         m_printer_bbl_sync->SetBitmap_("printer_sync_not");
+    }
+
+    // When the switch is ready every AMS filament is available to both extruders; refresh the
+    // filament combos whenever the AMS list changes so both extruders pick up the full set.
+    if (fila_switch_flag) {
+        static std::map<int, DynamicPrintConfig> last_filament_ams_list;
+        bool is_same_ams_list = last_filament_ams_list == wxGetApp().preset_bundle->filament_ams_list;
+        if (!is_same_ams_list)
+            last_filament_ams_list = wxGetApp().preset_bundle->filament_ams_list;
+        const auto print_tech = wxGetApp().preset_bundle->printers.get_edited_preset().printer_technology();
+        if (print_tech == ptFFF && !is_same_ams_list) {
+            for (PlaterPresetComboBox *cb : combos_filament)
+                cb->update();
+        }
     }
  }
 
@@ -2408,6 +2620,24 @@ Sidebar::Sidebar(Plater *parent)
         p->left_extruder  = new ExtruderGroup(p->m_panel_printer_content, 0, _L("Left Nozzle"));
         p->right_extruder = new ExtruderGroup(p->m_panel_printer_content, 1, _L("Right Nozzle"));
         p->single_extruder = new ExtruderGroup(p->m_panel_printer_content, -1, _L("Nozzle"));
+        // Orca: keep the floating switcher icon aligned with the left extruder's AMS row when the
+        // extruder card is resized (the overlay is absolutely positioned, not managed by a sizer).
+        p->left_extruder->Bind(wxEVT_SIZE, [this](wxSizeEvent &evt) {
+            if (p->extruder_separator_icon && p->extruder_separator_icon->IsShown()) {
+                wxPoint left_box_pos  = p->left_extruder->GetPosition();
+                wxPoint ams_local_pos = p->left_extruder->hsizer_ams->GetPosition();
+                wxSize  left_size     = p->left_extruder->sizer->GetSize();
+                wxSize  ams_size      = p->left_extruder->hsizer_ams->GetSize();
+                wxSize  icon_size     = p->extruder_separator_icon->GetSize();
+                int     ams_abs_y     = left_box_pos.y + ams_local_pos.y + FromDIP(4);
+                int     center_x      = left_size.GetWidth() + FromDIP(6) - icon_size.GetWidth() / 2;
+                int     center_y      = ams_abs_y + (ams_size.GetHeight() - icon_size.GetHeight()) / 2 - icon_size.GetHeight() / 2;
+                p->extruder_separator_icon->SetPosition(wxPoint(center_x, center_y));
+                if (p->m_panel_printer_content)
+                    p->m_panel_printer_content->Refresh();
+            }
+            evt.Skip();
+        });
         auto switch_diameter = [this](wxCommandEvent & evt) {
             auto extruder = dynamic_cast<ExtruderGroup *>(dynamic_cast<ComboBox *>(evt.GetEventObject())->GetParent());
             p->is_switching_diameter = true;
@@ -3819,6 +4049,16 @@ bool Sidebar::sync_extruder_list()
 {
     bool only_external_material;
     return p->sync_extruder_list(only_external_material);
+}
+
+bool Sidebar::is_fila_switch_ready()
+{
+    return p->is_fila_switch_ready();
+}
+
+void Sidebar::reset_fila_switch()
+{
+    p->update_extruder_separator_icon(false, false);
 }
 
 bool Sidebar::need_auto_sync_extruder_list_after_connect_priner(const MachineObject *obj)
@@ -6947,6 +7187,14 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
                                         }
                                     }
                                 }
+
+                                // Filament Track Switch state is derived live from the connected
+                                // printer; a loaded project must not carry a stale installed/active
+                                // flag, so clear both and let device sync re-derive them.
+                                if (auto* has_switcher = proj_cfg.opt<ConfigOptionBool>("has_filament_switcher"))
+                                    has_switcher->value = false;
+                                if (auto* dynamic_map = proj_cfg.opt<ConfigOptionBool>("enable_filament_dynamic_map"))
+                                    dynamic_map->value = false;
                             }
                             // Update filament combobox after loading config
                             wxGetApp().plater()->sidebar().update_presets(Preset::TYPE_FILAMENT);

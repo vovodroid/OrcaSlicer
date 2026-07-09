@@ -9,6 +9,19 @@ namespace Slic3r {
 
 DevFilaSwitch::DevFilaSwitch(MachineObject *owner) { m_owner = owner; }
 
+bool DevFilaSwitch::IsReady() const
+{
+    if (!m_is_installed) { return false; }
+
+    const auto& ams_list = m_owner->GetFilaSystem()->GetAmsList();
+    for (const auto& ams_item : ams_list) {
+        if (ams_item.second->GetBindedExtruderSet().empty()) { return false; }
+        if (!ams_item.second->GetSwitcherPos().has_value()) { return false; }
+    }
+
+    return true;
+}
+
 void DevFilaSwitch::Reset()
 {
     m_is_installed = false;

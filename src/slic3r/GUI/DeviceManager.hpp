@@ -8,6 +8,7 @@
 #include <memory>
 #include <chrono>
 #include <unordered_set>
+#include <optional>
 #include <boost/thread.hpp>
 #include <boost/nowide/fstream.hpp>
 #include "nlohmann/json.hpp"
@@ -378,6 +379,7 @@ public:
     DevFirmwareVersionInfo laser_version_info;
     DevFirmwareVersionInfo cutting_module_version_info;
     DevFirmwareVersionInfo extinguish_version_info;
+    DevFirmwareVersionInfo filatrack_version_info;
     std::map<std::string, DevFirmwareVersionInfo> module_vers;
     std::map<std::string, DevFirmwareVersionInfo> new_ver_list;
     bool    m_new_ver_list_exist = false;
@@ -633,6 +635,7 @@ public:
 
     // fun2
     bool is_support_print_with_emmc{false};
+    bool is_support_check_track_switch_match_slice_printer{false};
 
     bool installed_upgrade_kit{false};
     int  bed_temperature_limit = -1;
@@ -746,7 +749,7 @@ public:
     int check_resume_condition();
     // ams controls
     //int command_ams_switch(int tray_index, int old_temp = 210, int new_temp = 210);
-    int command_ams_change_filament(bool load, std::string ams_id, std::string slot_id, int old_temp = 210, int new_temp = 210);
+    int command_ams_change_filament(bool load, std::string ams_id, std::string slot_id, int old_temp = 210, int new_temp = 210, std::optional<int> extruder_id = std::nullopt);
     int command_ams_user_settings(bool start_read_opt, bool tray_read_opt, bool remain_flag = false);
     int command_ams_switch_filament(bool switch_filament);
     int command_ams_air_print_detect(bool air_print_detect);

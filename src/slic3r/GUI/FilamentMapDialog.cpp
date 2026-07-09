@@ -39,6 +39,68 @@ static std::vector<int> get_applied_map(DynamicConfig& proj_config, const Plater
 extern std::string& get_left_extruder_unprintable_text();
 extern std::string& get_right_extruder_unprintable_text();
 
+// Orca: minimal smart-filament toggle. When a filament track switch is ready every AMS filament is
+// reachable from both nozzles, so one filament can be assigned to multiple nozzles to maximize
+// savings. The checkbox drives the enable_filament_dynamic_map project flag.
+class SmartFilamentPanel : public wxPanel
+{
+    static constexpr int spacing = 20;
+
+public:
+    SmartFilamentPanel(wxWindow *parent) : wxPanel(parent)
+    {
+        SetBackgroundColour(*wxWHITE);
+        wxBoxSizer *main_sizer = new wxBoxSizer(wxVERTICAL);
+
+        main_sizer->AddSpacer(FromDIP(spacing));
+
+        auto *separator = new wxPanel(this);
+        separator->SetBackgroundColour(wxColour("#EEEEEE"));
+        main_sizer->Add(separator, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(15));
+
+        main_sizer->AddSpacer(FromDIP(spacing));
+
+        m_smart_filament_checkbox = new CheckBox(this);
+        if (auto *opt = enable_filament_dynamic_map())
+            m_smart_filament_checkbox->SetValue(opt->value);
+        m_smart_filament_checkbox->Bind(wxEVT_TOGGLEBUTTON, &SmartFilamentPanel::on_smart_filament_checkbox, this);
+
+        auto *label = new Label(this, _L("Enable smart filament assign: Assign one filament to multiple nozzles to maximize savings"));
+        label->SetFont(Label::Body_12);
+
+        // Orca: dropped the vendor "Learn more" tracking link (no Orca help page for this feature).
+
+        auto *smart_sizer = new wxBoxSizer(wxHORIZONTAL);
+        smart_sizer->Add(m_smart_filament_checkbox, 0, wxALIGN_CENTER_VERTICAL);
+        smart_sizer->Add(label, 0, wxLEFT | wxALIGN_CENTER_VERTICAL, FromDIP(3));
+
+        main_sizer->Add(smart_sizer, 0, wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(15));
+
+        SetSizer(main_sizer);
+        Layout();
+        Fit();
+        wxGetApp().UpdateDarkUIWin(this);
+    }
+
+private:
+    static ConfigOptionBool *enable_filament_dynamic_map()
+    {
+        auto &config = wxGetApp().preset_bundle->project_config;
+        return dynamic_cast<ConfigOptionBool *>(config.option("enable_filament_dynamic_map"));
+    }
+
+    void on_smart_filament_checkbox(wxCommandEvent &event)
+    {
+        if (auto *opt = enable_filament_dynamic_map())
+            opt->value = m_smart_filament_checkbox->GetValue();
+        wxGetApp().plater()->update();
+        event.Skip();
+    }
+
+private:
+    CheckBox *m_smart_filament_checkbox{nullptr};
+};
+
 
 bool try_pop_up_before_slice(bool is_slice_all, Plater* plater_ref, PartPlate* partplate_ref, bool force_pop_up)
 {
@@ -136,6 +198,14 @@ FilamentMapDialog::FilamentMapDialog(wxWindow                       *parent,
     SetMinSize(wxSize(FromDIP(580), -1));
     SetMaxSize(wxSize(FromDIP(580), -1));
 
+    // Orca: when a filament track switch is ready, every AMS filament reaches both nozzles, so the
+    // Match/Convenience sub-mode is dropped and Auto is presented purely as a filament-saving mode.
+    // Orca has no fmmAutoForQuality, so "only saving" collapses to "switch ready" and the remaining
+    // auto mode set is { fmmAutoForFlush }.
+    m_fila_switch_ready              = wxGetApp().sidebar().is_fila_switch_ready();
+    const bool only_saving_mode     = m_fila_switch_ready;
+    const bool auto_match_available = machine_synced && !m_fila_switch_ready;
+
     if (mode < fmmManual)
         m_page_type = PageType::ptAuto;
     else if (mode == fmmManual || mode == fmmNozzleManual)
@@ -149,7 +219,7 @@ FilamentMapDialog::FilamentMapDialog(wxWindow                       *parent,
 
     wxBoxSizer *mode_sizer = new wxBoxSizer(wxHORIZONTAL);
 
-    m_auto_btn   = new CapsuleButton(this, PageType::ptAuto, _L("Auto"), false);
+    m_auto_btn   = new CapsuleButton(this, PageType::ptAuto, only_saving_mode ? _L("Fila Saving") : _L("Auto"), false);
     m_manual_btn = new CapsuleButton(this, PageType::ptManual, _L("Custom"), false);
     if (show_default)
         m_default_btn = new CapsuleButton(this, PageType::ptDefault, _L("Same as Global"), true);
@@ -168,12 +238,14 @@ FilamentMapDialog::FilamentMapDialog(wxWindow                       *parent,
 
     auto            panel_sizer       = new wxBoxSizer(wxHORIZONTAL);
 
+    // Orca: fall back to the saving mode whenever Match is unavailable, which now also covers the
+    // filament-track-switch-ready case (auto_match_available folds in !m_fila_switch_ready).
     FilamentMapMode default_auto_mode = mode >= fmmManual ? fmmAutoForFlush :
-        mode == fmmAutoForMatch && !machine_synced ? fmmAutoForFlush :
+        mode == fmmAutoForMatch && !auto_match_available ? fmmAutoForFlush :
         mode;
 
     m_manual_map_panel                = new FilamentMapManualPanel(this, m_filament_color, m_filament_type, filaments, filament_map);
-    m_auto_map_panel                  = new FilamentMapAutoPanel(this, default_auto_mode, machine_synced);
+    m_auto_map_panel                  = new FilamentMapAutoPanel(this, default_auto_mode, auto_match_available);
     if (show_default)
         m_default_map_panel = new FilamentMapDefaultPanel(this);
     else
@@ -183,6 +255,13 @@ FilamentMapDialog::FilamentMapDialog(wxWindow                       *parent,
     panel_sizer->Add(m_auto_map_panel, 0, wxEXPAND);
     if (show_default) panel_sizer->Add(m_default_map_panel, 0, wxEXPAND);
     main_sizer->Add(panel_sizer, 0, wxEXPAND);
+
+    // Smart filament section, shown only in filament-saving (flush) mode when the switch is ready.
+    if (m_fila_switch_ready) {
+        m_smart_filament = new SmartFilamentPanel(this);
+        m_smart_filament->Show(get_mode() == fmmAutoForFlush);
+        main_sizer->Add(m_smart_filament, 0, wxEXPAND);
+    }
 
     wxPanel* bottom_panel = new wxPanel(this);
     bottom_panel->SetBackgroundColour(*wxWHITE);
@@ -318,6 +397,9 @@ void FilamentMapDialog::update_panel_status(PageType page)
         m_auto_btn->Select(true);
         m_auto_map_panel->Show();
     }
+
+    if (m_smart_filament)
+        m_smart_filament->Show(get_mode() == fmmAutoForFlush);
 
     Layout();
     Fit();

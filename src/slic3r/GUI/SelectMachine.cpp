@@ -1593,6 +1593,58 @@ bool SelectMachineDialog::use_dynamic_nozzle_map() const
     return false;
 }
 
+bool SelectMachineDialog::slicing_with_fila_switch() const
+{
+    if (use_dynamic_nozzle_map())
+        return true;
+
+    if (m_print_type == FROM_NORMAL) {
+        auto has_filament_switcher = wxGetApp().preset_bundle->project_config.option<ConfigOptionBool>("has_filament_switcher");
+        if (has_filament_switcher)
+            return has_filament_switcher->value;
+    } else if (m_print_type == FROM_SDCARD_VIEW) {
+        if (m_required_data_plate_data_list.size() > (size_t) m_print_plate_idx) {
+            auto has_filament_switcher = m_required_data_plate_data_list[m_print_plate_idx]->config.option<ConfigOptionBool>("has_filament_switcher");
+            if (has_filament_switcher)
+                return has_filament_switcher->value;
+        }
+        auto has_filament_switcher = m_required_data_config.option<ConfigOptionBool>("has_filament_switcher");
+        if (has_filament_switcher)
+            return has_filament_switcher->value;
+    }
+    return false;
+}
+
+bool SelectMachineDialog::CheckErrorDynamicSwitchNozzle(MachineObject* obj_)
+{
+    if (!obj_)
+        return false;
+
+    // Advisory only (does not block Send): the file was sliced for a switch state that doesn't
+    // match the installed hardware, so grouping/flush may be suboptimal. Only on firmware that
+    // reports it can check this.
+    if (obj_->is_support_check_track_switch_match_slice_printer && slicing_with_fila_switch() != obj_->GetFilaSwitch()->IsInstalled()) {
+        show_status(PrintDialogStatus::PrintStatusFilaSwitcherSlicingNotMatch,
+                    {_L("The Filament Track Switch installed on the printer does not match the slicing file. Please re-slice to avoid print quality issues.")});
+    }
+
+    // The blocking checks below only matter for dynamic nozzle mapping, which requires a switch.
+    if (!use_dynamic_nozzle_map())
+        return true;
+
+    if (!obj_->GetFilaSwitch()->IsInstalled()) {
+        show_status(PrintDialogStatus::PrintStatusFilaSwitcherError, {_L("This print requires a Filament Track Switch. Please install it first.")});
+        return false;
+    }
+
+    if (!obj_->GetFilaSwitch()->IsReady()) {
+        show_status(PrintDialogStatus::PrintStatusFilaSwitcherError, {_L("The Filament Track Switch has not been setup. Please setup it first.")});
+        return false;
+    }
+
+    return true;
+}
+
 void SelectMachineDialog::clear_nozzle_mapping()
 {
     m_nozzle_mapping_result.clear();
@@ -2008,6 +2060,14 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
         Enable_Send_Button(false);
     } else if (status == PrintDialogStatus::PrintStatusRackNozzleMappingWarning) {
         // Extra-waste warning: allow Send.
+        Enable_Refresh_Button(true);
+        Enable_Send_Button(true);
+    } else if (status == PrintDialogStatus::PrintStatusFilaSwitcherError) {
+        // Missing or un-set-up switch required by the slice: block Send.
+        Enable_Refresh_Button(true);
+        Enable_Send_Button(false);
+    } else if (status == PrintDialogStatus::PrintStatusFilaSwitcherSlicingNotMatch) {
+        // Advisory slicing/hardware mismatch: allow Send.
         Enable_Refresh_Button(true);
         Enable_Send_Button(true);
     }
@@ -3794,6 +3854,10 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
             }
         }
     }
+
+    // Filament Track Switch: warn on a slicing/hardware mismatch, and block Send when dynamic
+    // nozzle mapping needs a switch that isn't installed or set up. No-op for printers without one.
+    if (!CheckErrorDynamicSwitchNozzle(obj_)) return;
 
     // Rack print-dispatch nozzle mapping (dynamic V1): request/await the printer's mapping and block
     // Send while it computes. No-op for non-rack printers.

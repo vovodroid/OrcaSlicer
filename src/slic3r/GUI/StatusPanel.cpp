@@ -2258,7 +2258,7 @@ void StatusBasePanel::show_filament_load_group(bool show)
         }
 
         auto cur_ext = obj->GetExtderSystem()->GetCurrentExtder();
-        m_filament_step->SetupSteps(cur_ext ? cur_ext->HasFilamentInExt() : false);
+        m_filament_step->SetupSteps(obj, cur_ext ? cur_ext->HasFilamentInExt() : false);
 
         Layout();
         Fit();
@@ -3526,6 +3526,14 @@ void StatusPanel::update_ams_control_state(std::string ams_id, std::string slot_
         if (ams_id.empty() || slot_id.empty()) {
             load_error_info = _L("Choose an AMS slot then press \"Load\" or \"Unload\" button to automatically load or unload filament.");
             unload_error_info = _L("Choose an AMS slot then press \"Load\" or \"Unload\" button to automatically load or unload filament.");
+        } else if (obj->GetFilaSwitch()->IsInstalled() && devPrinterUtil::IsVirtualSlot(ams_id)) {
+            // Orca: with a Filament Track Switch installed the external spool cannot be routed, so both actions are blocked.
+            load_error_info  = _L("\"Load\" or \"Unload\" is not supported for external spool while using Filament Track Switch.");
+            unload_error_info = load_error_info;
+        } else if (obj->GetFilaSwitch()->IsInstalled() && !obj->GetFilaSwitch()->IsReady()) {
+            // Orca: an un-calibrated Filament Track Switch cannot route filament to either extruder, so block both actions.
+            load_error_info  = _L("The Filament Track Switch has not been setup. Please setup on printer.");
+            unload_error_info = load_error_info;
         } else if (ams_id == std::to_string(VIRTUAL_TRAY_MAIN_ID) || ams_id == std::to_string(VIRTUAL_TRAY_DEPUTY_ID)) {
             for (auto ext : obj->GetExtderSystem()->GetExtruders()) {
                 if (ext.GetSlotNow().ams_id == ams_id && ext.GetSlotNow().slot_id == slot_id)
@@ -3535,6 +3543,8 @@ void StatusPanel::update_ams_control_state(std::string ams_id, std::string slot_
             }
         } else {
             for (auto ext : obj->GetExtderSystem()->GetExtruders()) {
+                // Orca: with a Filament Track Switch installed a slot is not bound to a single extruder, so skip the "already loaded" identity check.
+                if (obj->GetFilaSwitch()->IsInstalled()) { continue; }
                 if (ext.GetSlotNow().ams_id == ams_id && ext.GetSlotNow().slot_id == slot_id)
                 {
                     load_error_info = _L("Current slot has already been loaded.");
@@ -4231,6 +4241,43 @@ void StatusPanel::on_ams_load_curr()
         std::string                            curr_ams_id = m_ams_control->GetCurentAms();
         std::string                            curr_can_id = m_ams_control->GetCurrentCan(curr_ams_id);
 
+        std::optional<int> extruder_id = std::nullopt;
+        if (obj->GetFilaSwitch() && obj->GetFilaSwitch()->IsInstalled()) {
+            if (!obj->GetFilaSwitch()->IsReady()) {
+                MessageDialog msg_dlg(nullptr, _L("The Filament Track Switch has not been setup. Please setup on printer."), wxEmptyString, wxICON_WARNING | wxOK);
+                msg_dlg.ShowModal();
+                return;
+            }
+
+            // Filament Track Switch is calibrated: the load can go to either extruder, so ask the
+            // user which. Record each extruder's currently-loaded slot so the dialog can grey out a
+            // side that already holds this filament.
+            std::vector<std::pair<std::string, std::string>> extruderSlots(2, {"", ""});
+            if (auto ext = obj->GetExtderSystem()->GetExtderById(MAIN_EXTRUDER_ID); ext.has_value())
+            {
+                if (ext->HasFilamentInExt())
+                {
+                    extruderSlots[MAIN_EXTRUDER_ID] = {ext->GetSlotNow().ams_id, ext->GetSlotNow().slot_id};
+                }
+            }
+            if (auto ext = obj->GetExtderSystem()->GetExtderById(DEPUTY_EXTRUDER_ID); ext.has_value())
+            {
+                if (ext->HasFilamentInExt())
+                {
+                    extruderSlots[DEPUTY_EXTRUDER_ID] = {ext->GetSlotNow().ams_id, ext->GetSlotNow().slot_id};
+                }
+            }
+
+            FeedDirectionDialog dialog(nullptr, 2, obj->printer_type);
+            dialog.SetExtruderMapping(obj, curr_ams_id, curr_can_id, extruderSlots);
+            auto rtn = dialog.ShowModal();
+
+            if (rtn != wxID_OK)
+            {
+                return;
+            }
+            extruder_id = dialog.GetExtruderID();
+        }
 
         update_load_with_temp();
         //virtual tray
@@ -4262,11 +4309,11 @@ void StatusPanel::on_ams_load_curr()
             if (obj->is_enable_np || obj->is_enable_ams_np) {
                 try {
                     if (!curr_ams_id.empty() && !curr_can_id.empty()) {
-                        obj->command_ams_change_filament(true, curr_ams_id, "0", old_temp, new_temp);
+                        obj->command_ams_change_filament(true, curr_ams_id, "0", old_temp, new_temp, extruder_id);
                     }
                 } catch (...) {}
             } else {
-                obj->command_ams_change_filament(true, "254", "0", old_temp, new_temp);
+                obj->command_ams_change_filament(true, "254", "0", old_temp, new_temp, extruder_id);
             }
         }
 
@@ -4302,12 +4349,12 @@ void StatusPanel::on_ams_load_curr()
         if (obj->is_enable_np) {
             try {
                 if (!curr_ams_id.empty() && !curr_can_id.empty()) {
-                    obj->command_ams_change_filament(true, curr_ams_id, curr_can_id, old_temp, new_temp);
+                    obj->command_ams_change_filament(true, curr_ams_id, curr_can_id, old_temp, new_temp, extruder_id);
                 }
             }
             catch (...){}
         } else {
-            obj->command_ams_change_filament(true, curr_ams_id, curr_can_id, old_temp, new_temp);
+            obj->command_ams_change_filament(true, curr_ams_id, curr_can_id, old_temp, new_temp, extruder_id);
         }
     }
 }
