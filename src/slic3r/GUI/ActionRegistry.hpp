@@ -4,6 +4,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <wx/thread.h>
+
+#include <cassert>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -36,9 +40,6 @@ struct AppAction
 // Always clean when read: built once at startup, then maintained incrementally by
 // loader callbacks (via CallAfter on the UI thread). The action vector is UI-thread
 // confined and deliberately unguarded.
-//
-// ponytail: AppAction is a plain struct with run(), not a polymorphic base — one action
-// type exists today. Reintroduce the hierarchy when a second action type shows up.
 class ActionRegistry
 {
 public:
@@ -46,7 +47,7 @@ public:
     void build();
 
     // Always-clean read surface. UI thread only.
-    const std::vector<AppAction>& all() const;
+    const std::vector<AppAction>& all() const { assert(wxThread::IsMain()); return m_actions; }
     const AppAction*              by_id(const std::string& id) const;
 
     // Targeted incremental maintenance, reached via CallAfter from loader callbacks.
@@ -71,9 +72,14 @@ private:
     void         erase_id(const std::string& id);
     // Builds the AppAction for one loaded+enabled script capability; returns false
     // (and builds nothing) when the capability is unloaded, missing, or disabled.
-    bool         make_action(const std::string& plugin_key, const std::string& capability, AppAction& out) const;
+    bool         make_action(const std::string& plugin_key, const std::string& capability,
+                             const std::function<std::string(const std::string&)>& package_name_for,
+                             AppAction& out) const;
 
-    std::vector<AppAction> m_actions;  // UI-thread confined; no lock (see spec, thread confinement)
+    // why: vector storage favors the popup path, which snapshots by iterating, sorting, and
+    // serializing small action sets. Id lookups are event-driven and build is startup-only, so
+    // a persistent map would add hashing/allocation cost without helping render.
+    std::vector<AppAction> m_actions;  // UI-thread confined; no lock
 };
 
 }} // namespace Slic3r::GUI

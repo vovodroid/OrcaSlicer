@@ -1,5 +1,6 @@
 #include "SpeedDialDialog.hpp"
 
+#include "ActionRegistry.hpp"
 #include "GUI.hpp"
 #include "GUI_App.hpp"
 #include "MainFrame.hpp"
@@ -11,19 +12,10 @@
 #include "Widgets/WebView.hpp"
 #include "Widgets/WebViewHostDialog.hpp"
 #include "Widgets/StateColor.hpp"
-#include "slic3r/plugin/PluginManager.hpp"
-
-#include <libslic3r/AppConfig.hpp>
-
-#include <slic3r/plugin/PluginLoader.hpp>
-#include <slic3r/plugin/PythonPluginInterface.hpp>
 
 #include <boost/filesystem.hpp>
 
 #include <algorithm>
-#include <cmath>
-#include <ctime>
-#include <map>
 
 #include <wx/display.h>
 #include <wx/sizer.h>
@@ -34,49 +26,11 @@ namespace Slic3r { namespace GUI {
 
 namespace {
 
-// AppConfig section for the speed dial (favourites, run stats, ask suppression).
-constexpr const char* kConfigSection = "speed_dial";
 // ADJUST WIDTH HERE (DIP px). Fixed popup width; was 360, now 1.5x. Height is not set here -
 // the popup auto-resizes to the page content (see resize_to_content + the list max-height in style.css).
 constexpr int kPopupWidth = 540;
 constexpr int kPopupMinHeight = 60;   // just above the bare search-bar height, so the popup hugs content
 constexpr int kPopupMaxHeight = 282;
-
-// Tolerant parse of a config-stored JSON value; anything unreadable degrades to `fallback`
-// (the section is brand new, so damaged/absent values just mean empty defaults).
-nlohmann::json parse_config_json(const std::string& value, nlohmann::json fallback)
-{
-    nlohmann::json parsed = nlohmann::json::parse(value, nullptr, false);
-    return parsed.is_discarded() ? std::move(fallback) : parsed;
-}
-
-// Stable action identity for the page: type-prefixed (plugin_key, capability) pair.
-std::string action_id(const std::string& key, const std::string& cap) { return "script:" + key + "::" + cap; }
-
-// frecency = frequency + recency
-double frecency_score(int count, long long last, long long now)
-{
-    if (count <= 0)
-        return 0.0;
-    constexpr double HALF_LIFE_DAYS = 30.0; // tunable knob: score halves every 30 idle days
-    double age = std::max(0.0, double(now - last) / 86400.0);
-    return count * std::pow(2.0, -age / HALF_LIFE_DAYS);
-}
-
-// why: STATIC free function, not a member - run_action Dismisses (destroys) the popup before
-// the deferred run, so there is no `this` left to bump on. Reads/writes config directly.
-void bump_frecency(const std::string& id)
-{
-    auto stats = parse_config_json(wxGetApp().app_config->get(kConfigSection, "stats"), nlohmann::json::object());
-    // why: stats[id] on a new id yields a null node; value("count",...) throws type_error.306 on a
-    // non-object, so seed it to {} first (the first run of every action hit this before the toast).
-    nlohmann::json& e = stats[id];
-    if (!e.is_object())
-        e = nlohmann::json::object();
-    e["count"] = e.value("count", 0) + 1;
-    e["last"]  = (long long) std::time(nullptr);
-    wxGetApp().app_config->set(kConfigSection, "stats", stats.dump());
-}
 
 wxString dialog_url()
 {
@@ -234,7 +188,7 @@ private:
             m_page_ready = true;
             send_actions();
         }
-        else if (cmd == "toggle_favourite") toggle_favourite(p.value("id", ""), p.value("fav", false));
+        else if (cmd == "toggle_favourite") wxGetApp().action_registry().set_favourite(p.value("id", ""), p.value("fav", false));
         else if (cmd == "run_action")       run_action(p.value("id", ""), p.value("title", ""));
         else if (cmd == "resize")           resize_to_content(json_int_or(p, "height", 0));
         else if (cmd == "close_page")       Dismiss();
@@ -285,65 +239,18 @@ private:
         m_pending_show = false;
     }
 
-    // Config readers/writer for the persisted dial state (favourites, run stats, ask suppression).
-    std::vector<std::string> read_favourites() const
-    {
-        auto j = parse_config_json(wxGetApp().app_config->get(kConfigSection, "favourites"), nlohmann::json::array());
-        std::vector<std::string> v;
-        for (auto& e : j)
-            if (e.is_string())
-                v.push_back(e.get<std::string>());
-        return v;
-    }
-    nlohmann::json read_stats() const
-    {
-        return parse_config_json(wxGetApp().app_config->get(kConfigSection, "stats"), nlohmann::json::object());
-    }
-    std::vector<std::string> read_ask_suppressed() const
-    {
-        auto j = parse_config_json(wxGetApp().app_config->get(kConfigSection, "ask_suppressed"), nlohmann::json::array());
-        std::vector<std::string> v;
-        for (auto& e : j)
-            if (e.is_string())
-                v.push_back(e.get<std::string>());
-        return v;
-    }
-    static void write_json(const char* key, const nlohmann::json& j) { wxGetApp().app_config->set(kConfigSection, key, j.dump()); }
-
-    void toggle_favourite(const std::string& id, bool fav)
-    {
-        auto favs = read_favourites();
-        auto it   = std::find(favs.begin(), favs.end(), id);
-        if (fav && it == favs.end())
-            favs.push_back(id);
-        if (!fav && it != favs.end())
-            favs.erase(it);
-        write_json("favourites", nlohmann::json(favs));
-    }
-
-    void suppress_ask_for(const std::string& key)
-    {
-        auto arr = read_ask_suppressed();
-        if (std::find(arr.begin(), arr.end(), key) == arr.end())
-            arr.push_back(key);
-        write_json("ask_suppressed", nlohmann::json(arr));
-    }
-
-    // id == "script:<key>::<cap>". Hide FIRST (scripts may open their own modals that must not stack
-    // under this launcher), gate on a native run-confirm unless suppressed, then run on the next tick.
+    // Hide FIRST (scripts may open their own modals that must not stack under this
+    // launcher), gate on a native run-confirm unless suppressed, then run on the next
+    // tick via the registry (which re-resolves the capability and bumps stats).
     void run_action(const std::string& id, const std::string& title)
     {
-        const std::string prefix = "script:";
-        if (id.rfind(prefix, 0) != 0)
+        ActionRegistry& reg = wxGetApp().action_registry();
+        const AppAction* a = reg.by_id(id);
+        if (!a)
             return;
-        auto body = id.substr(prefix.size());
-        auto sep  = body.find("::");
-        if (sep == std::string::npos)
-            return;
-        std::string key = body.substr(0, sep), cap = body.substr(sep + 2);
-
-        auto suppressed = read_ask_suppressed();
-        const bool ask  = std::find(suppressed.begin(), suppressed.end(), key) == suppressed.end();
+        const std::string key = a->plugin_key;
+        const std::string cap = a->capability;
+        const bool ask = reg.should_ask(key);
         Dismiss(); // launcher gone before the modal / the script's own UI
 
         if (ask) {
@@ -354,40 +261,19 @@ private:
             if (dlg.ShowModal() != wxID_OK)
                 return;
             if (dlg.IsCheckBoxChecked())
-                suppress_ask_for(key);
+                wxGetApp().action_registry().suppress_ask(key);
         }
         // why: value-capture only. Script execution may outlive this popup if the app is closing.
-        wxGetApp().CallAfter([id, key, cap] {
-            ScriptRunOutcome o = run_script_plugin_capability(key, cap);
+        wxGetApp().CallAfter([id] {
+            ScriptRunOutcome o = wxGetApp().action_registry().run(id);
             if (o.level == ScriptRunOutcome::Level::Busy)
                 return;
-            bump_frecency(id);
             if (!o.message.IsEmpty())
                 wxGetApp().plater()->get_notification_manager()->push_notification(
                     NotificationType::CustomNotification,
                     o.level == ScriptRunOutcome::Level::Error ? NotificationManager::NotificationLevel::ErrorNotificationLevel :
                                                                 NotificationManager::NotificationLevel::RegularNotificationLevel,
                     into_u8(o.message));
-        });
-    }
-
-    // Frecency ordering so the page shows most-reached-for first; ties broken alphabetically by title.
-    void sort_by_frecency(nlohmann::json& actions) const
-    {
-        nlohmann::json stats = read_stats();
-        long long now        = (long long) std::time(nullptr);
-        std::stable_sort(actions.begin(), actions.end(), [&](const nlohmann::json& a, const nlohmann::json& b) {
-            auto sc = [&](const nlohmann::json& x) {
-                auto it = stats.find(x["id"].get<std::string>());
-                // why: guard is_object() too - value() throws on a malformed (non-object) stats entry.
-                if (it == stats.end() || !it->is_object())
-                    return 0.0;
-                return frecency_score(it->value("count", 0), it->value("last", 0LL), now);
-            };
-            double sa = sc(a), sb = sc(b);
-            if (sa != sb)
-                return sa > sb;
-            return a["title"].get<std::string>() < b["title"].get<std::string>();
         });
     }
 
@@ -402,40 +288,12 @@ private:
         WebView::RunScript(m_browser, wxT("window.HandleStudio(") + payload + wxT(")"));
     }
 
-    // Only runnable actions are offered: enabled AND loaded SCRIPT capabilities. Unloaded or
-    // invalid ones stay hidden (this transient launcher has no greyed/edit state yet).
-    nlohmann::json build_actions() const
-    {
-        PluginLoader& loader = PluginManager::instance().get_loader();
-
-        // plugin_key -> package display name (the row eyebrow); falls back to the key.
-        std::map<std::string, std::string> pkg_name;
-        for (const PluginDescriptor& desc : loader.get_all_loaded_plugin_descriptors())
-            pkg_name[desc.plugin_key] = desc.name;
-
-        nlohmann::json arr = nlohmann::json::array();
-        for (const auto& cap : loader.get_plugin_capabilities_by_type(PluginCapabilityType::Script)) {
-            if (!cap || !cap->enabled)
-                continue;
-            if (!loader.is_plugin_loaded(cap->plugin_key))
-                continue;
-            const auto it = pkg_name.find(cap->plugin_key);
-            arr.push_back({{"id", action_id(cap->plugin_key, cap->name)},
-                           {"title", cap->name.empty() ? cap->plugin_key : cap->name},
-                           {"pkg", (it != pkg_name.end() && !it->second.empty()) ? it->second : cap->plugin_key},
-                           {"runnable", true},
-                           {"shortcut", ""}});
-        }
-        return arr;
-    }
-
     void send_actions()
     {
-        nlohmann::json actions = build_actions();
-        sort_by_frecency(actions);
+        nlohmann::json snap = wxGetApp().action_registry().snapshot();
         push({{"command", "list_actions"},
-              {"actions", std::move(actions)},
-              {"favourites", read_favourites()}});
+              {"actions", std::move(snap["actions"])},
+              {"favourites", std::move(snap["favourites"])}});
     }
 
     wxWebView* m_browser{nullptr};

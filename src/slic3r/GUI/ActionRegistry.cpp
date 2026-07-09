@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <ctime>
+#include <unordered_map>
 
 namespace Slic3r { namespace GUI {
 
@@ -57,6 +58,14 @@ double frecency_score(int count, long long last, long long now)
     return count * std::pow(2.0, -age / HALF_LIFE_DAYS);
 }
 
+std::string find_loaded_package_name(PluginLoader& loader, const std::string& plugin_key)
+{
+    for (const PluginDescriptor& desc : loader.get_all_loaded_plugin_descriptors())
+        if (desc.plugin_key == plugin_key)
+            return desc.name.empty() ? plugin_key : desc.name;
+    return plugin_key;
+}
+
 } // namespace
 
 ScriptRunOutcome AppAction::run() const
@@ -66,7 +75,9 @@ ScriptRunOutcome AppAction::run() const
 
 // ---- build / enumeration ----------------------------------------------------
 
-bool ActionRegistry::make_action(const std::string& plugin_key, const std::string& capability, AppAction& out) const
+bool ActionRegistry::make_action(const std::string& plugin_key, const std::string& capability,
+                                 const std::function<std::string(const std::string&)>& package_name_for,
+                                 AppAction& out) const
 {
     PluginLoader& loader = PluginManager::instance().get_loader();
     if (!loader.is_plugin_loaded(plugin_key))
@@ -75,13 +86,9 @@ bool ActionRegistry::make_action(const std::string& plugin_key, const std::strin
     if (!cap || !cap->enabled)
         return false;
 
-    std::string pkg = plugin_key;
-    for (const PluginDescriptor& desc : loader.get_all_loaded_plugin_descriptors())
-        if (desc.plugin_key == plugin_key) { if (!desc.name.empty()) pkg = desc.name; break; }
-
     out.id         = speed_dial_action_id(plugin_key, capability);
     out.title      = capability.empty() ? plugin_key : capability;
-    out.pkg        = pkg;
+    out.pkg        = package_name_for(plugin_key);
     out.plugin_key = plugin_key;
     out.capability = capability;
     out.runnable   = true;
@@ -110,22 +117,29 @@ void ActionRegistry::build()
     assert(wxThread::IsMain()); // why: UI-thread only; m_actions is unguarded (confinement)
     m_actions.clear();
     PluginLoader& loader = PluginManager::instance().get_loader();
+
+    std::unordered_map<std::string, std::string> package_names;
+    for (const PluginDescriptor& desc : loader.get_all_loaded_plugin_descriptors())
+        if (!desc.name.empty())
+            package_names.emplace(desc.plugin_key, desc.name);
+
+    // why: build sees many capabilities, so package display names are indexed once instead of
+    // scanning the loaded descriptors for every capability.
+    auto package_name_for = [&package_names](const std::string& plugin_key) {
+        auto it = package_names.find(plugin_key);
+        return it == package_names.end() ? plugin_key : it->second;
+    };
+
     for (const auto& cap : loader.get_plugin_capabilities_by_type(PluginCapabilityType::Script)) {
         if (!cap || !cap->enabled)
             continue;
         AppAction a;
-        if (make_action(cap->plugin_key, cap->name, a))
+        if (make_action(cap->plugin_key, cap->name, package_name_for, a))
             m_actions.push_back(std::move(a));
     }
 }
 
 // ---- read surface -----------------------------------------------------------
-
-const std::vector<AppAction>& ActionRegistry::all() const
-{
-    assert(wxThread::IsMain());
-    return m_actions;
-}
 
 const AppAction* ActionRegistry::by_id(const std::string& id) const
 {
@@ -136,8 +150,7 @@ const AppAction* ActionRegistry::by_id(const std::string& id) const
 
 AppAction* ActionRegistry::find(const std::string& id)
 {
-    auto it = std::find_if(m_actions.begin(), m_actions.end(), [&](const AppAction& a) { return a.id == id; });
-    return it == m_actions.end() ? nullptr : &*it;
+    return const_cast<AppAction*>(by_id(id));
 }
 
 void ActionRegistry::erase_id(const std::string& id)
@@ -157,8 +170,14 @@ void ActionRegistry::refresh_capability(const std::string& plugin_key, const std
         erase_id(id);
         return;
     }
+    PluginLoader& loader = PluginManager::instance().get_loader();
+    const std::string package_name = find_loaded_package_name(loader, plugin_key);
+    // why: make_action only ever resolves this single plugin_key here, unlike build()'s
+    // multi-plugin lookup, so the callback can just return the already-resolved name.
+    auto package_name_for = [&package_name](const std::string&) { return package_name; };
+
     AppAction a;
-    if (!make_action(plugin_key, capability, a)) { // disabled / unloaded -> treat as gone
+    if (!make_action(plugin_key, capability, package_name_for, a)) { // why: disabled/unloaded capabilities leave the dial.
         erase_id(id);
         return;
     }
@@ -178,11 +197,16 @@ void ActionRegistry::refresh_package(const std::string& plugin_key, ActionChange
     if (change == ActionChange::Removed)
         return;
     PluginLoader& loader = PluginManager::instance().get_loader();
+    const std::string package_name = find_loaded_package_name(loader, plugin_key);
+    // why: every capability iterated below belongs to this single plugin_key, so the
+    // callback can just return the already-resolved name (see refresh_capability).
+    auto package_name_for = [&package_name](const std::string&) { return package_name; };
+
     for (const auto& cap : loader.get_plugin_capabilities_by_type(plugin_key, PluginCapabilityType::Script)) {
         if (!cap || !cap->enabled)
             continue;
         AppAction a;
-        if (make_action(plugin_key, cap->name, a))
+        if (make_action(plugin_key, cap->name, package_name_for, a))
             m_actions.push_back(std::move(a));
     }
 }
@@ -275,8 +299,7 @@ nlohmann::json ActionRegistry::snapshot() const
                            {"shortcut", ""}});
     // why: favourites is the ORDERED pin list - it must come from favourite_actions
     // as stored, not be re-derived from the frecency-sorted actions (that would
-    // reorder the favourites bar and renumber its Alt+1..9 targets). The page
-    // filters out ids with no live action itself.
+    // reorder the favourites bar). The page (js) filters out ids with no live action itself.
     nlohmann::json favourites(read_string_array("favourite_actions"));
     return {{"actions", std::move(actions)}, {"favourites", std::move(favourites)}};
 }
