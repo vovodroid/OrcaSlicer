@@ -701,20 +701,12 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         info.used_g = used_filament_g;
         info.used_m = used_filament_m;
 
-        // Stamp each filament's logical-nozzle assignment onto the saved 3mf so the
-        // device/monitor can reconstruct it. NOTE: this block runs for the whole fleet, not just
-        // multi-nozzle prints: reorder_extruders_for_minimum_flush_volume runs unconditionally and
-        // set_nozzle_group_result stores a (non-null) 1-nozzle result even for a single-extruder print,
-        // so result->nozzle_group_result is non-null here for X1/P1/A1/H2S too. Saved-3mf byte-identity
-        // vs the older filament_maps path therefore holds by VALUE-COINCIDENCE, not by skipping: for a
-        // standard 0.4/0.2/0.6/0.8 nozzle the stamped group_id/nozzle_diameter/volume_type render the same
-        // bytes as the filament_maps-derived fallback below (empirically confirmed on an X1C 0.4 saved 3mf:
-        // slice_info.config emits group_id="0" nozzle_diameter="0.40" volume_type="Standard" and
-        // <nozzle id="0" extruder_id="1" nozzle_diameter="0.4" volume_type="Standard"> == the else-path).
-        // The one divergence is a non-standard nozzle (e.g. 0.3/0.5): format_diameter_to_str snaps the
-        // stamped diameter to the nearest of {0.2,0.4,0.6,0.8} (0.5 -> "0.4"), whereas the older path wrote
-        // the raw config value — a metadata-only carry. No g-code effect; the raw nozzle_diameters plate
-        // metadata is unchanged.
+        // Stamp each filament's logical-nozzle assignment onto the saved 3mf so the device/monitor can
+        // reconstruct it. This block runs for every print: reorder_extruders_for_minimum_flush_volume
+        // runs unconditionally and stores a (non-null) 1-nozzle result even for a single-extruder print,
+        // so result->nozzle_group_result is non-null here for single-nozzle printers too. The stamped
+        // nozzle_diameter is the grouping result's rounded matching-key value; the 3mf writer decides the
+        // final saved diameter (see has_multi_nozzle_extruder). group_id and volume_type are unaffected.
         if (result && result->nozzle_group_result) {
             auto nozzles_for_filament = result->nozzle_group_result->get_nozzles_for_filament(it->first);
             if (!nozzles_for_filament.empty()) {
@@ -8331,6 +8323,18 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                 if (nozzle_diameter_option)
                     nozzle_diameters_str = nozzle_diameter_option->serialize();
 
+                // True when any extruder carries a cluster of interchangeable nozzles (max nozzle count
+                // > 1). Such an extruder's per-nozzle diameters are not expressible in the per-extruder
+                // nozzle_diameter config, so the saved <filament>/<nozzle> diameters must come from the
+                // grouping result. For a single-nozzle-per-extruder printer the true diameter is the raw
+                // config value; the grouping result rounds it to the nearest of {0.2,0.4,0.6,0.8} for its
+                // internal matching key, so reading that back would rewrite a non-standard nozzle
+                // (e.g. 0.5 -> 0.4). Use this flag to keep the exact config value in that case.
+                auto* extruder_max_nozzle_count_option = dynamic_cast<const ConfigOptionInts*>(config.option("extruder_max_nozzle_count"));
+                const bool has_multi_nozzle_extruder = extruder_max_nozzle_count_option &&
+                    std::any_of(extruder_max_nozzle_count_option->values.begin(), extruder_max_nozzle_count_option->values.end(),
+                                [](int v) { return v > 1; });
+
                 stream << "    <" << METADATA_TAG << " " << KEY_ATTR << "=\"" << PRINTER_MODEL_ID_ATTR       << "\" " << VALUE_ATTR << "=\"" << plate_data->printer_model_id << "\"/>\n";
                 stream << "    <" << METADATA_TAG << " " << KEY_ATTR << "=\"" << NOZZLE_DIAMETERS_ATTR       << "\" " << VALUE_ATTR << "=\"" << nozzle_diameters_str << "\"/>\n";
                 stream << "    <" << METADATA_TAG << " " << KEY_ATTR << "=\"" << TIMELAPSE_TYPE_ATTR << "\" " << VALUE_ATTR << "=\"" << timelapse_type << "\"/>\n";
@@ -8463,7 +8467,10 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                     if (std::find(used_nozzle_groups.begin(), used_nozzle_groups.end(), nozzle_group_id) == used_nozzle_groups.end())
                         used_nozzle_groups.push_back(nozzle_group_id);
                     const std::string filament_nozzle_group_id = it->group_id.empty() ? std::to_string(nozzle_group_id) : join_int_list_comma(it->group_id);
-                    const double filament_nozzle_diameter = it->nozzle_diameter > 0.0 ? it->nozzle_diameter : get_nozzle_diameter(nozzle_group_id);
+                    // Single-nozzle extruders: exact config diameter; clusters keep the result's rounded
+                    // value (see has_multi_nozzle_extruder).
+                    const double filament_nozzle_diameter = (has_multi_nozzle_extruder && it->nozzle_diameter > 0.0)
+                                                                ? it->nozzle_diameter : get_nozzle_diameter(nozzle_group_id);
                     const std::string filament_nozzle_volume_type = it->nozzle_volume_type.empty() ? get_nozzle_volume_type(nozzle_group_id) : it->nozzle_volume_type;
 
                     stream << "    <" << FILAMENT_TAG << " " << FILAMENT_ID_TAG << "=\"" << std::to_string(it->id + 1) << "\" "
@@ -8483,17 +8490,16 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                     stream << "    <" << SLICE_WARNING_TAG << " msg=\"" << it->msg << "\" level=\"" << std::to_string(it->level) << "\" error_code =\"" << it->error_code << "\"  />\n";
                 }
 
-                // Emit the <nozzle> tags from the grouping result when present. The result is present for
-                // the whole fleet (see the value-coincidence note in parse_filament_info), so this if-branch
-                // is normally taken; for single-nozzle-per-extruder prints get_used_nozzles_in_extruder()
-                // yields one nozzle per used extruder whose serialize() output is byte-identical to the
-                // filament_maps-derived else-path below for a standard nozzle diameter (a non-standard
-                // diameter snaps via format_diameter_to_str — the metadata-only carry). Only genuinely
-                // multi-nozzle prints emit per-nozzle tags the extruder map cannot express. The else
-                // is a defensive fallback for a missing result.
+                // Emit the <nozzle> tags from the grouping result. Single-nozzle-per-extruder printers
+                // override the diameter with the exact config value (see has_multi_nozzle_extruder); the
+                // else is a defensive fallback for a missing result.
                 if (plate_data->nozzle_group_result) {
                     auto used_nozzle_list = plate_data->nozzle_group_result->get_used_nozzles_in_extruder();
                     for (auto& used_nozzle : used_nozzle_list) {
+                        if (!has_multi_nozzle_extruder && nozzle_diameter_option &&
+                            used_nozzle.extruder_id >= 0 && used_nozzle.extruder_id < (int) nozzle_diameter_option->values.size()) {
+                            used_nozzle.diameter = get_nozzle_diameter_str(used_nozzle.extruder_id);
+                        }
                         stream << "    <" << NOZZLE_TAG << " " << used_nozzle.serialize() << "/>\n";
                     }
                 } else {

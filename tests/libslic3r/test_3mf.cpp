@@ -236,6 +236,88 @@ SCENARIO("H2C multi-nozzle .3mf round-trip", "[3mf][MultiNozzle]") {
     }
 }
 
+// Saved nozzle diameter for a single-nozzle-per-extruder printer with a non-standard nozzle.
+// The grouping result rounds every nozzle diameter to the nearest of {0.2,0.4,0.6,0.8} for its
+// internal matching key. That rounded value must NOT reach the saved <filament>/<nozzle> metadata on
+// a printer whose extruders each carry one nozzle: the exact per-extruder config diameter is written
+// instead, so a 0.5 mm nozzle is preserved rather than saved as 0.4. (Only an extruder that carries a
+// nozzle cluster, which the per-extruder config cannot express, keeps the grouping result's diameter.)
+SCENARIO("Non-standard nozzle diameter survives .3mf save on a single-nozzle printer", "[3mf][MultiNozzle]") {
+    GIVEN("a single-extruder plate whose nozzle is 0.5 mm and whose stamped diameter was rounded to 0.4") {
+        Model model;
+        std::string src_file = std::string(TEST_DATA_DIR) + "/test_3mf/Prusa.stl";
+        REQUIRE(load_stl(src_file.c_str(), &model));
+        model.add_default_instances();
+
+        std::string backup_dir =
+            (boost::filesystem::temp_directory_path() / boost::filesystem::unique_path("orca_nd_%%%%%%%%")).string();
+        boost::filesystem::create_directories(backup_dir);
+        model.set_backup_path(backup_dir);
+
+        // Single extruder with a non-standard 0.5 mm nozzle; extruder_max_nozzle_count stays at its
+        // default (no nozzle cluster), so the writer must emit the exact config diameter.
+        DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+        config.set_key_value("nozzle_diameter", new ConfigOptionFloats({ 0.5 }));
+
+        PlateData* plate = new PlateData();
+        plate->plate_index     = 0;
+        plate->is_sliced_valid = true;      // gate for the slice_info.config writer
+        plate->filament_maps   = { 1 };
+
+        // Seed the stamped diameter with the grouping result's rounded value (0.5 -> 0.4) so the
+        // assertion proves the writer ignores it and emits the exact config diameter instead.
+        FilamentInfo fi;
+        fi.id              = 0;
+        fi.type            = "PLA";
+        fi.color           = "#FFFFFFFF";
+        fi.group_id        = { 0 };
+        fi.nozzle_diameter = 0.4; // rounded; must NOT be the value written
+        plate->slice_filaments_info.push_back(fi);
+
+        WHEN("stored to and reloaded from a .3mf") {
+            std::string test_file = std::string(TEST_DATA_DIR) + "/test_3mf/nd_roundtrip.3mf";
+
+            StoreParams store_params;
+            store_params.path    = test_file.c_str();
+            store_params.model   = &model;
+            store_params.config  = &config;
+            store_params.plate_data_list.push_back(plate);
+            store_params.strategy = SaveStrategy::Zip64 | SaveStrategy::Silence;
+            REQUIRE(store_bbs_3mf(store_params));
+
+            Model dst_model;
+            DynamicPrintConfig dst_config;
+            ConfigSubstitutionContext ctxt{ ForwardCompatibilitySubstitutionRule::Enable };
+            PlateDataPtrs        dst_plates;
+            std::vector<Preset*> project_presets;
+            bool   is_bbl_3mf = false, is_orca_3mf = false;
+            Semver file_version;
+            bool loaded = load_bbs_3mf(test_file.c_str(), &dst_config, &ctxt, &dst_model, &dst_plates,
+                                       &project_presets, &is_bbl_3mf, &is_orca_3mf, &file_version, nullptr,
+                                       LoadStrategy::LoadModel | LoadStrategy::LoadConfig);
+            boost::filesystem::remove(test_file);
+
+            THEN("the saved nozzle diameter is the exact 0.5, not the rounded 0.4") {
+                REQUIRE(loaded);
+                REQUIRE(dst_plates.size() >= 1);
+                PlateData* rt = dst_plates.front();
+
+                // <nozzle> tag: device-facing per-nozzle diameter string, written verbatim.
+                REQUIRE(rt->nozzles_info.size() >= 1);
+                REQUIRE(rt->nozzles_info.front().diameter == "0.5");
+
+                // <filament> tag: per-filament nozzle_diameter parsed back as 0.5, not 0.4.
+                REQUIRE(rt->slice_filaments_info.size() >= 1);
+                REQUIRE_THAT(rt->slice_filaments_info.front().nozzle_diameter, Catch::Matchers::WithinAbs(0.5, 1e-6));
+            }
+
+            release_PlateData_list(dst_plates);
+        }
+        delete plate; // store_bbs_3mf does not take ownership of the source plate
+        boost::filesystem::remove_all(backup_dir);
+    }
+}
+
 // A legacy / foreign project (no multi-nozzle metadata) must load crash-safe through the BBS
 // importer and must not fabricate a filament_volume_map.
 SCENARIO("Legacy project loads crash-safe via load_bbs_3mf", "[3mf][MultiNozzle]") {
