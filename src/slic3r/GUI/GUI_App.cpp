@@ -141,6 +141,7 @@
 #include "slic3r/Utils/bambu_networking.hpp"
 
 #include "PluginsDialog.hpp"
+#include "SpeedDialDialog.hpp"
 #include "TerminalDialog.hpp"
 
 //#ifdef WIN32
@@ -8245,6 +8246,8 @@ void GUI_App::open_terminal_dialog()
     m_terminal_dlg->Show();
     m_terminal_dlg->Raise();
 }
+
+void GUI_App::open_speed_dial() { open_speed_dial_popup(); }
 
 void GUI_App::open_exportpresetbundledialog(size_t open_on_tab, const std::string& highlight_option)
 {
