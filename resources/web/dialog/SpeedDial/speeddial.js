@@ -2,7 +2,7 @@
 // node vm can exercise the pure helpers (filterActions / parseId / nextSel).
 
 // ---- state (populated by the C++ bridge via window.HandleStudio) ----
-var ACTIONS = [];        // [{id,title,pkg,runnable,shortcut}], already frecency-sorted by C++
+var ACTIONS = [];        // [{id,title,pkg,shortcut}], already frecency-sorted by C++
 var FAVS = [];           // [id...]
 var query = "";
 var sel = { zone: "list", i: 0 };   // zone: 'list' | 'fav'
@@ -69,10 +69,10 @@ function parseId(id) {
 }
 
 function visibleFavourites(favourites, actions) {
-  // why: a non-runnable fav renders a dead monogram tile whose click run()s to a silent
-  //      no-op; drop it from the quick-bar (the searchable list still shows it greyed).
+  // why: a fav whose id has no live action (plugin unloaded/disabled) renders a dead
+  //      monogram tile whose click run()s to a silent no-op; drop it from the quick-bar.
   var seen = {};
-  (actions || []).forEach(function (a) { if (a.runnable !== false) seen[a.id] = true; });
+  (actions || []).forEach(function (a) { seen[a.id] = true; });
   return (favourites || []).filter(function (id, i, arr) {
     return seen[id] && arr.indexOf(id) === i;
   });
@@ -314,7 +314,7 @@ function renderList() {
   arr.forEach(function (a, i) {
     var on = FAVS.indexOf(a.id) !== -1;
     var row = document.createElement("div");
-    row.className = "row" + (sel.zone === "list" && sel.i === i ? " sel" : "") + (a.runnable === false ? " disabled" : "");
+    row.className = "row" + (sel.zone === "list" && sel.i === i ? " sel" : "");
     row.setAttribute("aria-label", actionLabel(a, ACTIONS));
 
     var tile = document.createElement("div");
@@ -345,16 +345,14 @@ function renderList() {
     row.appendChild(tile);
     row.appendChild(left);
 
-    if (a.runnable !== false) {
-      var star = document.createElement("button");
-      star.className = "star" + (on ? " on" : "");
-      star.innerHTML = starSvg(on);
-      star.title = on ? "Unpin from favourites" : "Pin to favourites";
-      star.onclick = function (ev) { ev.stopPropagation(); toggleFav(a.id); };
-      // why: two quick fav/unfav clicks must not dblclick-run the row
-      star.ondblclick = function (ev) { ev.stopPropagation(); };
-      row.appendChild(star);
-    }
+    var star = document.createElement("button");
+    star.className = "star" + (on ? " on" : "");
+    star.innerHTML = starSvg(on);
+    star.title = on ? "Unpin from favourites" : "Pin to favourites";
+    star.onclick = function (ev) { ev.stopPropagation(); toggleFav(a.id); };
+    // why: two quick fav/unfav clicks must not dblclick-run the row
+    star.ondblclick = function (ev) { ev.stopPropagation(); };
+    row.appendChild(star);
 
     row.onclick = function () { sel = { zone: "list", i: i }; render(); };
     row.ondblclick = function () { sel = { zone: "list", i: i }; run(a); };
@@ -410,7 +408,7 @@ function toggleFav(id) {
 
 // Fire the action; C++ owns the run-confirm (native dialog) + suppression, then closes the popup + toasts.
 function run(a) {
-  if (!a || a.runnable === false) return;
+  if (!a) return;
   SendMessage({ command: "run_action", id: a.id, title: a.title });
 }
 

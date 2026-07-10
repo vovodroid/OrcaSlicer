@@ -169,7 +169,6 @@ kbd {
   border: 1px solid var(--border, var(--orca-border, #ddd));
   border-radius: 4px;
 }
-.row.disabled { opacity: .5; cursor: not-allowed; }
 .star {
   flex: 0 0 auto;
   width: 24px;

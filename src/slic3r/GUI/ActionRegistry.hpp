@@ -26,7 +26,6 @@ struct AppAction
     std::string pkg;          // owning package display name (row eyebrow)
     std::string plugin_key;   // weak handle: owning package
     std::string capability;   // weak handle: capability name
-    bool        runnable = true;
 
     // seeded from AppConfig for the snapshot / sort:
     bool        favourite = false;

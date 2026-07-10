@@ -91,7 +91,6 @@ bool ActionRegistry::make_action(const std::string& plugin_key, const std::strin
     out.pkg        = package_name_for(plugin_key);
     out.plugin_key = plugin_key;
     out.capability = capability;
-    out.runnable   = true;
     seed_state(out);
     return true;
 }
@@ -295,7 +294,6 @@ nlohmann::json ActionRegistry::snapshot() const
         actions.push_back({{"id", a->id},
                            {"title", a->title},
                            {"pkg", a->pkg},
-                           {"runnable", a->runnable},
                            {"shortcut", ""}});
     // why: favourites is the ORDERED pin list - it must come from favourite_actions
     // as stored, not be re-derived from the frecency-sorted actions (that would
