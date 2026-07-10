@@ -189,6 +189,12 @@ private:
             send_actions();
         }
         else if (cmd == "toggle_favourite") wxGetApp().action_registry().set_favourite(p.value("id", ""), p.value("fav", false));
+        else if (cmd == "reorder_favourites") {
+            std::vector<std::string> ids;
+            if (p.contains("ids") && p["ids"].is_array())
+                for (auto& e : p["ids"]) if (e.is_string()) ids.push_back(e.get<std::string>());
+            wxGetApp().action_registry().reorder_favourites(ids);
+        }
         else if (cmd == "run_action")       run_action(p.value("id", ""), p.value("title", ""));
         else if (cmd == "resize")           resize_to_content(json_int_or(p, "height", 0));
         else if (cmd == "close_page")       Dismiss();

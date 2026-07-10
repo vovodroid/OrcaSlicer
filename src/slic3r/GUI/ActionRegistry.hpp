@@ -58,6 +58,7 @@ public:
     // Dispatch + write-through (registry is the only thing that touches AppConfig).
     ScriptRunOutcome run(const std::string& id);            // runs + bumps stats
     void             set_favourite(const std::string& id, bool on);
+    void             reorder_favourites(const std::vector<std::string>& ids);   // persist a new bar order
 
     bool should_ask(const std::string& plugin_key) const;   // run-confirm gate
     void suppress_ask(const std::string& plugin_key);

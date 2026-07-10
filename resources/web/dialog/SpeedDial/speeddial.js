@@ -273,8 +273,63 @@ function renderFav() {
     tile.title = a.title;
     tile.setAttribute("aria-label", actionLabel(a, ACTIONS));
     tile.onclick = function () { sel = { zone: "fav", i: i }; run(a); };
+    tile.oncontextmenu = function (ev) {
+      ev.preventDefault();
+      // why: selecting shows the eyebrow, which grows the launcher - resize so the popup
+      //      isn't clipped (mirrors arrow-nav). requestResize no-ops when height is unchanged.
+      sel = { zone: "fav", i: i }; render({ resize: true });
+      showFavMenu(ev.clientX, ev.clientY, id);
+    };
     favEl.appendChild(tile);
   });
+}
+
+// ---- favourite context menu (right-click a tile) -----------------------------
+var favMenuEl = null;
+
+function hideFavMenu() { if (favMenuEl) favMenuEl.hidden = true; }
+
+function addFavMenuItem(label, enabled, fn) {
+  var item = document.createElement("button");
+  item.className = "ctx-item";
+  item.textContent = label;
+  item.disabled = !enabled;
+  item.onclick = function () { hideFavMenu(); fn(); };
+  favMenuEl.appendChild(item);
+}
+
+// One reused menu node (Move left/right + Unpin), positioned at the cursor and clamped
+// to the viewport. Native browser context menus can't add items, so we roll our own tiny one.
+function showFavMenu(x, y, id) {
+  if (!favMenuEl) {
+    favMenuEl = document.createElement("div");
+    favMenuEl.className = "ctx-menu";
+    document.body.appendChild(favMenuEl);
+  }
+  favMenuEl.innerHTML = "";
+  var favs = currentVisibleFavs();
+  var vi = favs.indexOf(id);
+  addFavMenuItem("Move left", vi > 0, function () { moveFav(id, -1); });
+  addFavMenuItem("Move right", vi >= 0 && vi < favs.length - 1, function () { moveFav(id, 1); });
+  addFavMenuItem("Unpin", true, function () { toggleFav(id); });
+  favMenuEl.hidden = false;
+  favMenuEl.style.left = Math.max(0, Math.min(x, window.innerWidth - favMenuEl.offsetWidth - 4)) + "px";
+  favMenuEl.style.top = Math.max(0, Math.min(y, window.innerHeight - favMenuEl.offsetHeight - 4)) + "px";
+}
+
+// Swap a favourite with its visible neighbour (dir -1/+1) and persist the new order. Swapping
+// by id inside FAVS (not the visible slice) keeps any hidden pins (no live action) in place.
+function moveFav(id, dir) {
+  var favs = currentVisibleFavs();
+  var vi = favs.indexOf(id);
+  var ni = vi + dir;
+  if (vi === -1 || ni < 0 || ni >= favs.length) return;
+  var a = FAVS.indexOf(id), b = FAVS.indexOf(favs[ni]);
+  if (a === -1 || b === -1) return;
+  FAVS[a] = favs[ni]; FAVS[b] = id;
+  SendMessage({ command: "reorder_favourites", ids: FAVS.slice() });
+  sel = { zone: "fav", i: ni };
+  render({ resize: true });
 }
 
 // Name of the selected favourite, shown above the bar; hidden unless a fav is selected.
@@ -432,7 +487,12 @@ function OnInit() {
     query = qEl.value; sel = { zone: "list", i: 0 }; syncClearButton(); render({ resize: true, resetScroll: true });
   });
 
+  // why: dismiss the fav context menu on any click/scroll away from it (capture scroll to catch nested scrollers).
+  document.addEventListener("click", hideFavMenu);
+  document.addEventListener("scroll", hideFavMenu, true);
+
   document.addEventListener("keydown", function (e) {
+    if (favMenuEl && !favMenuEl.hidden && e.key === "Escape") { e.preventDefault(); hideFavMenu(); return; }
     var arr = filterActions(ACTIONS, query);
     var favs = currentVisibleFavs();
     // why: Up/Down always navigate; Left/Right only navigate the fav bar. In the list zone,

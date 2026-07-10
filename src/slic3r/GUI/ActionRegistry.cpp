@@ -254,6 +254,23 @@ void ActionRegistry::set_favourite(const std::string& id, bool on)
         live->favourite = on;
 }
 
+void ActionRegistry::reorder_favourites(const std::vector<std::string>& ids)
+{
+    assert(wxThread::IsMain());
+    auto cur = read_string_array("favourite_actions");
+    std::vector<std::string> next;
+    // keep the requested order, but only ids that are actually favourites (guard a bad payload)
+    for (const auto& id : ids)
+        if (std::find(cur.begin(), cur.end(), id) != cur.end() &&
+            std::find(next.begin(), next.end(), id) == next.end())
+            next.push_back(id);
+    // why: don't drop favourites the page omitted (e.g. pins with no live action hidden from the bar)
+    for (const auto& id : cur)
+        if (std::find(next.begin(), next.end(), id) == next.end())
+            next.push_back(id);
+    write_section("favourite_actions", nlohmann::json(next));
+}
+
 bool ActionRegistry::should_ask(const std::string& plugin_key) const
 {
     assert(wxThread::IsMain());

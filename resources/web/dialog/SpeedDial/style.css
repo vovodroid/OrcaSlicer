@@ -55,6 +55,32 @@ body {
   border: 1px solid var(--speed-tile-border, #d8d8d8);
 }
 .fav-tile.sel { outline: 2px solid var(--main-color, var(--orca-accent, #009688)); outline-offset: 2px; }
+.ctx-menu {
+  position: fixed;
+  z-index: 10;
+  min-width: 120px;
+  padding: 4px;
+  background: var(--panel, var(--orca-bg, #fff));
+  border: 1px solid var(--border, var(--orca-border, #ddd));
+  border-radius: 7px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.18);
+}
+.ctx-menu[hidden] { display: none; }
+.ctx-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text, var(--orca-fg, #1b1c1e));
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ctx-item:hover { background: var(--row-hover, rgba(127,127,127,.16)); }
+.ctx-item:disabled { opacity: .4; cursor: default; }
+.ctx-item:disabled:hover { background: transparent; }
 .dial-head { flex: 0 0 auto; padding: 8px; }
 .plugin-search {
   display: flex;
