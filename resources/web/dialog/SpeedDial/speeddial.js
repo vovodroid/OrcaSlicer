@@ -9,38 +9,13 @@ var sel = { zone: "list", i: 0 };   // zone: 'list' | 'fav'
 var lastResizeHeight = 0;
 var matchIndex = {};
 
-function FoldChar(ch) {
-  return ch.normalize("NFD").replace(/\p{Diacritic}/gu, "");
-}
-
-function NormChar(ch) {
-  return FoldChar(ch).toLowerCase();
-}
+// why: fuzzy matcher (FoldChar/Norm/FuzzyRanges) lives in shared ../../js/fuzzy-search.js, loaded before
+//      this script - it is shared with the Plugins dialog. Speed dial search is always case-insensitive.
 
 // element handles, assigned in OnInit (kept null so load-time touches no DOM)
 var qEl = null, listEl = null, favEl = null, clearEl = null, eyeEl = null, countEl = null;
 
 // ---- pure helpers (no DOM; unit-tested) -------------------------------------
-function fuzzyRanges(text, query) {
-  var t = text || "";
-  var q = query || "";
-  if (!q)
-    return null;
-  var needle = Array.from(q).map(function (c) { return NormChar(c); }).join("");
-  var ranges = [];
-  var qi = 0;
-  for (var i = 0; i < t.length && qi < needle.length; i++) {
-    if (NormChar(t[i]) === needle[qi]) {
-      if (ranges.length && ranges[ranges.length - 1][1] === i)
-        ranges[ranges.length - 1][1] = i + 1;
-      else
-        ranges.push([i, i + 1]);
-      qi++;
-    }
-  }
-  return qi === needle.length ? ranges : null;
-}
-
 function filterActions(actions, query) {
   var q = (query || "").trim();
   var list = actions || [];
@@ -51,8 +26,8 @@ function filterActions(actions, query) {
   var out = [];
   for (var i = 0; i < list.length; i++) {
     var a = list[i];
-    var titleMatch = fuzzyRanges(a.title, q);
-    var pkgMatch = fuzzyRanges(a.pkg, q);
+    var titleMatch = FuzzyRanges(a.title, q, false);
+    var pkgMatch = FuzzyRanges(a.pkg, q, false);
     if (!titleMatch && !pkgMatch)
       continue;
     matchIndex[a.id] = { title: titleMatch, pkg: pkgMatch, useTitle: !!titleMatch };
