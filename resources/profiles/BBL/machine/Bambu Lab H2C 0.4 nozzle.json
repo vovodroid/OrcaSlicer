@@ -118,7 +118,7 @@
 		"14"
 	],
 	"support_chamber_temp_control": "1",
-	"support_air_filtration": "1",
+	"support_cooling_filter": "1",
 	"wrapping_exclude_area": [
 		"145x310",
 		"251x310",

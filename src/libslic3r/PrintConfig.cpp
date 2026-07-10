@@ -4095,6 +4095,11 @@ void PrintConfigDef::init_fff_params()
     def->mode=comDevelop;
     def->set_default_value(new ConfigOptionBool(true));
 
+    // Printer capability flag: switches the accessory UI between air filtration and the cooling filter.
+    def = this->add("support_cooling_filter", coBool);
+    def->mode    = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
+
     def = this->add("cooling_filter_enabled", coBool);
     def->label = L("Use cooling filter");
     def->tooltip = L("Enable this if printer support cooling filter");
