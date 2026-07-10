@@ -79,7 +79,7 @@ function visibleFavourites(favourites, actions) {
 }
 
 function resultCountText(total, shown, query) {
-  return (query || "").trim() ? shown + " of " + total : total + " actions";
+  return (query || "").trim() ? "Showing " + shown + " of " + total + " actions" : total + " actions";
 }
 
 // Resolve the selection cursor {zone,i} to the action id it points at: fav zone indexes the
@@ -115,6 +115,8 @@ function actionLabel(action, actions) {
 
 // Monogram code for a tile: title initial, escalated on collision by PREPENDING the pkg
 // initial (pi+ti, e.g. "GC"), then a 1-based ordinal - so same-titled actions stay distinct.
+// why: ordinal is assigned by id, not by ACTIONS order - ACTIONS is frecency-sorted and
+// reshuffles as usage changes, which would otherwise flip who's "1" and who's "2" across runs.
 function tileCode(action, actions) {
   var list = actions || [];
   var ti = (action.title || " ").charAt(0).toUpperCase();
@@ -125,6 +127,7 @@ function tileCode(action, actions) {
   var samePkg = sameTitle.filter(function (o) { return (o.pkg || " ").charAt(0).toUpperCase() === pi; });
   if (samePkg.length <= 1)
     return pi + ti;
+  samePkg.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
   for (var i = 0; i < samePkg.length; i++)
     if (samePkg[i].id === action.id)
       return pi + ti + (i + 1);
@@ -199,6 +202,7 @@ window.HandleStudio = function (payload) {
     lastResizeHeight = next.lastResizeHeight;
     if (qEl) {
       qEl.value = "";
+      qEl.placeholder = "Search " + ACTIONS.length + " actions";
       syncClearButton();
     }
     render({ resize: true, resetScroll: true });
