@@ -568,6 +568,9 @@ extern bool is_filament_extruder_override_key(const std::string &opt_key);
 extern std::vector<std::map<int, int>> get_extruder_ams_count(const std::vector<std::string> &strs);
 extern std::vector<std::string> save_extruder_ams_count_to_string(const std::vector<std::map<int, int>> &extruder_ams_count);
 
+// maps a full extruder variant string (e.g. "Direct Drive High Flow") to its NozzleVolumeType; nvtHybrid if unparsable
+extern NozzleVolumeType convert_to_nvt_type(const std::string& variant_str);
+
 // for parse extruder_nozzle_stats (per-extruder physical nozzle inventory by volume type)
 extern std::vector<std::map<NozzleVolumeType, int>> get_extruder_nozzle_stats(const std::vector<std::string> &strs);
 extern std::vector<std::string> save_extruder_nozzle_stats_to_string(const std::vector<std::map<NozzleVolumeType, int>> &extruder_nozzle_stats);

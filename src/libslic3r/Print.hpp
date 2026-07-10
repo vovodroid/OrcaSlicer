@@ -1057,6 +1057,18 @@ public:
     */
     std::vector<std::set<int>> get_physical_unprintable_filaments(const std::vector<unsigned int>& used_filaments) const;
 
+    /**
+    * @brief Determines the forbidden nozzle volume types for each used filament
+    *
+    * A filament may declare the extruder variants it supports. Every volume type offered by the
+    * printer's extruders that the filament does not support is forbidden for that filament.
+    * Hybrid volumes are ignored on both sides, and filaments declaring no variants are unrestricted.
+    *
+    * @param used_filaments Totally used filaments when slicing
+    * @return A map from used filament index to the set of nozzle volume types it cannot print on
+    */
+    std::map<int, std::set<NozzleVolumeType>> get_filament_unprintable_flow(const std::vector<unsigned int> &used_filaments) const;
+
     std::vector<double> get_extruder_printable_height() const;
     std::vector<Polygons> get_extruder_printable_polygons() const;
     std::vector<Polygons> get_extruder_unprintable_polygons() const;

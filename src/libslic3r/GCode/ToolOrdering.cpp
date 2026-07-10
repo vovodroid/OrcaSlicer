@@ -1944,6 +1944,7 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
 
     std::vector<std::set<int>>geometric_unprintables = m_print->get_geometric_unprintable_filaments();
     std::vector<std::set<int>>physical_unprintables = m_print->get_physical_unprintable_filaments(used_filaments);
+    auto filament_unprintable_volumes = m_print->get_filament_unprintable_flow(used_filaments);
 
     filament_maps = m_print->get_filament_maps();
     map_mode = m_print->get_filament_map_mode();
@@ -2012,7 +2013,7 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
         // per-layer maps in a selector (4-arg create) result — which sets support_dynamic_nozzle_map and
         // lights the GCode per-layer hotend/nozzle placeholders. filament_sequences is produced here, so
         // the static reorder below is skipped for this branch.
-        auto grouping_context = build_filament_group_context(m_print, layer_filaments, physical_unprintables, geometric_unprintables, {}, FilamentMapMode::fmmAutoForFlush,
+        auto grouping_context = build_filament_group_context(m_print, layer_filaments, physical_unprintables, geometric_unprintables, filament_unprintable_volumes, FilamentMapMode::fmmAutoForFlush,
                                                              m_initial_nozzle_status.get_nozzle_filament_map());
         // The time estimator's per-extruder print times are global and do not apply to per-range
         // grouping.
@@ -2020,7 +2021,7 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
 
         m_nozzle_status = m_initial_nozzle_status;
         auto dynamic_plan_res = plan_filament_mapping_and_order_by_combo_ranges(m_print, grouping_context, get_custom_seq, FilamentMapMode::fmmAutoForFlush,
-                                                                                physical_unprintables, geometric_unprintables, {}, &m_nozzle_status);
+                                                                                physical_unprintables, geometric_unprintables, filament_unprintable_volumes, &m_nozzle_status);
 
         std::vector<std::vector<int>> nozzle_map_per_layer;
         for (auto& res : dynamic_plan_res) {
@@ -2042,7 +2043,7 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
     }
     // only check and map in sequence mode, in by object mode, we check the map in print.cpp
     else if (print_config->print_sequence != PrintSequence::ByObject || m_print->objects().size() == 1) {
-        grouping_result = ToolOrdering::get_recommended_filament_maps(layer_filaments, m_print, map_mode, physical_unprintables, geometric_unprintables);
+        grouping_result = ToolOrdering::get_recommended_filament_maps(layer_filaments, m_print, map_mode, physical_unprintables, geometric_unprintables, filament_unprintable_volumes);
         std::vector<int> derived_maps = grouping_result.get_extruder_map(false); // 1-based extruder map
 
         if (map_mode < FilamentMapMode::fmmManual) {
@@ -2145,12 +2146,12 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
                 // is_dynamic_group_reorder() implies filament_map_mode == fmmAutoForFlush, contradicting
                 // this map_mode != fmmAutoForFlush guard, so this sub-branch is unreachable under the
                 // current predicate. It is provably inert.
-                auto best_context = build_filament_group_context(m_print, layer_filaments, physical_unprintables, geometric_unprintables, {}, FilamentMapMode::fmmAutoForFlush,
+                auto best_context = build_filament_group_context(m_print, layer_filaments, physical_unprintables, geometric_unprintables, filament_unprintable_volumes, FilamentMapMode::fmmAutoForFlush,
                                                                  m_initial_nozzle_status.get_nozzle_filament_map());
                 best_context.speed_info.group_with_time = false;
                 MultiNozzleUtils::NozzleStatusRecorder best_nozzle_status = m_initial_nozzle_status;
                 auto best_plan = plan_filament_mapping_and_order_by_combo_ranges(m_print, best_context, get_custom_seq, FilamentMapMode::fmmAutoForFlush,
-                                                                                 physical_unprintables, geometric_unprintables, {}, &best_nozzle_status);
+                                                                                 physical_unprintables, geometric_unprintables, filament_unprintable_volumes, &best_nozzle_status);
                 std::vector<std::vector<int>> best_nozzle_map_per_layer;
                 for (auto& res : best_plan) {
                     best_sequences.emplace_back(cast<unsigned int>(res.fil_order));
@@ -2164,7 +2165,7 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
                 // Best-for-flush grouping (nozzle-aware result). The extruder-level map fed to the flush
                 // reorder is derived exactly as before, so best_sequences (and the flush weight) are
                 // identical; only flush_filament_change_count is now charged per physical nozzle.
-                auto best_group_result = get_recommended_filament_maps(layer_filaments, m_print, fmmAutoForFlush, physical_unprintables, geometric_unprintables);
+                auto best_group_result = get_recommended_filament_maps(layer_filaments, m_print, fmmAutoForFlush, physical_unprintables, geometric_unprintables, filament_unprintable_volumes);
                 std::vector<int> best_maps = best_group_result.get_extruder_map();
                 reorder_filaments_for_minimum_flush_volume(
                     filament_lists,

@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <limits>
 #include <numeric>
+#include <unordered_map>
 #include <unordered_set>
 #include <sstream>
 #include <boost/filesystem/path.hpp>
@@ -2504,13 +2505,14 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
 
             auto physical_unprintables = this->get_physical_unprintable_filaments(used_filaments);
             auto geometric_unprintables = this->get_geometric_unprintable_filaments();
+            auto filament_unprintable_volumes = this->get_filament_unprintable_flow(used_filaments);
             std::vector<int>filament_maps = this->get_filament_maps();
             auto map_mode = get_filament_map_mode();
             // get recommended filament map
             if (map_mode < FilamentMapMode::fmmManual) {
                 // Grouping returns a nozzle-aware result; the 1-based extruder map
                 // for the by-object path is derived from it.
-                auto grouping_result = ToolOrdering::get_recommended_filament_maps(all_filaments, this, map_mode, physical_unprintables, geometric_unprintables);
+                auto grouping_result = ToolOrdering::get_recommended_filament_maps(all_filaments, this, map_mode, physical_unprintables, geometric_unprintables, filament_unprintable_volumes);
                 auto derived_maps = grouping_result.get_extruder_map(false);
                 if (!derived_maps.empty()) {
                     filament_maps = derived_maps;
@@ -3278,6 +3280,41 @@ std::vector<std::set<int>> Print::get_physical_unprintable_filaments(const std::
     }
 
     return physical_unprintables;
+}
+
+std::map<int, std::set<NozzleVolumeType>> Print::get_filament_unprintable_flow(const std::vector<unsigned int> &used_filaments) const
+{
+    std::map<int, std::set<NozzleVolumeType>> ret;
+    std::vector<std::string> extruder_variant_list = m_config.printer_extruder_variant.values;
+    // A filament that declares no extruder variants carries no flow restriction.
+    const ConfigOptionStrings *filament_variant_opt = m_ori_full_print_config.option<ConfigOptionStrings>("filament_extruder_variant");
+    if (filament_variant_opt == nullptr)
+        return ret;
+    std::vector<std::string> filament_variant_list = filament_variant_opt->values;
+    std::vector<int> filament_self_index;
+    if (!m_ori_full_print_config.has("filament_self_index"))
+        filament_self_index.resize(filament_variant_list.size(), 1);
+    else
+        filament_self_index = m_ori_full_print_config.option<ConfigOptionInts>("filament_self_index")->values;
+    std::unordered_set<int> used_fils_set(used_filaments.begin(), used_filaments.end());
+
+    std::unordered_map<int, std::set<NozzleVolumeType>> filament_variant_map;
+    for(int i = 0; i < filament_variant_list.size(); ++i){
+        NozzleVolumeType volume = convert_to_nvt_type(filament_variant_list[i]);
+        if(volume != nvtHybrid) filament_variant_map[filament_self_index[i]].insert(volume);
+    }
+
+    for (auto iter : filament_variant_map) {
+        int fil_idx = iter.first - 1;
+        if (used_fils_set.find(fil_idx) == used_fils_set.end()) continue;
+        const std::set<NozzleVolumeType> &volumes = iter.second;
+        for (int exd_idx = 0; exd_idx < extruder_variant_list.size(); ++exd_idx) {
+            auto exd_volume = convert_to_nvt_type(extruder_variant_list[exd_idx]);
+            assert(exd_volume != nvtHybrid);
+            if (volumes.find(exd_volume) == volumes.end() && exd_volume != nvtHybrid) ret[fil_idx].insert(exd_volume);
+        }
+    }
+    return ret;
 }
 
 
