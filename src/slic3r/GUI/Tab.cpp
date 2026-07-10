@@ -46,6 +46,7 @@
 
 #include "Widgets/ComboBox.hpp"
 #include "Widgets/Label.hpp"
+#include "Widgets/MultiNozzleSync.hpp"
 #include "Widgets/SwitchButton.hpp"
 #include "Widgets/TabCtrl.hpp"
 #include "Widgets/ComboBox.hpp"
@@ -5677,6 +5678,19 @@ void TabPrinter::on_preset_loaded()
     }
     if (wxGetApp().plater())
         wxGetApp().plater()->sidebar().enable_purge_mode_btn(show_purge_mode);
+
+    // Sidebar nozzle-count badge on the extruder cards. The `extruder_nozzle_stats` key is session-only —
+    // saved presets never carry it, so any preset switch rebuilds the edited config without it — so
+    // re-baseline it whenever it is missing (each extruder gets extruder_max_nozzle_count nozzles of its
+    // selected volume type), then refresh the badges. Idempotent, so run on every preset load.
+    if (wxGetApp().plater())
+        wxGetApp().plater()->sidebar().enable_nozzle_count_edit(has_multiple_nozzle);
+    const auto *nozzle_stats = m_preset_bundle->printers.get_edited_preset().config.option<ConfigOptionStrings>("extruder_nozzle_stats");
+    if (nozzle_stats == nullptr || nozzle_stats->values.empty())
+        seedExtruderNozzleStats(m_preset_bundle);
+    if (auto *nozzle_volume_type = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type"))
+        for (size_t idx = 0; idx < nozzle_volume_type->values.size(); ++idx)
+            updateNozzleCountDisplay(m_preset_bundle, idx, NozzleVolumeType(nozzle_volume_type->values[idx]));
 }
 
 void TabPrinter::update_pages()
@@ -7551,6 +7565,11 @@ void TabPrinter::set_extruder_volume_type(int extruder_id, NozzleVolumeType type
     auto nozzle_volumes = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
     assert(nozzle_volumes->values.size() > (size_t)extruder_id);
     nozzle_volumes->values[extruder_id] = type;
+
+    // Carry the extruder's nozzle count over to the new flow type and refresh the sidebar badge.
+    onNozzleVolumeTypeSwitch(m_preset_bundle, extruder_id, type);
+    updateNozzleCountDisplay(m_preset_bundle, extruder_id, type);
+
     on_value_change((boost::format("nozzle_volume_type#%1%") % extruder_id).str(), int(type));
 
     //save to app config

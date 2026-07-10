@@ -75,6 +75,8 @@ ManualNozzleCountDialog::ManualNozzleCountDialog(
 
     wxPanel *content = new wxPanel(this);
     content->SetBackgroundColour(*wxWHITE);
+    wxBitmap    nozzle_bmp  = create_scaled_bitmap("hotend_thumbnail", nullptr, FromDIP(60));
+    auto       *nozzle_icon = new wxStaticBitmap(content, wxID_ANY, nozzle_bmp);
     wxBoxSizer *content_sizer = new wxBoxSizer(wxHORIZONTAL);
     content->SetSizer(content_sizer);
 
@@ -85,14 +87,15 @@ ManualNozzleCountDialog::ManualNozzleCountDialog(
     for (int i = 0; i <= max_nozzle_count; ++i)
         nozzle_choices.Add(wxString::Format("%d", i));
 
-    // Orca's NozzleVolumeType is {Standard, High Flow} (no Hybrid), so exactly one choice is shown per dialog.
-    if (volume_type == nvtStandard) {
+    // A Hybrid extruder mixes Standard and High Flow nozzles, so it gets both count choices; the concrete
+    // types get exactly one.
+    if (volume_type == nvtStandard || volume_type == nvtHybrid) {
         choice_sizer->Add(new wxStaticText(content, wxID_ANY, _L(get_nozzle_volume_type_string(nvtStandard))), 0, wxALL | wxALIGN_LEFT, FromDIP(5));
         m_standard_choice = new wxChoice(content, wxID_ANY, wxDefaultPosition, wxSize(FromDIP(100), -1), nozzle_choices);
         m_standard_choice->SetSelection(standard_count);
         choice_sizer->Add(m_standard_choice, 0, wxLEFT | wxBOTTOM | wxRIGHT, FromDIP(10));
     }
-    if (volume_type == nvtHighFlow) {
+    if (volume_type == nvtHighFlow || volume_type == nvtHybrid) {
         choice_sizer->Add(new wxStaticText(content, wxID_ANY, _L(get_nozzle_volume_type_string(nvtHighFlow))), 0, wxALL | wxALIGN_LEFT, FromDIP(5));
         m_highflow_choice = new wxChoice(content, wxID_ANY, wxDefaultPosition, wxSize(FromDIP(100), -1), nozzle_choices);
         m_highflow_choice->SetSelection(highflow_count);
@@ -133,6 +136,7 @@ ManualNozzleCountDialog::ManualNozzleCountDialog(
             e.Skip();
         });
 
+    content_sizer->Add(nozzle_icon, 0, wxALL | wxALIGN_CENTER_VERTICAL, FromDIP(15));
     content_sizer->Add(choice_sizer, 0, wxALIGN_CENTRE_VERTICAL);
 
     m_confirm_btn = new Button(this, _L("Confirm"));
@@ -155,14 +159,28 @@ int ManualNozzleCountDialog::GetNozzleCount(NozzleVolumeType volume_type) const
         return m_standard_choice ? m_standard_choice->GetSelection() : 0;
     if (volume_type == nvtHighFlow)
         return m_highflow_choice ? m_highflow_choice->GetSelection() : 0;
+    if (volume_type == nvtHybrid)
+        return (m_standard_choice ? m_standard_choice->GetSelection() : 0) +
+               (m_highflow_choice ? m_highflow_choice->GetSelection() : 0);
     return 0;
 }
 
 // ---- free functions -------------------------------------------------------------------------------------------
 
+// Session-scoped provenance of the current `extruder_nozzle_stats` values: device sync sets it so a manual
+// flow switch keeps the machine-reported per-type breakdown; seeding clears it. The stats themselves do not
+// survive a preset switch (the key is absent from saved presets, so the edited config is rebuilt without it),
+// so this flag only protects the currently loaded values.
+static bool s_nozzle_stats_from_machine = false;
+
+void setNozzleStatsFromMachine(bool from_machine) { s_nozzle_stats_from_machine = from_machine; }
+
 void setExtruderNozzleCount(PresetBundle *preset_bundle, int extruder_id, NozzleVolumeType volume_type, int nozzle_count, bool clear_all)
 {
     if (!preset_bundle)
+        return;
+    // Hybrid is a mix marker, not a physical nozzle type — never a stats key.
+    if (volume_type == nvtHybrid)
         return;
     auto &config = preset_bundle->printers.get_edited_preset().config;
     auto *opt    = config.option<ConfigOptionStrings>("extruder_nozzle_stats", true);
@@ -200,12 +218,59 @@ bool extruder_supports_tpu_high_flow(PresetBundle *preset_bundle, int extruder_i
 
 void updateNozzleCountDisplay(PresetBundle *preset_bundle, int extruder_id, NozzleVolumeType volume_type)
 {
-    // Orca: the sidebar ExtruderGroup has no per-extruder nozzle-count badge yet, so this refresh is a no-op. The
-    // authoritative count already lives in the extruder_nozzle_stats config written by setExtruderNozzleCount; kept
-    // as the wiring point for that future UI.
-    (void) preset_bundle;
-    (void) extruder_id;
-    (void) volume_type;
+    auto *plater = wxGetApp().plater();
+    if (!preset_bundle || !plater)
+        return;
+
+    auto *max_nozzle_count = preset_bundle->printers.get_edited_preset().config.option<ConfigOptionIntsNullable>("extruder_max_nozzle_count");
+    // Skip nil entries: a nullable-int nil is INT_MAX (> 1) and would otherwise falsely pass the gate.
+    const bool support_multi_nozzle = max_nozzle_count &&
+        std::any_of(max_nozzle_count->values.begin(), max_nozzle_count->values.end(),
+                    [](int v) { return v > 1 && v != ConfigOptionIntsNullable::nil_value(); });
+
+    int display_count = -1; // hides the badge
+    if (support_multi_nozzle)
+        display_count = volume_type == nvtHybrid ? extruder_nozzle_count_total(preset_bundle, extruder_id)
+                                                 : extruder_nozzle_count(preset_bundle, extruder_id, volume_type);
+    plater->sidebar().set_extruder_nozzle_count(extruder_id, display_count);
+}
+
+void seedExtruderNozzleStats(PresetBundle *preset_bundle)
+{
+    if (!preset_bundle)
+        return;
+    auto *max_nozzle_count   = preset_bundle->printers.get_edited_preset().config.option<ConfigOptionIntsNullable>("extruder_max_nozzle_count");
+    auto *nozzle_volume_type = preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
+
+    const int extruder_count = preset_bundle->get_printer_extruder_count();
+    for (int eid = 0; eid < extruder_count; ++eid) {
+        NozzleVolumeType type = nvtStandard;
+        if (nozzle_volume_type && eid < (int) nozzle_volume_type->values.size())
+            type = NozzleVolumeType(nozzle_volume_type->values[eid]);
+        // A fresh seed has no per-type breakdown to draw on, so a Hybrid extruder starts as all-Standard.
+        if (type == nvtHybrid)
+            type = nvtStandard;
+        int count = 1;
+        if (max_nozzle_count && eid < (int) max_nozzle_count->values.size() &&
+            max_nozzle_count->values[eid] != ConfigOptionIntsNullable::nil_value())
+            count = max_nozzle_count->values[eid];
+        setExtruderNozzleCount(preset_bundle, eid, type, count, true);
+    }
+    s_nozzle_stats_from_machine = false;
+}
+
+void onNozzleVolumeTypeSwitch(PresetBundle *preset_bundle, int extruder_id, NozzleVolumeType type)
+{
+    if (!preset_bundle)
+        return;
+    // Machine-synced stats carry the device's per-type breakdown; a flow switch must not collapse it.
+    if (s_nozzle_stats_from_machine)
+        return;
+    // Hybrid is a mix, not a type every nozzle shares, so there is nothing to carry over.
+    if (type == nvtHybrid)
+        return;
+    const int total = extruder_nozzle_count_total(preset_bundle, extruder_id);
+    setExtruderNozzleCount(preset_bundle, extruder_id, type, total, true);
 }
 
 void manuallySetNozzleCount(int extruder_id)
@@ -232,14 +297,20 @@ void manuallySetNozzleCount(int extruder_id)
     const int              standard_count = extruder_nozzle_count(preset_bundle, extruder_id, nvtStandard);
     const int              highflow_count = extruder_nozzle_count(preset_bundle, extruder_id, nvtHighFlow);
 
-    // Require at least one nozzle when the other extruder currently has none.
-    bool force_no_zero = false;
+    // Require at least one nozzle for a Hybrid extruder (an empty mix is meaningless) and when the other
+    // extruder currently has none.
+    bool force_no_zero = volume_type == nvtHybrid;
     if (nozzle_volume_type_opt->values.size() > 1)
-        force_no_zero = extruder_nozzle_count_total(preset_bundle, 1 - extruder_id) == 0;
+        force_no_zero |= extruder_nozzle_count_total(preset_bundle, 1 - extruder_id) == 0;
 
     ManualNozzleCountDialog dialog(wxGetApp().plater(), volume_type, standard_count, highflow_count, max_nozzle_count->values[extruder_id], force_no_zero);
     if (dialog.ShowModal() == wxID_OK) {
-        setExtruderNozzleCount(preset_bundle, extruder_id, volume_type, dialog.GetNozzleCount(volume_type), true);
+        if (volume_type == nvtHybrid) {
+            setExtruderNozzleCount(preset_bundle, extruder_id, nvtStandard, dialog.GetNozzleCount(nvtStandard), true);
+            setExtruderNozzleCount(preset_bundle, extruder_id, nvtHighFlow, dialog.GetNozzleCount(nvtHighFlow), false);
+        } else {
+            setExtruderNozzleCount(preset_bundle, extruder_id, volume_type, dialog.GetNozzleCount(volume_type), true);
+        }
         updateNozzleCountDisplay(preset_bundle, extruder_id, volume_type);
         wxGetApp().plater()->update();
     }
@@ -1182,7 +1253,7 @@ std::optional<NozzleOption> tryPopUpMultiNozzleDialog(MachineObject* obj)
             bool clear_all = true;
             if (!selected_option->extruder_nozzle_stats.count(extruder_id)) {
                 nozzle_count = 0;
-                // Reset the concrete volume types (Standard/High Flow); Hybrid stays a hidden match-any sentinel.
+                // Reset the concrete volume types (Standard/High Flow); Hybrid is a mix marker, never a stats key.
                 // TPU High Flow is a concrete variant that exists only on 0.4/0.6 nozzles, so reset it too, but
                 // only there (same guard that skips High Flow on 0.2).
                 std::vector<NozzleVolumeType> reset_types{nvtStandard, nvtHighFlow};
@@ -1203,9 +1274,13 @@ std::optional<NozzleOption> tryPopUpMultiNozzleDialog(MachineObject* obj)
                 }
             }
         }
-        // Orca: there is no ExtruderNozzleStat runtime object, so there is no machine/user data-source flag to mark
-        // here; nozzle stats persist directly into the printer preset's `extruder_nozzle_stats` config key via
-        // setExtruderNozzleCount.
+        // The stats now hold the device's per-type breakdown: protect it from being collapsed by a manual
+        // flow switch, and refresh the sidebar badges.
+        setNozzleStatsFromMachine(true);
+        if (nozzle_volume_type_opt) {
+            for (int extruder_id = 0; extruder_id < 2 && extruder_id < (int) nozzle_volume_type_opt->values.size(); ++extruder_id)
+                updateNozzleCountDisplay(preset_bundle, extruder_id, NozzleVolumeType(nozzle_volume_type_opt->values[extruder_id]));
+        }
         return selected_option;
     }
 

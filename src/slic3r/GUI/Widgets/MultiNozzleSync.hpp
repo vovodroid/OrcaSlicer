@@ -219,9 +219,23 @@ std::optional<NozzleOption> tryPopUpMultiNozzleDialog(MachineObject* obj);
 // counts are reset first.
 void setExtruderNozzleCount(PresetBundle *preset_bundle, int extruder_id, NozzleVolumeType type, int nozzle_count, bool clear_all);
 
-// Refresh the sidebar nozzle-count display for one extruder. Deferred wiring point: Orca's sidebar ExtruderGroup has
-// no nozzle-count widget yet, so the multi-nozzle sidebar UI is not wired up.
+// Refresh the sidebar nozzle-count badge for one extruder: shows the extruder's physical nozzle count on
+// multi-nozzle printers, hides it (count -1) everywhere else.
 void updateNozzleCountDisplay(PresetBundle *preset_bundle, int extruder_id, NozzleVolumeType volume_type);
+
+// Reset `extruder_nozzle_stats` to its baseline for the selected printer: each extruder gets
+// extruder_max_nozzle_count nozzles of its currently selected volume type. Called whenever the stats are
+// absent (the key is session-only — preset switches rebuild the edited config without it). Clears the
+// machine-provenance flag.
+void seedExtruderNozzleStats(PresetBundle *preset_bundle);
+
+// React to the user switching one extruder's nozzle volume type: carry the extruder's total nozzle count
+// over to the new type. No-op for Hybrid (which is a mix, not a type all nozzles share) and for
+// machine-synced stats (the device-reported per-type breakdown must survive a flow switch).
+void onNozzleVolumeTypeSwitch(PresetBundle *preset_bundle, int extruder_id, NozzleVolumeType type);
+
+// Mark the current `extruder_nozzle_stats` values as machine-reported (device sync) or manual/seeded.
+void setNozzleStatsFromMachine(bool from_machine);
 
 // True when a nozzle of this diameter can carry the "Direct Drive TPU High Flow" variant. That variant
 // exists on the 0.4 and 0.6 nozzle H2D/H2D Pro leaves (not 0.2/0.8), so this is the single source of truth
