@@ -39,8 +39,8 @@ pybind11::array make_readonly_rows(pybind11::handle base, const T* data, pybind1
     namespace py = pybind11;
     if (rows == 0 || data == nullptr) {
         py::array_t<T> empty(std::vector<py::ssize_t>{ 0, (py::ssize_t) N });
-        // Keep behavior-preserving: the pre-refactor helper returned read-only
-        // arrays on every path, so mark the fresh empty array read-only too.
+        // Mark the fresh empty array read-only so every return path of this
+        // helper yields a read-only view.
         empty.attr("setflags")(py::arg("write") = false);
         return std::move(empty);
     }

@@ -10,7 +10,7 @@ namespace Slic3r {
 bool SlicingPipelineContext::cancelled() const { return print && print->canceled(); }
 
 void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::enum_<PluginCapabilityType>& pluginTypes) {
-    (void) pluginTypes; // matches gcode/script/printerAgent; Step is a fresh enum below.
+    (void) pluginTypes; // unused: this capability defines its own Step enum (below) rather than extending the shared PluginCapabilityType enum.
     auto slicing = module.def_submodule("slicing", "Slicing pipeline API (research/experimental).");
 
     py::enum_<SlicingPipelineStepPlugin>(slicing, "Step")
@@ -18,7 +18,7 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
         .value("posPerimeters", SlicingPipelineStepPlugin::posPerimeters)
         .value("posEstimateCurledExtrusions", SlicingPipelineStepPlugin::posEstimateCurledExtrusions)
         .value("posPrepareInfill", SlicingPipelineStepPlugin::posPrepareInfill) // after prepare_infill, before make_fills: editing fill_surfaces here CASCADES
-        .value("posInfill", SlicingPipelineStepPlugin::posInfill)          // after make_fills: editing fill_surfaces here does NOT regenerate fills (v1)
+        .value("posInfill", SlicingPipelineStepPlugin::posInfill)          // after make_fills: editing fill_surfaces here does NOT regenerate the fills
         .value("posIroning", SlicingPipelineStepPlugin::posIroning)
         .value("posContouring", SlicingPipelineStepPlugin::posContouring)
         .value("posSupportMaterial", SlicingPipelineStepPlugin::posSupportMaterial)
@@ -70,8 +70,8 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
             if (ctx.object == nullptr)
                 return py::none();
             // The hook signature hands objects out as const; they are genuinely mutable
-            // (owned by the Print) — the same const_cast the old view mutators used,
-            // done once here at the graph entry point.
+            // (owned by the Print), so the const_cast is safe — done once here at the
+            // graph entry point so Python steps receive a mutable PrintObject.
             return py::cast(const_cast<PrintObject*>(ctx.object), py::return_value_policy::reference);
         }, "orca.host.PrintObject for object-scoped steps, or None for print-wide steps. "
            "Valid only during the execute(ctx) call.")

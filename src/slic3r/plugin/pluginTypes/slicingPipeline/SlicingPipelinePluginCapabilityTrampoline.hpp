@@ -14,10 +14,10 @@ public:
             [&]{
                 // At Step.psGCodePostProcess the plugin edits the exported G-code file, which lives
                 // outside data_dir() (a temp/output folder), so writing to it would otherwise be
-                // blocked by the audit sandbox. Grant that folder as a scoped allowed root, mirroring
-                // the former G-code post-processing trampoline. The setup callback runs AFTER the
-                // audit context is constructed, so the scoped root is not cleared by its constructor.
-                // Empty at every other step, so no extra access is granted to the geometry hooks.
+                // blocked by the audit sandbox. Grant that folder as a scoped allowed root. The setup
+                // callback runs AFTER the audit context is constructed, so the scoped root is not
+                // cleared by its constructor. Empty at every other step, so no extra access is
+                // granted to the geometry hooks.
                 if (!ctx.gcode_path.empty())
                     ::Slic3r::PluginAuditManager::instance().add_scoped_allowed_root(
                         std::filesystem::path(ctx.gcode_path).parent_path());

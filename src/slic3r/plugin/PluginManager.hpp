@@ -102,7 +102,7 @@ void execute_capabilities_from_refs(const ConfigOptionStrings& capabilities,
 {
     PluginManager&                plugin_mgr = PluginManager::instance();
 
-    // Log prefix derived from the capability type so each capability family (Post-processing,
+    // Log prefix derived from the capability type so each capability family (Printer connection,
     // Slicing Pipeline, ...) tags its dispatch diagnostics with its own display name.
     const std::string tag = plugin_capability_type_display_name(type);
 

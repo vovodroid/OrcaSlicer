@@ -109,7 +109,7 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
     // ------------------------------------------------------------------
     // Slicing print-graph data model — raw bindings of the classes the C++
     // pipeline itself uses, same nodelete/reference style as the Model and
-    // Preset graphs above.
+    // Preset graphs in PluginHostApi.cpp.
     //
     // LIFETIME (C++ semantics, the one rule of this API): every object handed
     // out below is a non-owning reference into the live slicing graph owned by
@@ -306,8 +306,7 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
         .def("set_type", [](SurfaceCollection& c, SurfaceType t) { c.set_type(t); }, py::arg("surface_type"))
         .def("set", [](SurfaceCollection& c, const std::vector<ExPolygon>& src, SurfaceType t) { c.set(src, t); },
              py::arg("expolygons"), py::arg("surface_type"),
-             "Replace all surfaces from a list of ExPolygon, all tagged `surface_type`. "
-             "This is the faithful replacement for the retired set_slices().")
+             "Replace all surfaces from a list of ExPolygon, all tagged `surface_type`.")
         .def("set", [](SurfaceCollection& c, const std::vector<Surface>& src) { c.set(src); },
              py::arg("surfaces"), "Replace all surfaces from a list of Surface (types preserved per surface).")
         .def("append", [](SurfaceCollection& c, const std::vector<ExPolygon>& src, SurfaceType t) { c.append(src, t); },
@@ -315,9 +314,8 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
         .def("filter_by_type", [](py::object self, SurfaceType t) {
             SurfaceCollection& c = self.cast<SurfaceCollection&>();
             py::list out;
-            // SurfacesPtr (SurfaceCollection::filter_by_type's return type) is
-            // std::vector<const Surface*> (see Surface.hpp); the brief's note describing it
-            // as std::vector<Surface*> does not match the header, so this iterates by const
+            // SurfaceCollection::filter_by_type returns SurfacesPtr, which is
+            // std::vector<const Surface*> (see Surface.hpp), so iterate by const
             // pointer (py::cast accepts `const itype*` directly, see cast.h cast(const itype*)).
             for (const Surface* s : c.filter_by_type(t))
                 out.append(py::cast(s, py::return_value_policy::reference_internal, self));
@@ -333,7 +331,7 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
         }, "Surfaces as [Surface] references into the live collection. Invalidated by "
            "set()/append()/clear() on this collection (C++ vector semantics).");
 
-    // --- Extrusion tree (read-only in v1). Registered polymorphically: when a returned
+    // --- Extrusion tree (read-only). Registered polymorphically: when a returned
     // ExtrusionEntity*'s dynamic type IS one of the classes registered below, pybind
     // hands the plugin that concrete type, so plugins walk the same tree shape C++ does.
     // When the dynamic type is NOT registered (e.g. ExtrusionLoopSloped, produced with
@@ -419,9 +417,9 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
         .def_readonly("fill_surfaces", &LayerRegion::fill_surfaces,
             "Surfaces prepared for infill (SurfaceCollection). Edit in place or via fill_surfaces.set(...).")
         .def_readonly("perimeters", &LayerRegion::perimeters,
-            "Perimeter toolpaths (ExtrusionEntityCollection, read-only in v1).")
+            "Perimeter toolpaths (ExtrusionEntityCollection, read-only).")
         .def_readonly("fills", &LayerRegion::fills,
-            "Infill toolpaths (ExtrusionEntityCollection, read-only in v1).")
+            "Infill toolpaths (ExtrusionEntityCollection, read-only).")
         .def("layer", [](LayerRegion& r) -> py::object {
             Layer* l = r.layer();
             if (l == nullptr)
@@ -487,7 +485,7 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
                 out.append(py::cast(static_cast<Layer*>(sl),
                                     py::return_value_policy::reference_internal, self));
             return out;
-        }, "Support layers as [Layer] (support-specific fields are not exposed in v1).")
+        }, "Support layers as [Layer] (support-specific fields are not exposed).")
         .def("model_object", [](PrintObject& o) -> py::object {
             // The Print's model SNAPSHOT (worker-thread stable), reusing the
             // orca.host.ModelObject bindings — mesh access for slicing plugins.

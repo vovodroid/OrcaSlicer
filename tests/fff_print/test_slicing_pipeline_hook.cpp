@@ -115,7 +115,7 @@ TEST_CASE("Inactive hook: process output is byte-identical (no-op hook == unset)
     CHECK(strip_nondeterministic_gcode_lines(run(true,  true)) == baseline);  // active no-op hook fires everywhere, mutates nothing
 }
 
-// Fix 4(a): gating negative path. With the option EMPTY the plugin is inactive, so a
+// Gating negative path. With the option EMPTY the plugin is inactive, so a
 // registered hook must NOT fire even once across a full slice (m_pipeline_plugin_active
 // stays false in Print::apply). Distinct from the byte-identical test above: this asserts
 // the gate directly by counting invocations rather than comparing output.
@@ -132,7 +132,7 @@ TEST_CASE("Empty option: registered hook is gated off and never fires", "[slicin
     CHECK(calls == 0);
 }
 
-// Fix 4(b): duplicate-skip gating. Two ModelObjects that share one mesh_ptr are detected as
+// Duplicate-skip gating. Two ModelObjects that share one mesh_ptr are detected as
 // identical by Print::process()'s is_print_object_the_same(); the second becomes a shared
 // (duplicate) object and is NOT re-sliced, so the Slice hook must fire exactly once even
 // though there are two print objects. The clone shares mesh_ptr and copies the volume
@@ -220,11 +220,11 @@ TEST_CASE("Changing slicing_pipeline_plugin invalidates posSlice", "[slicing_pip
 
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-// §3.6 (Twistify design): Twistify's effect is a similarity transform (rotate + uniform
-// scale) applied to slices at Step.posSlice. This C++ analogue rotates every region's slices a
-// fixed 45 deg about the object's base-footprint center -- the same seam and cascade that
-// Twistify.py drives through the slices.set() + Layer::make_slices() path. Two end-to-end invariants after
-// process() confirm the approach:
+// A similarity transform (rotate + uniform scale) applied to slices at Step.posSlice, matching
+// what the Twistify sample (sandboxes/orca_twistify_plugin_example_any.py) does. This C++ analogue
+// rotates every region's slices a fixed 45 deg about the object's base-footprint center -- the same
+// seam and cascade the sample drives through the slices.set() + Layer::make_slices() path. Two
+// end-to-end invariants after process() confirm the approach:
 //   (1) a pure rotation is a similarity with scale 1, so total fill area is preserved, and
 //   (2) the mutation genuinely cascaded into make_perimeters' fill_surfaces -- a 20mm square
 //       rotated 45 deg becomes a diamond whose bbox is ~sqrt(2)x wider (it did not stay
@@ -300,13 +300,13 @@ TEST_CASE("Rotating slices at the Slice boundary cascades (area preserved, bbox 
     CHECK(rot.height < 1.5 * base.height);
 }
 
-// §3.6 (Twistify design): Twistify skips exact-identity layers entirely, but every transformed
-// layer invokes the slices.set() write-back + make_perimeters re-run. This proves that write path
-// is lossless for already-normalized (CCW contour / CW hole) input -- an active hook that
-// re-sets every region's slices to their CURRENT geometry (the identity similarity transform)
-// produces output byte-identical to an active hook that mutates nothing. Both runs are active
-// (same config dump); the only difference is whether the write path ran, so equality isolates it.
-TEST_CASE("Identity round-trip through set_slices is byte-identical", "[slicing_pipeline]") {
+// The Twistify sample skips exact-identity layers entirely, but every transformed layer invokes
+// the slices.set() write-back + make_perimeters re-run. This proves that write path is lossless
+// for already-normalized (CCW contour / CW hole) input -- an active hook that re-sets every
+// region's slices to their CURRENT geometry (the identity similarity transform) produces output
+// byte-identical to an active hook that mutates nothing. Both runs are active (same config dump);
+// the only difference is whether the write path ran, so equality isolates it.
+TEST_CASE("Identity round-trip through slices.set() is byte-identical", "[slicing_pipeline]") {
     auto run = [](bool roundtrip) {
         Slic3r::Print print; Slic3r::Model model;
         auto config = Slic3r::DynamicPrintConfig::full_print_config();
@@ -390,7 +390,7 @@ TEST_CASE("raw_slices captures post-hook geometry so a perimeter re-run keeps th
 }
 
 // A plugin can mutate fill_surfaces at the new PrepareInfill seam and have make_fills consume
-// them, whereas the pre-existing Infill seam fires after the fills are already built (v1 limit).
+// them, whereas the pre-existing Infill seam fires after the fills are already built.
 // All three runs register a hook (active path) so the comparison isolates only the mutation.
 TEST_CASE("fill_surfaces mutation cascades at PrepareInfill but not at Infill", "[slicing_pipeline]") {
     auto fill_paths = [](bool shrink, Slic3r::SlicingPipelineStepPlugin at) {
@@ -423,7 +423,7 @@ TEST_CASE("fill_surfaces mutation cascades at PrepareInfill but not at Infill", 
     const size_t base = fill_paths(false, S::posPrepareInfill); // active hook, no mutation
     CHECK(base > 0);
     CHECK(fill_paths(true, S::posPrepareInfill) < base); // mutation before make_fills cascades
-    CHECK(fill_paths(true, S::posInfill) == base);       // mutation after make_fills is a no-op (v1)
+    CHECK(fill_paths(true, S::posInfill) == base);       // mutation after make_fills is a no-op
 }
 
 // lslices (the layer's merged islands) are built once in slice() and never rebuilt by

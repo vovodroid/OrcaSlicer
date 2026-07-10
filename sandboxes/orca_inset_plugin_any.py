@@ -19,8 +19,8 @@ geometry. At Step.posSlice the split slice loop runs make_perimeters() right aft
 the hook, so the change cascades into perimeters, infill and the final G-code
 -- the toolpath preview shrinks.
 
-Unlike the old axis-aligned demo, ExPolygon.offset() is a correct inward offset
-for any contour (it is Clipper under the hood), and it naturally handles holes.
+ExPolygon.offset() is a correct inward offset for any contour (it is Clipper
+under the hood), and it naturally handles holes.
 A surface may split into several islands or vanish when shrunk; both are handled.
 
 No numpy required: the whole edit is expressed with the host geometry classes.

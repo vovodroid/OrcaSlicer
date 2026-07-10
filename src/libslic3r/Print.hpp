@@ -103,7 +103,7 @@ enum class SlicingPipelineStepPlugin {
     posSlice, posPerimeters, posEstimateCurledExtrusions, posPrepareInfill, posInfill, posIroning, posContouring,
     posSupportMaterial, posDetectOverhangsForLift, posSimplifyPath, psWipeTower, psSkirtBrim,
     // Fires from the GUI G-code export/post-process seam (PostProcessor.cpp), NOT from Print::process().
-    // At this step the plugin edits the exported G-code file in place; see the binding for the full contract.
+    // At this step the plugin edits the exported G-code file in place; see SlicingPipelinePluginCapability for the full contract.
     psGCodePostProcess
 };
 

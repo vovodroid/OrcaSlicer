@@ -75,7 +75,7 @@ TEST_CASE("make_writable_rows builds a writable (N,2) int64 view that aliases th
 
 TEST_CASE("orca.slicing module: Step enum, context, and a Python capability can execute", "[slicing_pipeline]") {
     ensure_python_initialized();
-    import_orca_module(); // forces PythonPluginBridge::instance() (see test_plugin_host_api.cpp:32-40)
+    import_orca_module(); // forces PythonPluginBridge::instance() (see import_orca_module in python_test_support.hpp)
     py::gil_scoped_acquire gil;
     py::module_ orca = py::module_::import("orca");
     REQUIRE(py::hasattr(orca, "slicing"));
@@ -301,7 +301,7 @@ TEST_CASE("orca.host Surface/SurfaceCollection: construct, writable members, set
     surf.attr("thickness") = py::float_(0.3);
     CHECK_THAT(surf.attr("thickness").cast<double>(), WithinRel(0.3, 1e-9));
 
-    // SurfaceCollection.set(expolys, type) — the faithful replacement for set_slices' body.
+    // SurfaceCollection.set(expolys, type): replace all surfaces from a list of ExPolygon tagged with one SurfaceType.
     Slic3r::SurfaceCollection coll;
     py::object cv = py::cast(&coll, py::return_value_policy::reference);
     py::list expolys; expolys.append(ex);
