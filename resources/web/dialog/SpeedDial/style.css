@@ -44,7 +44,7 @@ body {
   color: hsl(var(--h) var(--speed-tile-text-s, 72%) var(--speed-tile-text-l, 38%));
   font-weight: 700;
   /* why: mirror .tile centering - tileCode can be 2-3 chars (e.g. "EA1") on collision, and a
-     bare <button> inherits 13px + UA padding, clipping the code. inline-flex + 12px + pad:0 fits it. */
+     bare <button> inherits 13px + UA padding, clipping the code (e.g. "AE1"). inline-flex + 12px + pad:0 fits it. */
   font-size: 12px;
   padding: 0;
   display: inline-flex;

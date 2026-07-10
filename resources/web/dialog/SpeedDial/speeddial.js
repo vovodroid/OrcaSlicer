@@ -113,8 +113,8 @@ function actionLabel(action, actions) {
   return label;
 }
 
-// Monogram code for a tile: title initial, escalated to +pkg initial then a 1-based ordinal
-// only when actions collide - so same-titled actions still get visually distinct tiles.
+// Monogram code for a tile: title initial, escalated on collision by PREPENDING the pkg
+// initial (pi+ti, e.g. "GC"), then a 1-based ordinal - so same-titled actions stay distinct.
 function tileCode(action, actions) {
   var list = actions || [];
   var ti = (action.title || " ").charAt(0).toUpperCase();
@@ -124,11 +124,11 @@ function tileCode(action, actions) {
   var pi = (action.pkg || " ").charAt(0).toUpperCase();
   var samePkg = sameTitle.filter(function (o) { return (o.pkg || " ").charAt(0).toUpperCase() === pi; });
   if (samePkg.length <= 1)
-    return ti + pi;
+    return pi + ti;
   for (var i = 0; i < samePkg.length; i++)
     if (samePkg[i].id === action.id)
-      return ti + pi + (i + 1);
-  return ti + pi;
+      return pi + ti + (i + 1);
+  return pi + ti;
 }
 
 function syncClearButton() {
