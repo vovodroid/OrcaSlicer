@@ -29,13 +29,14 @@
     }
 
 // Opens the plugin's filesystem audit scope for the duration of a C++ -> Python call
-// when this trampoline instance carries a non-empty audit plugin key. Declares a local
-// `_orca_audit_scope`.
+// when this trampoline instance carries a non-empty audit plugin key. Also publishes the
+// calling capability's name, so host APIs invoked from Python can tell which capability
+// they are serving. Declares a local `_orca_audit_scope`.
 #define ORCA_PY_AUDIT_SCOPE(mode)                                                         \
     std::optional<::Slic3r::ScopedPluginAuditContext> _orca_audit_scope;                  \
     if (const std::string& _orca_audit_key = this->audit_plugin_key();                    \
         !_orca_audit_key.empty())                                                         \
-        _orca_audit_scope.emplace(_orca_audit_key, mode)
+        _orca_audit_scope.emplace(_orca_audit_key, this->audit_capability_name(), mode)
 
 #define ORCA_PY_OVERRIDE_AUDITED(mode, audit_setup, override_macro, ret, base, name, ...) \
     do {                                                                                  \

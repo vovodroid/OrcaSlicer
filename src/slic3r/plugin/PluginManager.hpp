@@ -19,6 +19,7 @@
 #include "PluginCatalog.hpp"
 #include "PluginLoader.hpp"
 #include "PluginDescriptor.hpp"
+#include "PluginConfig.hpp"
 
 namespace Slic3r {
 
@@ -58,6 +59,8 @@ public:
     const PluginCatalog& get_catalog() const { return m_catalog; }
     PluginLoader& get_loader() { return m_loader; }
     const PluginLoader& get_loader() const { return m_loader; }
+    PluginConfig& get_config() { return m_config; }
+    const PluginConfig& get_config() const { return m_config; }
 
     void set_cloud_agent(std::shared_ptr<OrcaCloudServiceAgent> agent) { m_cloud_service.set_cloud_agent(std::move(agent)); }
 
@@ -88,6 +91,7 @@ private:
     CloudPluginService m_cloud_service;
     PluginCatalog m_catalog;
     PluginLoader m_loader;
+    PluginConfig m_config;
 
     mutable std::mutex m_mutex;
 

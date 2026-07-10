@@ -3,6 +3,7 @@
 #include <boost/log/trivial.hpp>
 #include <memory>
 #include <mutex>
+#include <slic3r/plugin/PluginAuditManager.hpp>
 #include <unordered_map>
 
 #include <pybind11/embed.h>
@@ -10,6 +11,7 @@
 #include <pybind11/stl.h>
 
 #include "PythonInterpreter.hpp"
+#include "PluginConfig.hpp"
 #include "PluginHostApi.hpp"
 #include "PyPluginPackage.hpp"
 #include "PyPluginTrampoline.hpp"
@@ -338,6 +340,7 @@ void bind_python_api(pybind11::module_& m)
     PrinterAgentPluginCapability::RegisterBindings(m, pluginTypes);
     ScriptPluginCapability::RegisterBindings(m, pluginTypes);
     PluginHostApi::RegisterBindings(m);
+    PluginConfig::RegisterBindings(m);
     BOOST_LOG_TRIVIAL(debug) << "Registered ScriptPluginCapability Python bindings";
 
     m.def(

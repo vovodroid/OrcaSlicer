@@ -279,7 +279,7 @@ std::vector<std::string> PluginCatalog::get_plugin_directories() const
     };
 
     // Local plugins: {data_dir}/orca_plugins/
-    add_or_create_dir(fs::path(data_dir()) / "orca_plugins");
+    add_or_create_dir(get_orca_plugins_dir());
 
     // Cloud plugins: {data_dir}/orca_plugins/_subscribed/{user_id}/
     if (!cloud_plugin_dir_name.empty())

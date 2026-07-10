@@ -17,6 +17,8 @@ extern const char* const INSTALL_STATE_FILE;
 // Path: {data_dir}/orca_plugins/_subscribed/{user_id}/
 std::string get_cloud_plugin_dir(const std::string& user_id);
 
+std::string get_orca_plugins_dir();
+
 boost::filesystem::path resolve_plugin_root_from_descriptor(const PluginDescriptor& descriptor);
 
 bool is_plugin_root_allowed(const boost::filesystem::path& candidate_root,

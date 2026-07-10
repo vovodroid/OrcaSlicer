@@ -98,8 +98,13 @@ class PluginCapabilityInterface
 public:
     virtual ~PluginCapabilityInterface() = default;
 
-    virtual std::string get_name() const = 0;                                                    // required — overridden in Python
-    virtual PluginCapabilityType get_type() const { return PluginCapabilityType::Unknown; }      // optional — typed bases override
+    // Required APIs
+    virtual std::string get_name() const = 0;
+
+    // Optional APIs
+    virtual PluginCapabilityType get_type() const { return PluginCapabilityType::Unknown; }
+    virtual bool has_config() const { return false; }
+    virtual std::string embed_config_ui() const { return ""; }
 
     virtual void on_load() {}
     virtual void on_unload() {}
@@ -110,8 +115,16 @@ public:
     void set_audit_plugin_key(std::string key) { m_audit_plugin_key = std::move(key); }
     const std::string& audit_plugin_key() const { return m_audit_plugin_key; }
 
+    // The cached get_name() captured at load, paired with the audit plugin key to identify
+    // which capability a trampoline call belongs to. Cached rather than read live: get_name()
+    // is itself a trampoline call, so calling it from inside a trampoline would recurse.
+    // Empty until PluginLoader materializes the capability.
+    void set_audit_capability_name(std::string name) { m_audit_capability_name = std::move(name); }
+    const std::string& audit_capability_name() const { return m_audit_capability_name; }
+
 private:
     std::string m_audit_plugin_key;
+    std::string m_audit_capability_name;
 };
 
 } // namespace Slic3r

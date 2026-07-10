@@ -1,6 +1,8 @@
 #include "PluginManager.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
 
+#include <boost/filesystem/path.hpp>
+#include <libslic3r/Utils.hpp>
 #include <pybind11/embed.h>
 
 #include "PythonPluginBridge.hpp"

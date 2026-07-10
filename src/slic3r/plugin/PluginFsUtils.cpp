@@ -13,10 +13,16 @@ namespace Slic3r {
 
 const char* const INSTALL_STATE_FILE = ".install_state.json";
 
+std::string get_orca_plugins_dir()
+{
+    namespace fs = boost::filesystem;
+    return (fs::path(data_dir()) / "orca_plugins").string();
+}
+
 std::string get_cloud_plugin_dir(const std::string& user_id)
 {
     namespace fs = boost::filesystem;
-    return (fs::path(data_dir()) / "orca_plugins" / PLUGIN_SUBSCRIBED_DIR / user_id).string();
+    return (fs::path(get_orca_plugins_dir()) / PLUGIN_SUBSCRIBED_DIR / user_id).string();
 }
 
 boost::filesystem::path resolve_plugin_root_from_descriptor(const PluginDescriptor& descriptor)
@@ -30,8 +36,7 @@ boost::filesystem::path resolve_plugin_root_from_descriptor(const PluginDescript
     return {};
 }
 
-bool is_plugin_root_allowed(const boost::filesystem::path& candidate_root,
-                            const std::vector<std::string>& allowed_dirs)
+bool is_plugin_root_allowed(const boost::filesystem::path& candidate_root, const std::vector<std::string>& allowed_dirs)
 {
     boost::system::error_code ec;
     boost::filesystem::path resolved_root = boost::filesystem::weakly_canonical(candidate_root, ec);
@@ -44,8 +49,7 @@ bool is_plugin_root_allowed(const boost::filesystem::path& candidate_root,
         return false;
 
     for (const auto& allowed_dir : allowed_dirs) {
-        if (is_inside_allowed_root(std::filesystem::path(resolved_root.string()),
-                                   std::filesystem::path(allowed_dir)))
+        if (is_inside_allowed_root(std::filesystem::path(resolved_root.string()), std::filesystem::path(allowed_dir)))
             return true;
     }
 
@@ -85,9 +89,7 @@ bool resolve_allowed_plugin_root(const PluginDescriptor& descriptor,
     return true;
 }
 
-bool delete_plugin_root(const boost::filesystem::path& resolved_root,
-                        const std::string& plugin_id,
-                        std::string& error)
+bool delete_plugin_root(const boost::filesystem::path& resolved_root, const std::string& plugin_id, std::string& error)
 {
     namespace fs = boost::filesystem;
 

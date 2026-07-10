@@ -59,7 +59,7 @@ std::string plugin_package_extension(const boost::filesystem::path& path)
 
 boost::filesystem::path local_plugin_root()
 {
-    return boost::filesystem::path(data_dir()) / "orca_plugins";
+    return boost::filesystem::path(get_orca_plugins_dir());
 }
 
 boost::filesystem::path local_plugin_install_dir(const boost::filesystem::path& source_path)
@@ -973,6 +973,7 @@ void PluginLoader::load_plugin_impl(PluginCatalog& catalog, const std::string& p
                 }
 
                 loaded_cap->instance->set_audit_plugin_key(descriptor.plugin_key);
+                loaded_cap->instance->set_audit_capability_name(loaded_cap->name);
                 capability_types.push_back(loaded_cap->type);
                 loaded.capabilities.push_back(capability_id);
                 capabilities.emplace_back(std::move(loaded_cap));
