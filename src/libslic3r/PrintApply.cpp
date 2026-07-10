@@ -1162,15 +1162,28 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
     }
 
     //apply extruder related values
+    std::vector<std::vector<NozzleVolumeType>> nozzle_volume_types;
+    int extruder_count = 1, extruder_volume_type_count = 1;
+    bool different_extruder = false;
+
+    different_extruder = new_full_config.support_different_extruders(extruder_count);
+    extruder_volume_type_count = new_full_config.get_extruder_nozzle_volume_count(extruder_count, nozzle_volume_types);
     if (!extruder_applied) {
-        // variant_2 must be processed first, because variant_1 will make `printer_extruder_id` and `printer_extruder_variant` half of the size that makes `get_index_for_extruder` no longer work properly
-        new_full_config.update_values_to_printer_extruders(new_full_config, printer_options_with_variant_2, "printer_extruder_id", "printer_extruder_variant", 2);
-        new_full_config.update_values_to_printer_extruders(new_full_config, printer_options_with_variant_1, "printer_extruder_id", "printer_extruder_variant");
-        //update print config related with variants
-        new_full_config.update_values_to_printer_extruders(new_full_config, print_options_with_variant, "print_extruder_id", "print_extruder_variant");
+        if ((extruder_count > 1) || different_extruder) {
+            // variant_2 must be processed first, because variant_1 will make `printer_extruder_id` and `printer_extruder_variant` half of the size that makes `get_index_for_extruder` no longer work properly
+            new_full_config.update_values_to_printer_extruders(new_full_config, extruder_count, extruder_volume_type_count, nozzle_volume_types, printer_options_with_variant_2, "printer_extruder_id", "printer_extruder_variant", 2);
+            new_full_config.update_values_to_printer_extruders(new_full_config, extruder_count, extruder_volume_type_count, nozzle_volume_types, printer_options_with_variant_1, "printer_extruder_id", "printer_extruder_variant");
+            //update print config related with variants
+            new_full_config.update_values_to_printer_extruders(new_full_config, extruder_count, extruder_volume_type_count, nozzle_volume_types, print_options_with_variant, "print_extruder_id", "print_extruder_variant");
+        }
 
         m_ori_full_print_config = new_full_config;
-        new_full_config.update_values_to_printer_extruders_for_multiple_filaments(new_full_config, filament_options_with_variant,  "filament_self_index", "filament_extruder_variant");
+
+        std::set<std::string> filament_keys = filament_options_with_variant;
+        filament_keys.insert("filament_self_index");
+        if ((extruder_count > 1) || different_extruder)
+            new_full_config.update_values_to_printer_extruders_for_multiple_filaments(m_ori_full_print_config, extruder_count, extruder_volume_type_count, filament_keys,
+                                                                                      "filament_self_index", "filament_extruder_variant");
     }
     // else {
     //     int extruder_count;
@@ -1199,7 +1212,7 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
     if (print_diff_set.find("filament_map_mode") == print_diff_set.end())
     {
         FilamentMapMode map_mode = new_full_config.option<ConfigOptionEnum<FilamentMapMode>>("filament_map_mode", true)->value;
-        if (map_mode < fmmManual) {
+        if (is_auto_filament_map_mode(map_mode)) {
             if (print_diff_set.find("filament_map") != print_diff_set.end()) {
                 print_diff_set.erase("filament_map");
                 //full_config_diff.erase("filament_map");

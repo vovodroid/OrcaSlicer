@@ -120,17 +120,34 @@ DynamicPrintConfig PresetBundle::construct_full_config(
     inherits.emplace_back(print_inherits);
 
     // BBS: update printer config related with variants
+    std::vector<std::vector<NozzleVolumeType>> nozzle_volume_types;
+    int extruder_count = 1, extruder_volume_type_count = 1;
+    bool different_extruder = false;
     if (apply_extruder) {
-        out.update_values_to_printer_extruders(out, printer_options_with_variant_1, "printer_extruder_id", "printer_extruder_variant");
-        out.update_values_to_printer_extruders(out, printer_options_with_variant_2, "printer_extruder_id", "printer_extruder_variant", 2);
-        // update print config related with variants
-        out.update_values_to_printer_extruders(out, print_options_with_variant, "print_extruder_id", "print_extruder_variant");
+        different_extruder = out.support_different_extruders(extruder_count);
+        extruder_volume_type_count = out.get_extruder_nozzle_volume_count(extruder_count, nozzle_volume_types);
+
+        if ((extruder_count > 1) || different_extruder) {
+            // Orca: keep processing variant_1 before variant_2 here; variant_2 slots are resolved
+            // against the printer id/variant lists as rewritten by the variant_1 pass, and the
+            // composed values depend on that order. Note the order is load-bearing, not correct
+            // in general: the variant_2 pass reads the original full-width arrays through indices
+            // resolved on the shrunk lists, which mis-reads presets whose variant_2 columns differ
+            // per variant (e.g. X2D machine_max_speed_e/machine_max_acceleration_e). The slicing
+            // path composes variant_2 first and is unaffected; changing the order here would alter
+            // long-standing composed values, so any fix must re-baseline them.
+            out.update_values_to_printer_extruders(out, extruder_count, extruder_volume_type_count, nozzle_volume_types, printer_options_with_variant_1, "printer_extruder_id", "printer_extruder_variant");
+            out.update_values_to_printer_extruders(out, extruder_count, extruder_volume_type_count, nozzle_volume_types, printer_options_with_variant_2, "printer_extruder_id", "printer_extruder_variant", 2);
+            // update print config related with variants
+            out.update_values_to_printer_extruders(out, extruder_count, extruder_volume_type_count, nozzle_volume_types, print_options_with_variant, "print_extruder_id", "print_extruder_variant");
+        }
     }
 
     if (num_filaments <= 1) {
         // BBS: update filament config related with variants
         DynamicPrintConfig filament_config = in_filament_presets[0].config;
-        if (apply_extruder) filament_config.update_values_to_printer_extruders(out, filament_options_with_variant, "", "filament_extruder_variant", 1, filament_maps[0]);
+        if (apply_extruder && ((extruder_count > 1) || different_extruder))
+            filament_config.update_values_to_printer_extruders(out, extruder_count, extruder_volume_type_count, nozzle_volume_types, filament_options_with_variant, "", "filament_extruder_variant", 1, filament_maps[0]);
         out.apply(filament_config);
         compatible_printers_condition.emplace_back(in_filament_presets[0].compatible_printers_condition());
         compatible_prints_condition.emplace_back(in_filament_presets[0].compatible_prints_condition());
@@ -153,8 +170,8 @@ DynamicPrintConfig PresetBundle::construct_full_config(
         filament_temp_configs.resize(num_filaments);
         for (size_t i = 0; i < num_filaments; ++i) {
             filament_temp_configs[i] = *(filament_configs[i]);
-            if (apply_extruder)
-                filament_temp_configs[i].update_values_to_printer_extruders(out, filament_options_with_variant, "", "filament_extruder_variant", 1, filament_maps[i]);
+            if (apply_extruder && ((extruder_count > 1) || different_extruder))
+                filament_temp_configs[i].update_values_to_printer_extruders(out, extruder_count, extruder_volume_type_count, nozzle_volume_types, filament_options_with_variant, "", "filament_extruder_variant", 1, filament_maps[i]);
         }
 
         // loop through options and apply them to the resulting config.
@@ -3979,18 +3996,34 @@ DynamicPrintConfig PresetBundle::full_fff_config(bool apply_extruder, std::optio
     different_settings.emplace_back(different_print_settings);
 
     //BBS: update printer config related with variants
+    std::vector<std::vector<NozzleVolumeType>> nozzle_volume_types;
+    int extruder_count = 1, extruder_volume_type_count = 1;
+    bool different_extruder = false;
     if (apply_extruder) {
-        out.update_values_to_printer_extruders(out, printer_options_with_variant_1, "printer_extruder_id", "printer_extruder_variant");
-        out.update_values_to_printer_extruders(out, printer_options_with_variant_2, "printer_extruder_id", "printer_extruder_variant", 2);
-        //update print config related with variants
-        out.update_values_to_printer_extruders(out, print_options_with_variant, "print_extruder_id", "print_extruder_variant");
+        different_extruder = out.support_different_extruders(extruder_count);
+        extruder_volume_type_count = out.get_extruder_nozzle_volume_count(extruder_count, nozzle_volume_types);
+
+        if ((extruder_count > 1) || different_extruder) {
+            // Orca: keep processing variant_1 before variant_2 here; variant_2 slots are resolved
+            // against the printer id/variant lists as rewritten by the variant_1 pass, and the
+            // composed values depend on that order. Note the order is load-bearing, not correct
+            // in general: the variant_2 pass reads the original full-width arrays through indices
+            // resolved on the shrunk lists, which mis-reads presets whose variant_2 columns differ
+            // per variant (e.g. X2D machine_max_speed_e/machine_max_acceleration_e). The slicing
+            // path composes variant_2 first and is unaffected; changing the order here would alter
+            // long-standing composed values, so any fix must re-baseline them.
+            out.update_values_to_printer_extruders(out, extruder_count, extruder_volume_type_count, nozzle_volume_types, printer_options_with_variant_1, "printer_extruder_id", "printer_extruder_variant");
+            out.update_values_to_printer_extruders(out, extruder_count, extruder_volume_type_count, nozzle_volume_types, printer_options_with_variant_2, "printer_extruder_id", "printer_extruder_variant", 2);
+            //update print config related with variants
+            out.update_values_to_printer_extruders(out, extruder_count, extruder_volume_type_count, nozzle_volume_types, print_options_with_variant, "print_extruder_id", "print_extruder_variant");
+        }
     }
 
     if (num_filaments <= 1) {
         //BBS: update filament config related with variants
         DynamicPrintConfig filament_config = this->filaments.get_edited_preset().config;
-        if (apply_extruder)
-            filament_config.update_values_to_printer_extruders(out, filament_options_with_variant, "", "filament_extruder_variant", 1, filament_maps[0]);
+        if (apply_extruder && ((extruder_count > 1) || different_extruder))
+            filament_config.update_values_to_printer_extruders(out, extruder_count, extruder_volume_type_count, nozzle_volume_types, filament_options_with_variant, "", "filament_extruder_variant", 1, filament_maps[0]);
         out.apply(filament_config);
         compatible_printers_condition.emplace_back(this->filaments.get_edited_preset().compatible_printers_condition());
         compatible_prints_condition  .emplace_back(this->filaments.get_edited_preset().compatible_prints_condition());
@@ -4083,8 +4116,8 @@ DynamicPrintConfig PresetBundle::full_fff_config(bool apply_extruder, std::optio
         filament_temp_configs.resize(num_filaments);
         for (size_t i = 0; i < num_filaments; ++i) {
             filament_temp_configs[i] = *(filament_configs[i]);
-            if (apply_extruder)
-                filament_temp_configs[i].update_values_to_printer_extruders(out, filament_options_with_variant, "", "filament_extruder_variant", 1, filament_maps[i]);
+            if (apply_extruder && ((extruder_count > 1) || different_extruder))
+                filament_temp_configs[i].update_values_to_printer_extruders(out, extruder_count, extruder_volume_type_count, nozzle_volume_types, filament_options_with_variant, "", "filament_extruder_variant", 1, filament_maps[i]);
         }
 
         // loop through options and apply them to the resulting config.

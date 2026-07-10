@@ -3206,8 +3206,16 @@ void Print::update_filament_maps_to_config(std::vector<int> f_maps)
         m_ori_full_print_config.option<ConfigOptionInts>("filament_map", true)->values = f_maps;
         m_config.filament_map.values = f_maps;
 
+        int extruder_count = 1, extruder_volume_type_count = 1;
+        bool support_multi = m_ori_full_print_config.support_different_extruders(extruder_count);
+        std::vector<std::vector<NozzleVolumeType>> nozzle_volume_types;
+        extruder_volume_type_count = m_ori_full_print_config.get_extruder_nozzle_volume_count(extruder_count, nozzle_volume_types);
+
         m_full_print_config = m_ori_full_print_config;
-        m_full_print_config.update_values_to_printer_extruders_for_multiple_filaments(m_full_print_config, filament_options_with_variant,  "filament_self_index", "filament_extruder_variant");
+        std::set<std::string> filament_keys = filament_options_with_variant;
+        filament_keys.insert("filament_self_index");
+        if ((extruder_count > 1) || support_multi)
+            m_full_print_config.update_values_to_printer_extruders_for_multiple_filaments(m_full_print_config, extruder_count, extruder_volume_type_count, filament_keys,  "filament_self_index", "filament_extruder_variant");
 
         const std::vector<std::string> &extruder_retract_keys = print_config_def.extruder_retract_keys();
         const std::string               filament_prefix       = "filament_";

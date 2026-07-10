@@ -468,6 +468,11 @@ enum FilamentMapMode {
     fmmDefault
 };
 
+// All auto modes are ordered before fmmManual (see the enum ordering note above).
+inline bool is_auto_filament_map_mode(FilamentMapMode mode) {
+    return mode < fmmManual;
+}
+
 // Dual-extruder purge control. Default reproduces the current
 // per-extruder flush_multiplier + filament_prime_volume behaviour, so absent/default is inert.
 //   Saving -> reduce prime volume to 15 mm3;  Fast -> use flush_multiplier_fast + filament_flush_temp_fast.
@@ -478,6 +483,10 @@ enum PrimeVolumeMode {
 };
 
 extern std::string get_extruder_variant_string(ExtruderType extruder_type, NozzleVolumeType nozzle_volume_type);
+
+// Base slot lookup: scans a variant list (paired with its 1-based extruder/filament ids) for the
+// entry matching the given extruder/volume type and id. Returns 0 when no entry matches.
+extern int get_config_index_base(NozzleVolumeType volume_type, ExtruderType extruder_type, int variant_id_1based, const std::vector<std::string>& variant_list, const std::vector<int>& variant_ids_1based);
 
 static std::set<NozzleVolumeType> get_valid_nozzle_volume_type() {
     std::set<NozzleVolumeType> type;
@@ -731,9 +740,14 @@ public:
     //BBS
     bool is_using_different_extruders();
     bool support_different_extruders(int& extruder_count) const;
+    // Counts the config slots of a printer: one per (extruder x nozzle volume type) as described by
+    // extruder_nozzle_stats, or simply one per extruder when the stats are absent/mismatched.
+    // Fills nozzle_volume_types with each extruder's volume types in ascending enum order.
+    int get_extruder_nozzle_volume_count(int extruder_count, std::vector<std::vector<NozzleVolumeType>>& nozzle_volume_types) const;
     int get_index_for_extruder(int extruder_or_filament_id, std::string id_name, ExtruderType extruder_type, NozzleVolumeType nozzle_volume_type, std::string variant_name, unsigned int stride = 1) const;
-    void update_values_to_printer_extruders(DynamicPrintConfig& printer_config, std::set<std::string>& key_set, std::string id_name, std::string variant_name, unsigned int stride = 1, unsigned int extruder_id = 0);
-    void update_values_to_printer_extruders_for_multiple_filaments(DynamicPrintConfig& printer_config, std::set<std::string>& key_set, std::string id_name, std::string variant_name);
+    std::vector<int> update_values_to_printer_extruders(DynamicPrintConfig& printer_config, int extruder_count, int extruder_nozzle_volume_count, std::vector<std::vector<NozzleVolumeType>>& nv_types,
+        std::set<std::string>& key_set, std::string id_name, std::string variant_name, unsigned int stride = 1, unsigned int extruder_id = 0, NozzleVolumeType filament_nvt = nvtStandard);
+    void update_values_to_printer_extruders_for_multiple_filaments(DynamicPrintConfig& printer_config, int extruder_count, int extruder_nozzle_volume_count, std::set<std::string>& key_set, std::string id_name, std::string variant_name);
 
     void update_non_diff_values_to_base_config(DynamicPrintConfig& new_config, const t_config_option_keys& keys, const std::set<std::string>& different_keys, std::string extruder_id_name, std::string extruder_variant_name,
         std::set<std::string>& key_set1, std::set<std::string>& key_set2);
