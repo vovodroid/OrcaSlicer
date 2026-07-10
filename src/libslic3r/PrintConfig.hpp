@@ -774,7 +774,7 @@ extern std::set<std::string> printer_options_with_variant_2;
 extern std::set<std::string> empty_options;
 
 extern void compute_filament_override_value(const std::string& opt_key, const ConfigOption *opt_old_machine, const ConfigOption *opt_new_machine, const ConfigOption *opt_new_filament, const DynamicPrintConfig& new_full_config,
-    t_config_option_keys& diff_keys, DynamicPrintConfig& filament_overrides, std::vector<int>& f_maps);
+    t_config_option_keys& diff_keys, DynamicPrintConfig& filament_overrides, std::vector<int>& f_map_indices);
 
 void handle_legacy_sla(DynamicPrintConfig &config);
 
@@ -1447,8 +1447,12 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionInts,                required_nozzle_HRC))
     ((ConfigOptionEnum<FilamentMapMode>, filament_map_mode))
     ((ConfigOptionInts,                filament_map))
+    ((ConfigOptionInts,                filament_volume_map))
+    ((ConfigOptionInts,                filament_nozzle_map))
+    ((ConfigOptionInts,                filament_map_2)) //used for multi nozzle, map filament to the index identified by extruder+nozzle_volume_type
     //((ConfigOptionInts,                filament_extruder_id))
     ((ConfigOptionStrings,             filament_extruder_variant))
+    ((ConfigOptionInts,                filament_self_index))
     ((ConfigOptionBool,                support_object_skip_flush))
     ((ConfigOptionEnum<BedTempFormula>, bed_temperature_formula))
     ((ConfigOptionInts,                physical_extruder_map))

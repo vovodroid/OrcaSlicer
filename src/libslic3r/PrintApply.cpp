@@ -240,7 +240,10 @@ static t_config_option_keys print_config_diffs(
         const ConfigOption *opt_new_filament = std::binary_search(extruder_retract_keys.begin(), extruder_retract_keys.end(), opt_key) ? new_full_config.option(filament_prefix + opt_key) : nullptr;
 
         if (opt_new_filament != nullptr) {
-            compute_filament_override_value(opt_key, opt_old, opt_new, opt_new_filament, new_full_config, print_diff, filament_overrides, filament_maps);
+            std::vector<int> filament_map_indices(filament_maps.size(), 0);
+            for (int i = 0; i < filament_maps.size(); i++)
+                filament_map_indices[i] = filament_maps[i] - 1;
+            compute_filament_override_value(opt_key, opt_old, opt_new, opt_new_filament, new_full_config, print_diff, filament_overrides, filament_map_indices);
         } else if (*opt_new != *opt_old) {
             //BBS: add plate_index logic for wipe_tower_x/wipe_tower_y
             if (!opt_key.compare("wipe_tower_x") || !opt_key.compare("wipe_tower_y")) {
@@ -1248,6 +1251,29 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
             print_diff.assign(print_diff_set.begin(), print_diff_set.end());
     }
 
+    //filament_map_2
+    // Orca: seed with 0-based extruder indices so the copy stays a valid slot map even when the
+    // variant options are absent below and the rebuild loop is skipped (unit tests, degenerate
+    // presets); the loop overwrites every entry when it runs.
+    m_config.filament_map_2.values = filament_maps;
+    for (auto& v : m_config.filament_map_2.values)
+        --v;
+    auto opt_extruder_type = dynamic_cast<const ConfigOptionEnumsGeneric*>(new_full_config.option("extruder_type"));
+    auto opt_filament_volume_maps = dynamic_cast<const ConfigOptionInts*>(new_full_config.option("filament_volume_map"));
+    auto opt_nozzle_volume_type = dynamic_cast<const ConfigOptionEnumsGeneric*>(new_full_config.option("nozzle_volume_type"));
+    for (int index = 0; opt_extruder_type && opt_nozzle_volume_type && index < filament_maps.size(); index++)
+    {
+        ExtruderType extruder_type = (ExtruderType)(opt_extruder_type->get_at(filament_maps[index] - 1));
+        NozzleVolumeType nozzle_volume_type = (NozzleVolumeType)(opt_nozzle_volume_type->get_at(filament_maps[index] - 1));
+        // Orca: the per-filament volume map is only trustworthy when a producer explicitly sized it
+        // to the filament count; the registered default is a 1-element vector (see
+        // update_values_to_printer_extruders_for_multiple_filaments for the same guard).
+        if ((extruder_volume_type_count > extruder_count) && opt_filament_volume_maps
+            && filament_maps.size() > 1 && opt_filament_volume_maps->values.size() == filament_maps.size())
+            nozzle_volume_type = (NozzleVolumeType)(opt_filament_volume_maps->values[index]);
+        m_config.filament_map_2.values[index] = new_full_config.get_index_for_extruder(filament_maps[index], "print_extruder_id", extruder_type, nozzle_volume_type, "print_extruder_variant");
+    }
+
     // Do not use the ApplyStatus as we will use the max function when updating apply_status.
     unsigned int apply_status = APPLY_STATUS_UNCHANGED;
     auto update_apply_status = [&apply_status](bool invalidated)
@@ -1295,6 +1321,7 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
 	    m_default_region_config.apply_only(new_full_config, region_diff, true);
         //m_full_print_config = std::move(new_full_config);
         m_full_print_config = new_full_config;
+        update_filament_self_index_cache();
         if (num_extruders  != m_config.filament_diameter.size()) {
             num_extruders  = m_config.filament_diameter.size();
             num_extruders_changed  = true;
@@ -1668,6 +1695,7 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
         // Handle changes to regions config defaults
         m_default_region_config.apply_only(new_full_config, new_changed_keys, true);
         m_full_print_config = std::move(new_full_config);
+        update_filament_self_index_cache();
     }
 
     // All regions now have distinct settings.

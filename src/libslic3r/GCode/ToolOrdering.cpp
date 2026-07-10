@@ -1167,8 +1167,8 @@ static std::vector<MultiNozzleUtils::NozzleInfo> build_default_nozzle_list(const
 
 // Best-effort readers for the multi-nozzle dev config keys. These are registered in the ConfigDef
 // but not (yet) static PrintConfig members, so the slicing PrintConfig reads them as inert defaults,
-// which keeps the auto grouping path bit-exact (all these degrade to the flush-only, non-switcher,
-// hybrid-flow case).
+// which keeps the auto grouping path bit-exact (all these degrade to the flush-only, non-switcher
+// case).
 static bool cfg_bool(const ConfigBase& c, const char* key, bool def)
 {
     if (auto* o = c.option<ConfigOptionBool>(key)) return o->value;
@@ -1178,11 +1178,6 @@ static double cfg_float(const ConfigBase& c, const char* key, double def)
 {
     if (auto* o = c.option<ConfigOptionFloat>(key)) return o->value;
     return def;
-}
-static std::vector<int> cfg_ints(const ConfigBase& c, const char* key)
-{
-    if (auto* o = c.option<ConfigOptionInts>(key)) return o->values;
-    return {};
 }
 
 // Prepare per-extruder flush matrices. The prime_volume_mode==pvmFast branch: Default reads
@@ -1336,19 +1331,17 @@ static FilamentGroupContext build_filament_group_context(
     context.group_info.ignore_ext_filament = ignore_ext_filament;
     context.group_info.has_filament_switcher = has_filament_switcher;
 
-    // hybrid flow means no special per-filament nozzle-volume request. In manual mode we honour the
-    // config's per-filament volume map when it is present and correctly sized; otherwise (the key is
-    // not a static PrintConfig member) fall back to hybrid so rebuild_nozzle_unprintables
-    // never indexes out of range.
-    if (mode == FilamentMapMode::fmmManual) {
-        auto fvm = cfg_ints(print_config, "filament_volume_map");
-        if (fvm.size() == filament_nums)
-            context.group_info.filament_volume_map = std::move(fvm);
-        else
-            context.group_info.filament_volume_map = std::vector<int>(filament_nums, (int)(NozzleVolumeType::nvtHybrid));
-    } else {
+    // hybrid flow means no special per-filament nozzle-volume request.
+    // Orca: in manual mode the config's per-filament volume map is honoured only when a producer
+    // sized it to a multi-filament count (the trust guard used by
+    // update_values_to_printer_extruders_for_multiple_filaments): the registered default is a
+    // 1-element vector ({Standard}) that a single-filament count cannot tell apart from a real
+    // map, and it must not displace the hybrid fallback rebuild_nozzle_unprintables relies on.
+    if (mode == FilamentMapMode::fmmManual && filament_nums > 1 &&
+        print_config.filament_volume_map.values.size() == filament_nums)
+        context.group_info.filament_volume_map = print_config.filament_volume_map.values;
+    else
         context.group_info.filament_volume_map = std::vector<int>(filament_nums, (int)(NozzleVolumeType::nvtHybrid));
-    }
 
     context.nozzle_info.nozzle_list          = build_nozzle_list(nozzle_groups);
     context.nozzle_info.extruder_nozzle_list = build_extruder_nozzle_list(context.nozzle_info.nozzle_list);
@@ -1493,7 +1486,17 @@ MultiNozzleUtils::LayeredNozzleGroupResult ToolOrdering::get_recommended_filamen
         auto manual_filament_map = print_config.filament_map.values;
         std::transform(manual_filament_map.begin(), manual_filament_map.end(), manual_filament_map.begin(), [](int v) { return v - 1; });
         float diameter = print_config.nozzle_diameter.values.empty() ? 0.4f : (float)print_config.nozzle_diameter.values.front();
-        auto nozzle_result = LayeredNozzleGroupResult::create(used_filaments, manual_filament_map, cfg_ints(print_config, "filament_volume_map"), cfg_ints(print_config, "filament_nozzle_map"), get_extruder_nozzle_stats(print_config.extruder_nozzle_stats.values), diameter);
+        // Orca: create() indexes the volume/nozzle maps per used filament with no bounds check, so
+        // pass them only when a producer sized them to a multi-filament count — the registered
+        // 1-element defaults are indistinguishable by size from a real single-filament map.
+        // Without valid maps the fully-manual request cannot be honoured; return the empty result,
+        // the same failure an unsatisfiable create() yields.
+        std::optional<LayeredNozzleGroupResult> nozzle_result;
+        if (filament_nums > 1 && print_config.filament_volume_map.values.size() == filament_nums &&
+            print_config.filament_nozzle_map.values.size() == filament_nums)
+            nozzle_result = LayeredNozzleGroupResult::create(used_filaments, manual_filament_map, print_config.filament_volume_map.values, print_config.filament_nozzle_map.values, get_extruder_nozzle_stats(print_config.extruder_nozzle_stats.values), diameter);
+        if (!nozzle_result)
+            BOOST_LOG_TRIVIAL(error) << "Failed to build nozzle group result from filament nozzle map!";
         return nozzle_result ? *nozzle_result : LayeredNozzleGroupResult();
     }
 
@@ -1611,11 +1614,18 @@ static MultiNozzleUtils::LayeredNozzleGroupResult build_group_result_from_map(
 {
     using namespace MultiNozzleUtils;
     const size_t extruder_nums = print_config.nozzle_diameter.values.size();
+    const size_t filament_nums = print_config.filament_colour.values.size();
     const bool   has_multiple_nozzle = std::any_of(print_config.extruder_max_nozzle_count.values.begin(), print_config.extruder_max_nozzle_count.values.end(),
                                                    [](int v) { return v > 1; });
-    if (has_multiple_nozzle) {
+    // Orca: same trust guard as the manual grouping paths — create() indexes the volume/nozzle
+    // maps per used filament with no bounds check, and the registered 1-element defaults must not
+    // be mistaken for a real single-filament map. Unsized maps fall through to the extruder-level
+    // wrap below.
+    if (has_multiple_nozzle && filament_nums > 1 &&
+        print_config.filament_volume_map.values.size() == filament_nums &&
+        print_config.filament_nozzle_map.values.size() == filament_nums) {
         float diameter = print_config.nozzle_diameter.values.empty() ? 0.4f : static_cast<float>(print_config.nozzle_diameter.values.front());
-        if (auto g = LayeredNozzleGroupResult::create(used_filaments, filament_map_0based, cfg_ints(print_config, "filament_volume_map"), cfg_ints(print_config, "filament_nozzle_map"), get_extruder_nozzle_stats(print_config.extruder_nozzle_stats.values), diameter))
+        if (auto g = LayeredNozzleGroupResult::create(used_filaments, filament_map_0based, print_config.filament_volume_map.values, print_config.filament_nozzle_map.values, get_extruder_nozzle_stats(print_config.extruder_nozzle_stats.values), diameter))
             return *g;
     }
     auto nozzle_list = build_default_nozzle_list(print_config, extruder_nums);

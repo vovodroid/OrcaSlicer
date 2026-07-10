@@ -2731,10 +2731,9 @@ void PrintConfigDef::init_fff_params()
     def->set_default_value(new ConfigOptionInts{1});
 
     // Multi-nozzle: per-filament map to the config slot identified by (extruder, nozzle_volume_type).
-    // Forward-compat-only registration with no consumer yet.
-    // Orca: resolves per-variant slots via get_index_for_extruder at PrintApply time rather than a
-    // read-time filament-config-index lookup, so nothing in src/ reads this key. Kept registered so an
-    // H2C project/config that carries it loads without an unknown-option substitution warning.
+    // Engine-internal per-filament slot map: recomputed at apply time from filament_map (plus the
+    // per-filament volume map when an extruder exposes several volume types) and used to key the
+    // retract-override fallback; never a user input and never part of the exported full config.
     // Internal use only, no translation.
     def = this->add("filament_map_2", coInts);
     def->label = "Filament map plus for multi nozzle";
@@ -2742,9 +2741,10 @@ void PrintConfigDef::init_fff_params()
     def->mode = comDevelop;
     def->set_default_value(new ConfigOptionInts{1});
 
-    // Per-filament nozzle-volume-type override (multi-volume/Hybrid). Registered so the value
-    // round-trips through .3mf plate metadata (filament_volume_maps); load/save-only for now and
-    // inert for existing printers (unread by slicing until the multi-volume pipeline lands).
+    // Per-filament nozzle-volume-type override (multi-volume/Hybrid). Round-trips through .3mf
+    // plate metadata (filament_volume_maps) and steers per-filament slot resolution when an
+    // extruder exposes several volume types; inert for existing printers (no producer sizes it
+    // to the filament count until the write-back pipeline lands).
     def = this->add("filament_volume_map", coInts);
     def->mode = comDevelop;
     def->set_default_value(new ConfigOptionInts{(int)(NozzleVolumeType::nvtStandard)});
@@ -11030,7 +11030,7 @@ void DynamicPrintConfig::update_diff_values_to_child_config(DynamicPrintConfig& 
 }
 
 void compute_filament_override_value(const std::string& opt_key, const ConfigOption *opt_old_machine, const ConfigOption *opt_new_machine, const ConfigOption *opt_new_filament, const DynamicPrintConfig& new_full_config,
-    t_config_option_keys& diff_keys, DynamicPrintConfig& filament_overrides, std::vector<int>& f_maps)
+    t_config_option_keys& diff_keys, DynamicPrintConfig& filament_overrides, std::vector<int>& f_map_indices)
 {
     bool is_nil = opt_new_filament->is_nil();
 
@@ -11052,7 +11052,7 @@ void compute_filament_override_value(const std::string& opt_key, const ConfigOpt
     }
 
     auto opt_copy = opt_new_machine->clone();
-    opt_copy->apply_override(opt_new_filament, f_maps);
+    opt_copy->apply_override(opt_new_filament, f_map_indices);
     bool changed = *opt_old_machine != *opt_copy;
 
     if (changed) {

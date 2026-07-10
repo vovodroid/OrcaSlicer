@@ -30,6 +30,57 @@ void add_print_variant_columns(DynamicPrintConfig &config)
 
 } // namespace
 
+TEST_CASE("apply_override fills nil entries from the 0-based default index", "[Config]")
+{
+    ConfigOptionFloats machine({10., 20., 30.});
+    ConfigOptionFloatsNullable filament;
+    filament.values = {ConfigOptionFloatsNullable::nil_value(), 42.};
+
+    SECTION("a nil entry picks the slot addressed by its 0-based index") {
+        std::vector<int> slot_index{2, 0};
+        ConfigOptionFloats resolved(machine);
+        REQUIRE(resolved.apply_override(&filament, slot_index));
+        REQUIRE(resolved.values == std::vector<double>({30., 42.}));
+    }
+
+    SECTION("an index past the machine slots falls back to the first slot") {
+        std::vector<int> slot_index{5, 0};
+        ConfigOptionFloats resolved(machine);
+        REQUIRE(resolved.apply_override(&filament, slot_index));
+        REQUIRE(resolved.values == std::vector<double>({10., 42.}));
+    }
+
+    SECTION("a negative index (unresolved slot) falls back to the first slot") {
+        std::vector<int> slot_index{-1, 0};
+        ConfigOptionFloats resolved(machine);
+        REQUIRE(resolved.apply_override(&filament, slot_index));
+        REQUIRE(resolved.values == std::vector<double>({10., 42.}));
+    }
+}
+
+TEST_CASE("get_config_index_base resolves (volume type, extruder type, id) to a slot", "[Config]")
+{
+    const std::vector<std::string> variant_list = {"Direct Drive Standard", "Direct Drive High Flow",
+                                                   "Direct Drive Standard", "Direct Drive High Flow"};
+    const std::vector<int> variant_ids = {1, 1, 2, 2};
+
+    SECTION("a matching (variant, id) pair yields its slot") {
+        REQUIRE(get_config_index_base(nvtStandard, etDirectDrive, 1, variant_list, variant_ids) == 0);
+        REQUIRE(get_config_index_base(nvtHighFlow, etDirectDrive, 1, variant_list, variant_ids) == 1);
+        REQUIRE(get_config_index_base(nvtStandard, etDirectDrive, 2, variant_list, variant_ids) == 2);
+        REQUIRE(get_config_index_base(nvtHighFlow, etDirectDrive, 2, variant_list, variant_ids) == 3);
+    }
+
+    SECTION("no matching column falls back to slot 0") {
+        REQUIRE(get_config_index_base(nvtStandard, etDirectDrive, 3, variant_list, variant_ids) == 0);
+        REQUIRE(get_config_index_base(nvtStandard, etBowden, 1, variant_list, variant_ids) == 0);
+    }
+
+    SECTION("Hybrid is not a preset variant string and falls back to slot 0") {
+        REQUIRE(get_config_index_base(nvtHybrid, etDirectDrive, 2, variant_list, variant_ids) == 0);
+    }
+}
+
 TEST_CASE("get_extruder_nozzle_volume_count reads the per-extruder volume-type layout", "[Config]")
 {
     std::vector<std::vector<NozzleVolumeType>> nozzle_volume_types;

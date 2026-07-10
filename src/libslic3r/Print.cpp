@@ -3211,6 +3211,29 @@ void Print::update_filament_maps_to_config(std::vector<int> f_maps)
         std::vector<std::vector<NozzleVolumeType>> nozzle_volume_types;
         extruder_volume_type_count = m_ori_full_print_config.get_extruder_nozzle_volume_count(extruder_count, nozzle_volume_types);
 
+        //filament_map_2
+        // Orca: seed with 0-based extruder indices so the override keying below degenerates to the
+        // plain per-extruder slot when the rebuild loop is skipped; the loop overwrites every
+        // entry when it runs.
+        m_config.filament_map_2.values = f_maps;
+        for (auto& v : m_config.filament_map_2.values)
+            --v;
+        auto opt_extruder_type = dynamic_cast<const ConfigOptionEnumsGeneric*>(m_ori_full_print_config.option("extruder_type"));
+        auto opt_nozzle_volume_type = dynamic_cast<const ConfigOptionEnumsGeneric*>(m_ori_full_print_config.option("nozzle_volume_type"));
+        // Orca: the loop tolerates configs without the extruder options (unit tests, degenerate
+        // presets); the volume-map override keeps the sizing guard used everywhere else, and the
+        // grouping engine does not produce per-filament volume maps yet, so m_config only carries
+        // a map when the project supplied one.
+        for (int index = 0; opt_extruder_type && opt_nozzle_volume_type && index < f_maps.size(); index++)
+        {
+            ExtruderType extruder_type = (ExtruderType)(opt_extruder_type->get_at(f_maps[index] - 1));
+            NozzleVolumeType nozzle_volume_type = (NozzleVolumeType)(opt_nozzle_volume_type->get_at(f_maps[index] - 1));
+            if ((extruder_volume_type_count > extruder_count)
+                && f_maps.size() > 1 && m_config.filament_volume_map.values.size() == f_maps.size())
+                nozzle_volume_type = (NozzleVolumeType)(m_config.filament_volume_map.values[index]);
+            m_config.filament_map_2.values[index] = m_ori_full_print_config.get_index_for_extruder(f_maps[index], "print_extruder_id", extruder_type, nozzle_volume_type, "print_extruder_variant");
+        }
+
         m_full_print_config = m_ori_full_print_config;
         std::set<std::string> filament_keys = filament_options_with_variant;
         filament_keys.insert("filament_self_index");
@@ -3228,7 +3251,7 @@ void Print::update_filament_maps_to_config(std::vector<int> f_maps)
             const ConfigOption *opt_old_machine = m_config.option(opt_key);
 
             if (opt_new_filament)
-                compute_filament_override_value(opt_key, opt_old_machine, opt_new_machine, opt_new_filament, m_full_print_config, print_diff, filament_overrides, f_maps);
+                compute_filament_override_value(opt_key, opt_old_machine, opt_new_machine, opt_new_filament, m_full_print_config, print_diff, filament_overrides, m_config.filament_map_2.values);
         }
 
         t_config_option_keys keys(filament_options_with_variant.begin(), filament_options_with_variant.end());
@@ -3238,6 +3261,7 @@ void Print::update_filament_maps_to_config(std::vector<int> f_maps)
             m_config.apply(filament_overrides);
         }
     }
+    update_filament_self_index_cache();
     m_has_auto_filament_map_result = true;
 }
 
@@ -3249,6 +3273,16 @@ void Print::apply_config_for_render(const DynamicConfig &config)
 std::vector<int> Print::get_filament_maps() const
 {
     return m_config.filament_map.values;
+}
+
+std::vector<int> Print::get_filament_nozzle_maps() const
+{
+    return m_config.filament_nozzle_map.values;
+}
+
+std::vector<int> Print::get_filament_volume_maps() const
+{
+    return m_config.filament_volume_map.values;
 }
 
 FilamentMapMode Print::get_filament_map_mode() const
@@ -3403,6 +3437,108 @@ bool Print::is_dynamic_group_reorder() const
     if (!enabled || m_config.filament_map_mode != FilamentMapMode::fmmAutoForFlush || m_config.nozzle_diameter.size() <= 1)
         return false;
     return true;
+}
+
+int Print::get_filament_config_indx(int filament_id, int layer_id)
+{
+    return get_config_index(filament_id, layer_id, m_config.filament_extruder_variant.values, m_filament_self_index, m_filament_index_map);
+}
+
+void Print::update_filament_self_index_cache()
+{
+    std::vector<int> values;
+    if (m_full_print_config.has("filament_self_index")) {
+        values = m_full_print_config.option<ConfigOptionInts>("filament_self_index")->values;
+    } else if (m_ori_full_print_config.has("filament_self_index")) {
+        values = m_ori_full_print_config.option<ConfigOptionInts>("filament_self_index")->values;
+    } else {
+        values = m_config.filament_self_index.values;
+    }
+
+    size_t expected_size = m_config.filament_extruder_variant.values.size();
+    m_filament_self_index.clear();
+    if (expected_size == 0) {
+        m_filament_index_map.clear();
+        m_nozzle_index_map.clear();
+        return;
+    }
+    m_filament_self_index.resize(expected_size, 1);
+    if (!values.empty()) {
+        for (size_t i = 0; i < expected_size; ++i) {
+            int v = i < values.size() ? values[i] : 1;
+            if (v <= 0)
+                v = 1;
+            m_filament_self_index[i] = v;
+        }
+    }
+    m_filament_index_map.clear();
+    m_nozzle_index_map.clear();
+}
+
+int Print::get_nozzle_config_index(int filament_id, int layer_id)
+{
+    // Orca: print_extruder_id/print_extruder_variant are PrintRegionConfig members in this codebase;
+    // the process-wide expanded values live in the default region config (regions never override them).
+    return get_config_index(filament_id, layer_id, m_default_region_config.print_extruder_variant.values, m_default_region_config.print_extruder_id.values, m_nozzle_index_map);
+}
+
+int Print::get_config_index(int filament_id, int layer_id, const std::vector<std::string> &variant_list, const std::vector<int>& self_index_list, FilamentIndexMap &index_map)
+{
+    auto group_result = get_layered_nozzle_group_result();
+    // Orca: sequential (by-object) prints never publish a Print-level layered group result on this
+    // branch, so fall back to the static identity: one filament-variant column per filament.
+    if (!group_result)
+        return filament_id;
+    auto nozzle_info  = group_result->get_nozzle_for_filament(filament_id, layer_id);
+    if (!nozzle_info.has_value()) {
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__
+                                 << boost::format(", Line %1%: could not found group_nozzle_info corresponding to filament_id %2%, layer_id %3%") % __LINE__ % filament_id %
+                                        layer_id;
+        return 0;
+    }
+
+    ExtruderType     extruder_type      = ExtruderType(m_config.extruder_type.get_at(nozzle_info->extruder_id));
+    NozzleVolumeType nozzle_volume_type = nozzle_info->volume_type;
+
+    FilamentIndexKey key{filament_id, extruder_type, nozzle_volume_type};
+    auto             iter = index_map.find(key);
+    if (iter == index_map.end()) {
+        int index = get_config_index_base(nozzle_volume_type, extruder_type, filament_id + 1, variant_list, self_index_list);
+        index_map[key] = index;
+        return index;
+    } else {
+        return index_map[key];
+    }
+}
+
+int Print::get_config_index(int filament_id, int layer_id, const std::vector<std::string> &variant_list, const std::vector<int>& self_index_list, PrintIndexMap &index_map)
+{
+    auto group_result = get_layered_nozzle_group_result();
+    // Orca: same static fallback as the filament overload; the slot degenerates to the filament's
+    // extruder column (filament_map is 1 based, get_extruder_id guards the filament id range).
+    if (!group_result)
+        return (int)get_extruder_id(filament_id);
+    auto nozzle_info  = group_result->get_nozzle_for_filament(filament_id, layer_id);
+    if (!nozzle_info.has_value()) {
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__
+                                 << boost::format(", Line %1%: could not found group_nozzle_info corresponding to filament_id %2%, layer_id %3%") % __LINE__ % filament_id %
+                                        layer_id;
+        return 0;
+    }
+
+    int              extruder_id        = nozzle_info->extruder_id + 1; // to 1 based
+    ExtruderType     extruder_type      = ExtruderType(m_config.extruder_type.get_at(nozzle_info->extruder_id));
+    NozzleVolumeType nozzle_volume_type = nozzle_info->volume_type;
+
+    PrintIndexKey key{filament_id, extruder_id, extruder_type, nozzle_volume_type};
+    auto          iter = index_map.find(key);
+    if (iter == index_map.end()) {
+        int index = get_config_index_base(nozzle_volume_type, extruder_type, extruder_id, variant_list, self_index_list);
+        index_map[key] = index;
+        return index;
+    } else {
+        return index_map[key];
+    }
 }
 
 // Wipe tower support.

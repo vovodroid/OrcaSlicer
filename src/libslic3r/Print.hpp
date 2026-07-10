@@ -23,6 +23,7 @@
 
 #include <functional>
 #include <set>
+#include <unordered_map>
 
 #include "calib.hpp"
 
@@ -1010,6 +1011,8 @@ public:
     // 1 based group ids
     std::vector<int> get_filament_maps() const;
     FilamentMapMode  get_filament_map_mode() const;
+    std::vector<int> get_filament_volume_maps() const;
+    std::vector<int> get_filament_nozzle_maps() const;
     // get the group label of filament
     size_t get_extruder_id(unsigned int filament_id) const;
 
@@ -1152,7 +1155,12 @@ public:
     bool is_all_objects_are_short() const {
         return std::all_of(this->objects().begin(), this->objects().end(), [&](PrintObject* obj) { return obj->height() < scale_(this->config().nozzle_height.value); });
     }
-    
+
+    // Post-slicing config-slot resolvers: map a (filament, layer) pair to the index of its
+    // per-(extruder x volume type) column in the expanded variant arrays, cached by grouping context.
+    int get_filament_config_indx(int filament_id, int layer_id);
+    int get_nozzle_config_index(int filament_id, int layer_id);
+
     // Orca: Implement prusa's filament shrink compensation approach
     // Returns if all used filaments have same shrinkage compensations.
      bool has_same_shrinkage_compensations() const;
@@ -1162,6 +1170,57 @@ public:
     std::tuple<float, float> object_skirt_offset(double margin_height = 0) const;
 
 protected:
+    struct FilamentIndexKey
+    {
+        int              filament_id;
+        ExtruderType     extruder;
+        NozzleVolumeType nozzle_volume_type;
+
+        bool operator==(const FilamentIndexKey &other) const
+        {
+            return filament_id == other.filament_id && extruder == other.extruder && nozzle_volume_type == other.nozzle_volume_type;
+        }
+    };
+
+    struct PrintIndexKey
+    {
+        int              filament_id;
+        int              extruder_id;
+        ExtruderType     extruder;
+        NozzleVolumeType nozzle_volume_type;
+
+        bool operator==(const PrintIndexKey &other) const
+        {
+            return filament_id == other.filament_id && extruder_id == other.extruder_id && extruder == other.extruder && nozzle_volume_type == other.nozzle_volume_type;
+        }
+    };
+
+    struct FilamentIndexKeyHash
+    {
+        std::size_t operator()(const FilamentIndexKey &k) const
+        {
+            size_t h1 = std::hash<int>{}(k.filament_id);
+            size_t h2 = std::hash<int>{}(static_cast<int>(k.extruder));
+            size_t h3 = std::hash<int>{}(static_cast<int>(k.nozzle_volume_type));
+            return h1 ^ (h2 << 8) ^ (h3 << 12);
+        }
+    };
+    struct PrintIndexKeyHash
+    {
+        std::size_t operator()(const PrintIndexKey &k) const
+        {
+            size_t h1 = std::hash<int>{}(k.filament_id);
+            size_t h2 = std::hash<int>{}(k.extruder_id);
+            size_t h3 = std::hash<int>{}(static_cast<int>(k.extruder));
+            size_t h4 = std::hash<int>{}(static_cast<int>(k.nozzle_volume_type));
+            return h1 ^ (h2 << 8) ^ (h3 << 12) ^ (h4 << 16);
+        }
+    };
+    using FilamentIndexMap = std::unordered_map<FilamentIndexKey, int, FilamentIndexKeyHash>;
+    using PrintIndexMap = std::unordered_map<PrintIndexKey, int, PrintIndexKeyHash>;
+    int get_config_index(int filament_id, int layer_id, const std::vector<std::string> &variant_list, const std::vector<int>& self_index_list, FilamentIndexMap &index_map);
+    int get_config_index(int filament_id, int layer_id, const std::vector<std::string> &variant_list, const std::vector<int>& self_index_list, PrintIndexMap &index_map);
+
     // Invalidates the step, and its depending steps in Print.
     bool                invalidate_step(PrintStep step);
 
@@ -1175,6 +1234,7 @@ private:
     void                _make_skirt();
     void                _make_wipe_tower();
     void                finalize_first_layer_convex_hull();
+    void                update_filament_self_index_cache();
 
     // Islands of objects and their supports extruded at the 1st layer.
     Polygons            first_layer_islands() const;
@@ -1210,6 +1270,13 @@ private:
 
     // Logical (extruder, nozzle) grouping result, set by ToolOrdering during reorder.
     std::shared_ptr<MultiNozzleUtils::NozzleGroupResultBase> m_nozzle_group_result;
+
+    // Used to cache filament parameter information
+    FilamentIndexMap m_filament_index_map;
+    // Used to cache printer and process parameter information
+    PrintIndexMap m_nozzle_index_map;
+    // save the config value of "filament_self_index"
+    std::vector<int> m_filament_self_index;
 
     // Following section will be consumed by the GCodeGenerator.
     ToolOrdering 							m_tool_ordering;
