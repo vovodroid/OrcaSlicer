@@ -616,26 +616,25 @@ void Tab::parse_extruder_selection(int selection, int &extruder_id, NozzleVolume
     for (int i = 0; i < extruder_nums; ++i) {
         NozzleVolumeType volume_type = NozzleVolumeType(nozzle_volumes->values[i]);
 
-        // TODO: Orca: Support hybrid
-        //if (volume_type == NozzleVolumeType::nvtHybrid) {
-        //    if (selection == current_index) {
-        //        extruder_id = i;
-        //        nozzle_type = NozzleVolumeType::nvtStandard;
-        //        return;
-        //    } else if (selection == current_index + 1) {
-        //        extruder_id = i;
-        //        nozzle_type = NozzleVolumeType::nvtHighFlow;
-        //        return;
-        //    }
-        //    current_index += 2;
-        //} else {
+        if (volume_type == NozzleVolumeType::nvtHybrid) {
+            if (selection == current_index) {
+                extruder_id = i;
+                nozzle_type = NozzleVolumeType::nvtStandard;
+                return;
+            } else if (selection == current_index + 1) {
+                extruder_id = i;
+                nozzle_type = NozzleVolumeType::nvtHighFlow;
+                return;
+            }
+            current_index += 2;
+        } else {
             if (selection == current_index) {
                 extruder_id = i;
                 nozzle_type = volume_type;
                 return;
             }
             current_index += 1;
-        //}
+        }
     }
 
     extruder_id = 0;
@@ -651,17 +650,16 @@ int Tab::calculate_selection_index_for_extruder(int extruder_id, NozzleVolumeTyp
 
     for (int i = 0; i < extruder_nums; ++i) {
         if (i == extruder_id) {
-            // TODO: Orca: Support hybrid
             NozzleVolumeType volume_type = NozzleVolumeType(nozzle_volumes->values[i]);
-            /*if (volume_type == NozzleVolumeType::nvtHybrid) {
+            if (volume_type == NozzleVolumeType::nvtHybrid) {
                 return nozzle_type == NozzleVolumeType::nvtHighFlow ? index + 1 : index;
-            } else*/ {
+            } else {
                 return index;
             }
         }
 
         NozzleVolumeType volume_type = NozzleVolumeType(nozzle_volumes->values[i]);
-        index += /*(volume_type == NozzleVolumeType::nvtHybrid) ? 2 :*/ 1;
+        index += (volume_type == NozzleVolumeType::nvtHybrid) ? 2 : 1;
     }
 
     return 0;
@@ -7557,8 +7555,14 @@ void TabPrinter::set_extruder_volume_type(int extruder_id, NozzleVolumeType type
 
     //save to app config
     if (!m_base_preset_name.empty()) {
-        ConfigOptionEnumsGeneric* nozzle_volume_type_option = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
-        std::string nozzle_volume_type_str = nozzle_volume_type_option->serialize();
+        // do not save hybrid flow status to config: it depends on the nozzles currently installed
+        // on the connected printer, so it must not be restored in a later session
+        ConfigOptionEnumsGeneric nozzle_volume_type_option = *m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
+        for (size_t i = 0; i < nozzle_volume_type_option.values.size(); i++) {
+            if (nozzle_volume_type_option.values[i] == (int) nvtHybrid)
+                nozzle_volume_type_option.values[i] = (int) nvtStandard;
+        }
+        std::string nozzle_volume_type_str = nozzle_volume_type_option.serialize();
         wxGetApp().app_config->save_nozzle_volume_types_to_config(m_base_preset_name, nozzle_volume_type_str);
     }
 
@@ -7888,12 +7892,11 @@ std::vector<wxString> Tab::generate_extruder_options()
         wxString extruder_name = _L(DevPrinterConfigUtil::get_toolhead_display_name(
             pt, ext_id, ToolHeadComponent::Nozzle, ToolHeadNameCase::TitleCase, true));
         NozzleVolumeType volume_type = NozzleVolumeType(nozzle_volumes->values[i]);
-        
-        // TODO: Orca: Support hybrid
-        /*if (volume_type == NozzleVolumeType::nvtHybrid) {
+
+        if (volume_type == NozzleVolumeType::nvtHybrid) {
             options.push_back(wxString::Format(_L("%s: %s"), extruder_name, _L("Standard")));
             options.push_back(wxString::Format(_L("%s: %s"), extruder_name, _L("High Flow")));
-        } else*/ {
+        } else {
             wxString volume_name = get_nozzle_volume_type_name(volume_type);
             options.push_back(wxString::Format(_L("%s: %s"), extruder_name, volume_name));
         }
@@ -7942,36 +7945,35 @@ bool Tab::get_extruder_sync_enable_state(int extruder_id)
     if (left_nozzle == right_nozzle) {
         return true;
     }
-    
-    // TODO: Orca: Support hybrid
-    //if (left_nozzle != NozzleVolumeType::nvtHybrid && right_nozzle != NozzleVolumeType::nvtHybrid) {
-    //    return false;
-    //}
 
-    //if (left_nozzle == NozzleVolumeType::nvtHybrid && right_nozzle == NozzleVolumeType::nvtHybrid) {
-    //    return true;
-    //}
+    if (left_nozzle != NozzleVolumeType::nvtHybrid && right_nozzle != NozzleVolumeType::nvtHybrid) {
+        return false;
+    }
 
-    //// Hybrid rules
-    //auto current_nozzle = get_actual_nozzle_volume_type(extruder_id);
-    //if (left_nozzle != NozzleVolumeType::nvtHybrid) {
-    //    if (extruder_id == 0) {
-    //        return true;
-    //    }
-    //    if (extruder_id == 1 && current_nozzle == left_nozzle) {
-    //        return true;
-    //    }
-    //    return false;
-    //}
-    //if (right_nozzle != NozzleVolumeType::nvtHybrid) {
-    //    if (extruder_id == 1) {
-    //        return true;
-    //    }
-    //    if (extruder_id == 0 && current_nozzle == right_nozzle) {
-    //        return true;
-    //    }
-    //    return false;
-    //}
+    if (left_nozzle == NozzleVolumeType::nvtHybrid && right_nozzle == NozzleVolumeType::nvtHybrid) {
+        return true;
+    }
+
+    // Hybrid rules
+    auto current_nozzle = get_actual_nozzle_volume_type(extruder_id);
+    if (left_nozzle != NozzleVolumeType::nvtHybrid) {
+        if (extruder_id == 0) {
+            return true;
+        }
+        if (extruder_id == 1 && current_nozzle == left_nozzle) {
+            return true;
+        }
+        return false;
+    }
+    if (right_nozzle != NozzleVolumeType::nvtHybrid) {
+        if (extruder_id == 1) {
+            return true;
+        }
+        if (extruder_id == 0 && current_nozzle == right_nozzle) {
+            return true;
+        }
+        return false;
+    }
     return false;
 }
 

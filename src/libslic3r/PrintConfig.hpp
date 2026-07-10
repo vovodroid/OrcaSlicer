@@ -452,7 +452,9 @@ enum ExtruderType {
 enum NozzleVolumeType {
     nvtStandard = 0,
     nvtHighFlow,
-    nvtHybrid,       // match-any / mixed sentinel; hidden from user selectors, kept out of the shipping slicer
+    nvtHybrid,       // extruder holds a mix of Standard and High Flow sub-nozzles; selectable only for extruders
+                     // with more than one sub-nozzle (extruder_max_nozzle_count > 1); matched as Standard for
+                     // preset lookup and never emitted in profile variant strings
     nvtTPUHighFlow,  // physical variant, used on H2D/H2DP 0.4 nozzles only
     // Integer values are serialized as raw ints in 3mf plate metadata and device MQTT, so they MUST stay stable.
     nvtMaxNozzleVolumeType = nvtTPUHighFlow
@@ -481,7 +483,8 @@ static std::set<NozzleVolumeType> get_valid_nozzle_volume_type() {
     std::set<NozzleVolumeType> type;
     for (int i = 0; i <= nvtMaxNozzleVolumeType; ++i) {
         auto t = static_cast<NozzleVolumeType>(i);
-        // Hybrid is a "match-any / mixed" sentinel, never a user-selectable physical type.
+        // Hybrid is not a physical nozzle variant: presets never define it, so it must not
+        // produce a variant string.
         if (t == nvtHybrid) continue;
         type.insert(t);
     }

@@ -1401,7 +1401,9 @@ bool SelectMachineDialog::is_nozzle_type_match(DevExtderSystem data, wxString& e
     //check nozzle used
     auto used_filaments = wxGetApp().plater()->get_partplate_list().get_curr_plate()->get_used_filaments(); // 1 based
     auto filament_maps  = wxGetApp().plater()->get_partplate_list().get_curr_plate()->get_real_filament_maps(project_config);  // 1 based
-    std::map<int, std::string> used_extruders_flow;
+    // flow type and diameter of every nozzle the sliced plate needs, keyed by logical extruder;
+    // a hybrid extruder contributes one entry per used sub-nozzle flow
+    std::multimap<int, std::pair<NozzleFlowType, float>> used_extruders_flow;
     std::vector<int> used_extruders; // 0 based
     for (auto f : used_filaments) {
         int filament_extruder = filament_maps[f - 1] - 1;
@@ -1411,60 +1413,78 @@ bool SelectMachineDialog::is_nozzle_type_match(DevExtderSystem data, wxString& e
     std::sort(used_extruders.begin(), used_extruders.end());
 
     auto nozzle_volume_type_opt = dynamic_cast<const ConfigOptionEnumsGeneric *>(wxGetApp().preset_bundle->project_config.option("nozzle_volume_type"));
+    auto nozzle_diameter_opt    = wxGetApp().preset_bundle->printers.get_edited_preset().config.option<ConfigOptionFloats>("nozzle_diameter");
     for (auto i = 0; i < used_extruders.size(); i++) {
         if (nozzle_volume_type_opt) {
             NozzleVolumeType nozzle_volume_type = (NozzleVolumeType) (nozzle_volume_type_opt->get_at(used_extruders[i]));
-            if (nozzle_volume_type == NozzleVolumeType::nvtStandard) { used_extruders_flow[used_extruders[i]] = "Standard";}
-            else if (nozzle_volume_type == NozzleVolumeType::nvtTPUHighFlow) { used_extruders_flow[used_extruders[i]] = "TPU High Flow";}
-            else {used_extruders_flow[used_extruders[i]] = "High Flow";}
+            float preset_diameter = nozzle_diameter_opt ? (float) nozzle_diameter_opt->get_at(used_extruders[i]) : -1.0f;
+            if (nozzle_volume_type == NozzleVolumeType::nvtHybrid) {
+                // A hybrid extruder prints with a mix of nozzle flows: collect the flow of each
+                // physically used nozzle instead of forcing a single one.
+                auto nozzle_group_res = DevUtilBackend::GetNozzleGroupResult(m_plater);
+                if (nozzle_group_res) {
+                    for (const auto &nozzle_info : nozzle_group_res->get_used_nozzles_in_extruder(used_extruders[i])) {
+                        float diameter = preset_diameter;
+                        try { diameter = std::stof(nozzle_info.diameter); } catch (const std::exception &) {}
+                        used_extruders_flow.insert({used_extruders[i], {DevNozzle::ToNozzleFlowType(nozzle_info.volume_type), diameter}});
+                    }
+                } else {
+                    // A by-object plate with several objects produces no plate-level nozzle grouping,
+                    // so the used flows are unknown; skip the check for this extruder rather than
+                    // blocking the print.
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": no nozzle group result, flow check skipped for extruder " << used_extruders[i];
+                }
+            } else {
+                used_extruders_flow.insert({used_extruders[i], {DevNozzle::ToNozzleFlowType(nozzle_volume_type), preset_diameter}});
+            }
         }
     }
 
     vector<int> map_extruders = {1, 0};
 
-
-    // The default two extruders are left, right, but the order of the extruders on the machine is right, left.
-    std::vector<std::string> flow_type_of_machine;
-    for (const auto& it : data.GetExtruders())
-    {
-        if (it.GetNozzleFlowType() == NozzleFlowType::H_FLOW)
-        {
-            flow_type_of_machine.push_back(L("High Flow"));
-        }
-        else if (it.GetNozzleFlowType() == NozzleFlowType::S_FLOW)
-        {
-            flow_type_of_machine.push_back(L("Standard"));
-        }
-        else if (it.GetNozzleFlowType() == NozzleFlowType::U_FLOW)
-        {
-            flow_type_of_machine.push_back(L("TPU High Flow"));
-        }
-    }
+    const DevNozzleSystem* nozzle_sys = data.Owner() ? data.Owner()->GetNozzleSystem() : nullptr;
+    const bool has_nozzle_rack = nozzle_sys && nozzle_sys->GetNozzleRack() && nozzle_sys->GetNozzleRack()->IsSupported();
 
     //Only when all preset nozzle types and machine nozzle types are exactly the same, return true.
-    for (std::map<int, std::string>::iterator it = used_extruders_flow.begin(); it!= used_extruders_flow.end(); it++) {
+    for (auto it = used_extruders_flow.begin(); it != used_extruders_flow.end(); it++) {
+        // The default two extruders are left, right, but the order of the extruders on the machine is right, left.
         int target_machine_nozzle_id = map_extruders[it->first];
+        NozzleFlowType used_flow = it->second.first;
 
-        if (target_machine_nozzle_id < flow_type_of_machine.size()) {
-            if (flow_type_of_machine[target_machine_nozzle_id] != used_extruders_flow[it->first]) {
-
-                wxString pos;
-                if (target_machine_nozzle_id == DEPUTY_EXTRUDER_ID)
-                {
-                    pos = _L("left nozzle");
-                }
-                else if(target_machine_nozzle_id == MAIN_EXTRUDER_ID)
-                {
-                    pos = _L("right nozzle");
-                }
-
-                error_message = wxString::Format(_L("The nozzle flow setting of %s(%s) doesn't match with the slicing file(%s). "
-                                                    "Please make sure the nozzle installed matches with settings in printer, "
-                                                    "then set the corresponding printer preset while slicing."), pos,
-                                                    _L(flow_type_of_machine[target_machine_nozzle_id]),
-                                                    _L(used_extruders_flow[it->first]));
+        // A nozzle-rack extruder swaps nozzles during the print, so the mounted nozzle is irrelevant:
+        // the extruder inventory (mounted nozzle + rack) must hold a nozzle of every needed flow instead.
+        if (has_nozzle_rack && target_machine_nozzle_id == MAIN_EXTRUDER_ID) {
+            if (nozzle_sys->CollectNozzles(target_machine_nozzle_id, used_flow, it->second.second).empty()) {
+                error_message = wxString::Format(_L("The printer has no nozzle matching the slicing file (%s). "
+                                                    "Please install a matching nozzle on the printer, "
+                                                    "or set the corresponding printer preset while slicing."),
+                                                 DevNozzle::GetNozzleFlowTypeStr(used_flow));
                 return false;
             }
+            continue;
+        }
+
+        NozzleFlowType machine_flow = data.GetNozzleFlowType(target_machine_nozzle_id);
+        if (machine_flow == NozzleFlowType::NONE_FLOWTYPE)
+            continue; // the mounted nozzle is unknown, nothing to compare against
+
+        if (machine_flow != used_flow) {
+            wxString pos;
+            if (target_machine_nozzle_id == DEPUTY_EXTRUDER_ID)
+            {
+                pos = _L("left nozzle");
+            }
+            else if(target_machine_nozzle_id == MAIN_EXTRUDER_ID)
+            {
+                pos = _L("right nozzle");
+            }
+
+            error_message = wxString::Format(_L("The nozzle flow setting of %s(%s) doesn't match with the slicing file(%s). "
+                                                "Please make sure the nozzle installed matches with settings in printer, "
+                                                "then set the corresponding printer preset while slicing."), pos,
+                                                DevNozzle::GetNozzleFlowTypeStr(machine_flow),
+                                                DevNozzle::GetNozzleFlowTypeStr(used_flow));
+            return false;
         }
     }
     return true;

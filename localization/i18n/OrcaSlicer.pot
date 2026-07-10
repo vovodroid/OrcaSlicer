@@ -18749,3 +18749,9 @@ msgstr ""
 
 msgid "Both"
 msgstr ""
+
+msgid ""
+"The printer has no nozzle matching the slicing file (%s). Please install a "
+"matching nozzle on the printer, or set the corresponding printer preset "
+"while slicing."
+msgstr ""

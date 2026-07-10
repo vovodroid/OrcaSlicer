@@ -1592,9 +1592,10 @@ std::optional<NozzleOption> Sidebar::priv::get_nozzle_options(MachineObject* obj
 
                     if (!nozzle_option->extruder_nozzle_stats.count(extruder_id)) {
                         nozzle_count = 0;
-                        // Reset the concrete volume types (Standard/High Flow); Hybrid stays a hidden match-any
-                        // sentinel and is left alone. TPU High Flow is a concrete variant shipped on 0.4/0.6
-                        // nozzles, so reset it too, but only there (mirrors the High-Flow-skip-for-0.2 guard).
+                        // Reset the concrete volume types (Standard/High Flow); Hybrid is not a physical
+                        // nozzle type and never appears in the stats. TPU High Flow is a concrete variant
+                        // shipped on 0.4/0.6 nozzles, so reset it too, but only there (mirrors the
+                        // High-Flow-skip-for-0.2 guard).
                         std::vector<NozzleVolumeType> reset_types{nvtStandard, nvtHighFlow};
                         if (extruder_supports_tpu_high_flow(preset_bundle, extruder_id))
                             reset_types.push_back(nvtTPUHighFlow);
@@ -1816,27 +1817,11 @@ bool Sidebar::priv::sync_extruder_list(bool &only_external_material, bool is_man
         std::optional<NozzleVolumeType> select_type;
         if (nozzle_option && nozzle_option->extruder_nozzle_stats.count(index)) {
             const auto &stats = nozzle_option->extruder_nozzle_stats[index];
-            if (stats.size() > 1) {
-                // Orca: for a mixed extruder, keep Hybrid out of the (still-deferred) nozzle-centric slicing
-                // pipeline, so collapse to the dominant concrete volume type (tie -> Standard).
-                // TPU High Flow is shipped on 0.4/0.6 nozzles, so only fold it in there (mirrors the
-                // High-Flow-skip-for-0.2 guard). Uses the device-reported diameter, same predicate as the preset path.
-                int std_cnt = 0, hf_cnt = 0, tpu_hf_cnt = 0;
-                for (const auto &kv : stats) {
-                    if (kv.first == nvtStandard)         std_cnt    = kv.second;
-                    else if (kv.first == nvtHighFlow)    hf_cnt     = kv.second;
-                    else if (kv.first == nvtTPUHighFlow) tpu_hf_cnt = kv.second;
-                }
-                if (!nozzle_diameter_supports_tpu_high_flow(nozzle_diameters[extruder_id]))
-                    tpu_hf_cnt = 0;
-                select_type = nvtStandard;
-                if (hf_cnt > std_cnt && hf_cnt >= tpu_hf_cnt)
-                    select_type = nvtHighFlow;
-                else if (tpu_hf_cnt > std_cnt && tpu_hf_cnt > hf_cnt)
-                    select_type = nvtTPUHighFlow;
-            } else {
+            if (stats.size() > 1)
+                // The extruder holds nozzles of several flow types: select the mixed-flow mode.
+                select_type = NozzleVolumeType::nvtHybrid;
+            else
                 select_type = stats.begin()->first;
-            }
         }
         if (obj->is_nozzle_flow_type_supported()) {
             if (obj->GetExtderSystem()->GetNozzleFlowType(index) == NozzleFlowType::NONE_FLOWTYPE) {
@@ -3292,8 +3277,12 @@ void Sidebar::update_presets(Preset::Type preset_type)
             auto type = extruders_def->enum_labels[extruders->values[index]];
             int select = -1;
             for (size_t i = 0; i < nozzle_volumes_def->enum_labels.size(); ++i) {
-                if (boost::algorithm::contains(extruder_variants->values[index], type + " " + nozzle_volumes_def->enum_labels[i]) /*||
-                    extruder_max_nozzle_count->values[index] > 1 && nozzle_volumes_def->enum_keys_map->at(nozzle_volumes_def->enum_values[i]) == nvtHybrid*/) { // TODO: Orca: Support hybrid
+                // get_at falls back to the first entry when a profile defines no per-extruder value,
+                // so extruders without an explicit sub-nozzle count never offer Hybrid. A nullable-int
+                // nil is INT_MAX (> 1) and would otherwise falsely pass the gate, so exclude it too.
+                if (boost::algorithm::contains(extruder_variants->values[index], type + " " + nozzle_volumes_def->enum_labels[i]) ||
+                    extruder_max_nozzle_count->get_at(index) > 1 && extruder_max_nozzle_count->get_at(index) != ConfigOptionIntsNullable::nil_value() &&
+                    nozzle_volumes_def->enum_keys_map->at(nozzle_volumes_def->enum_values[i]) == nvtHybrid) {
                     if (nozzle_volumes_def->enum_keys_map->at(nozzle_volumes_def->enum_values[i]) == NozzleVolumeType::nvtHighFlow &&(diameter == "0.2" ||
                         is_skip_high_flow_printer(printer_model)))
                         continue;
