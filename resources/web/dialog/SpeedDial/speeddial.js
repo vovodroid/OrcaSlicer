@@ -69,11 +69,66 @@ function parseId(id) {
 }
 
 function visibleFavourites(favourites, actions) {
+  // why: a non-runnable fav renders a dead monogram tile whose click run()s to a silent
+  //      no-op; drop it from the quick-bar (the searchable list still shows it greyed).
   var seen = {};
-  (actions || []).forEach(function (a) { seen[a.id] = true; });
+  (actions || []).forEach(function (a) { if (a.runnable !== false) seen[a.id] = true; });
   return (favourites || []).filter(function (id, i, arr) {
     return seen[id] && arr.indexOf(id) === i;
   });
+}
+
+function resultCountText(total, shown, query) {
+  return (query || "").trim() ? shown + " of " + total : total + " actions";
+}
+
+// Resolve the selection cursor {zone,i} to the action id it points at: fav zone indexes the
+// visible favourites, list zone the filtered actions. Pure so runSelected() shares one lookup.
+function selectedActionId(sel, actions, favIds) {
+  if (sel.zone === "fav")
+    return favIds[sel.i];
+  var a = actions[sel.i];
+  return a && a.id;
+}
+
+function foldLabel(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, ""); }
+
+// Title-case a package for display: "GCODE OPTIMIZER"/"iRoNiNg pRo" -> "Gcode Optimizer"/"Ironing Pro".
+function prettyPkg(pkg) {
+  return String(pkg || "").toLowerCase().replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+}
+
+// Accessible label "Title from Pretty Pkg", disambiguated with the plugin key when another action
+// shares the same title+pkg (case/separator-insensitive) - so two rows never read out identically.
+function actionLabel(action, actions) {
+  var label = action.title + " from " + prettyPkg(action.pkg);
+  if (actions && actions.length) {
+    var mine = foldLabel(action.title) + "|" + foldLabel(action.pkg);
+    var clash = actions.some(function (o) {
+      return o.id !== action.id && foldLabel(o.title) + "|" + foldLabel(o.pkg) === mine;
+    });
+    if (clash)
+      label += " (" + parseId(action.id).key + ")";
+  }
+  return label;
+}
+
+// Monogram code for a tile: title initial, escalated to +pkg initial then a 1-based ordinal
+// only when actions collide - so same-titled actions still get visually distinct tiles.
+function tileCode(action, actions) {
+  var list = actions || [];
+  var ti = (action.title || " ").charAt(0).toUpperCase();
+  var sameTitle = list.filter(function (o) { return (o.title || " ").charAt(0).toUpperCase() === ti; });
+  if (sameTitle.length <= 1)
+    return ti;
+  var pi = (action.pkg || " ").charAt(0).toUpperCase();
+  var samePkg = sameTitle.filter(function (o) { return (o.pkg || " ").charAt(0).toUpperCase() === pi; });
+  if (samePkg.length <= 1)
+    return ti + pi;
+  for (var i = 0; i < samePkg.length; i++)
+    if (samePkg[i].id === action.id)
+      return ti + pi + (i + 1);
+  return ti + pi;
 }
 
 function syncClearButton() {
@@ -214,8 +269,9 @@ function renderFav() {
     var tile = document.createElement("button");
     tile.className = "fav-tile" + (sel.zone === "fav" && sel.i === i ? " sel" : "");
     tile.style.setProperty("--h", hue(id));
-    tile.textContent = a.title.charAt(0).toUpperCase();
+    tile.textContent = tileCode(a, ACTIONS);
     tile.title = a.title;
+    tile.setAttribute("aria-label", actionLabel(a, ACTIONS));
     tile.onclick = function () { sel = { zone: "fav", i: i }; run(a); };
     favEl.appendChild(tile);
   });
@@ -253,17 +309,18 @@ function renderList() {
   }
   if (countEl) {
     countEl.hidden = false;
-    countEl.textContent = "Showing " + arr.length + " of " + ACTIONS.length + " actions";
+    countEl.textContent = resultCountText(ACTIONS.length, arr.length, query);
   }
   arr.forEach(function (a, i) {
     var on = FAVS.indexOf(a.id) !== -1;
     var row = document.createElement("div");
     row.className = "row" + (sel.zone === "list" && sel.i === i ? " sel" : "") + (a.runnable === false ? " disabled" : "");
+    row.setAttribute("aria-label", actionLabel(a, ACTIONS));
 
     var tile = document.createElement("div");
     tile.className = "tile";
     tile.style.setProperty("--h", hue(a.id));
-    tile.textContent = a.title.charAt(0).toUpperCase();
+    tile.textContent = tileCode(a, ACTIONS);
 
     var left = document.createElement("div");
     left.className = "row-left";
@@ -358,9 +415,8 @@ function run(a) {
 }
 
 function runSelected() {
-  if (sel.zone === "fav") { var id = currentVisibleFavs()[sel.i]; if (id) run(byId(id)); return; }
-  var a = filterActions(ACTIONS, query)[sel.i];
-  if (a) run(a);
+  var id = selectedActionId(sel, filterActions(ACTIONS, query), currentVisibleFavs());
+  if (id) run(byId(id));
 }
 
 function focusInput() { setTimeout(function () { qEl.focus(); }, 0); }
@@ -381,7 +437,10 @@ function OnInit() {
   document.addEventListener("keydown", function (e) {
     var arr = filterActions(ACTIONS, query);
     var favs = currentVisibleFavs();
-    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    // why: Up/Down always navigate; Left/Right only navigate the fav bar. In the list zone,
+    //      let Left/Right fall through so they move the caret in the focused search field.
+    var lr = e.key === "ArrowLeft" || e.key === "ArrowRight";
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || (lr && sel.zone === "fav")) {
       e.preventDefault();
       sel = nextSel(sel, e.key, arr.length, favs.length);
       // why: entering/leaving the fav zone toggles the eyebrow line, changing launcher height;
