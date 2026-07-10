@@ -18740,3 +18740,12 @@ msgstr ""
 
 msgid "Switch track at Filament Track Switch"
 msgstr ""
+
+msgid "Fan direction"
+msgstr ""
+
+msgid "Cooling fan direction of the printer"
+msgstr ""
+
+msgid "Both"
+msgstr ""

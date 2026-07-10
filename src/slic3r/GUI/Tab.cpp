@@ -4956,6 +4956,7 @@ void TabPrinter::build_fff()
         optgroup->append_single_option_line("nozzle_type", "printer_basic_information_accessory#nozzle-type");
         optgroup->append_single_option_line("nozzle_hrc", "printer_basic_information_accessory#nozzle-hrc");
         optgroup->append_single_option_line("auxiliary_fan", "printer_basic_information_accessory#auxiliary-part-cooling-fan");
+        optgroup->append_single_option_line("fan_direction");
         optgroup->append_single_option_line("support_chamber_temp_control", "printer_basic_information_accessory#support-controlling-chamber-temperature");
         optgroup->append_single_option_line("support_air_filtration", "printer_basic_information_accessory#support-air-filtration");
 
@@ -5892,6 +5893,8 @@ void TabPrinter::toggle_options()
 
         const bool support_parallel_printheads = printer_cfg.opt_bool("support_parallel_printheads");
         toggle_line("parallel_printheads_count", support_parallel_printheads);
+
+        toggle_line("fan_direction", m_config->opt_bool("auxiliary_fan"));
     }
     
 

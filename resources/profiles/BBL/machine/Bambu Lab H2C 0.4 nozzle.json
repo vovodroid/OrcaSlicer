@@ -31,6 +31,7 @@
 		"1",
 		"6"
 	],
+	"fan_direction": "left",
 	"hotend_cooling_rate": [
 		"1.6",
 		"1.6",
