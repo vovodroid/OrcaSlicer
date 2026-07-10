@@ -16,13 +16,23 @@ namespace Slic3r {
 struct SlicingPipelineContext {
     std::string          orca_version;
     SlicingPipelineStepPlugin  step { SlicingPipelineStepPlugin::posSlice };
-    Print*               print  { nullptr };   // always present when dispatched
-    const PrintObject*   object { nullptr };   // null for print-wide steps
+    Print*               print  { nullptr };   // present for in-pipeline steps; null at psGCodePostProcess
+    const PrintObject*   object { nullptr };   // null for print-wide steps and psGCodePostProcess
     // read-only per-plugin settings, populated by the dispatcher from the
     // plugin's [tool.orcaslicer.plugin.settings] PEP-723 table. Exposed as
     // ctx.params (dict of string->string).
     std::map<std::string, std::string> params;
-    bool cancelled() const;                     // -> print->canceled()
+    // Populated ONLY at Step.psGCodePostProcess (the GUI G-code export/post-process seam,
+    // PostProcessor.cpp). gcode_path is the working G-code file on disk that the plugin edits
+    // in place; host is the target ("File", "OctoPrint", ...); output_name mirrors
+    // SLIC3R_PP_OUTPUT_NAME. Empty at every other step.
+    std::string          gcode_path;
+    std::string          host;
+    std::string          output_name;
+    // C++-only config fallback for psGCodePostProcess (no live Print graph there): config_value()
+    // reads it when `print` is null. Not exposed to Python directly. Never dereferenced elsewhere.
+    const DynamicPrintConfig* full_config { nullptr };
+    bool cancelled() const;                     // -> print->canceled() (false when print is null)
 };
 
 class SlicingPipelinePluginCapability : public PluginCapabilityInterface {

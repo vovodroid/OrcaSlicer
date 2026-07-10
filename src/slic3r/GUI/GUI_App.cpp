@@ -3182,7 +3182,7 @@ bool GUI_App::on_init_inner()
                         static const char* const kStepNames[] = {
                             "posSlice", "posPerimeters", "posEstimateCurledExtrusions", "posPrepareInfill", "posInfill",
                             "posIroning", "posContouring", "posSupportMaterial", "posDetectOverhangsForLift",
-                            "posSimplifyPath", "psWipeTower", "psSkirtBrim"
+                            "posSimplifyPath", "psWipeTower", "psSkirtBrim", "psGCodePostProcess"
                         }; // order must match Slic3r::SlicingPipelineStepPlugin
                         const char* step_name = static_cast<size_t>(step) < sizeof(kStepNames) / sizeof(kStepNames[0])
                                                     ? kStepNames[static_cast<int>(step)] : "Unknown";

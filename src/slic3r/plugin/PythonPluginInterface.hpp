@@ -10,12 +10,11 @@
 
 namespace Slic3r {
 
-enum class PluginCapabilityType { PostProcessing = 0, PrinterConnection, Automation, Analysis, Importer, Exporter, Visualization, Script, SlicingPipeline, Unknown };
+enum class PluginCapabilityType { PrinterConnection = 0, Automation, Analysis, Importer, Exporter, Visualization, Script, SlicingPipeline, Unknown };
 
 inline std::string plugin_capability_type_to_string(PluginCapabilityType type)
 {
     switch (type) {
-    case PluginCapabilityType::PostProcessing: return "post-processing";
     case PluginCapabilityType::PrinterConnection: return "printer-connection";
     case PluginCapabilityType::Automation: return "automation";
     case PluginCapabilityType::Analysis: return "analysis";
@@ -31,7 +30,6 @@ inline std::string plugin_capability_type_to_string(PluginCapabilityType type)
 inline std::string plugin_capability_type_display_name(PluginCapabilityType type)
 {
     switch (type) {
-    case PluginCapabilityType::PostProcessing: return "Post-processing";
     case PluginCapabilityType::PrinterConnection: return "Printer connection";
     case PluginCapabilityType::Automation: return "Automation";
     case PluginCapabilityType::Analysis: return "Analysis";
@@ -53,8 +51,6 @@ inline PluginCapabilityType plugin_capability_type_from_string(std::string_view 
         lowered.push_back(to_lower(ch));
     }
 
-    if (lowered == "post-processing")
-        return PluginCapabilityType::PostProcessing;
     if (lowered == "printer-connection")
         return PluginCapabilityType::PrinterConnection;
     if (lowered == "automation")

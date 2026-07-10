@@ -81,7 +81,8 @@ TEST_CASE("orca.slicing module: Step enum, context, and a Python capability can 
     REQUIRE(py::hasattr(orca, "slicing"));
     py::object slicing = orca.attr("slicing");
     CHECK(py::hasattr(slicing, "Step"));
-    CHECK(py::hasattr(slicing.attr("Step"), "Slice"));
+    CHECK(py::hasattr(slicing.attr("Step"), "posSlice"));
+    CHECK(py::hasattr(slicing.attr("Step"), "psGCodePostProcess"));
     CHECK(py::hasattr(slicing, "SlicingPipelineContext"));
     CHECK(py::hasattr(slicing, "SlicingPipelineCapabilityBase"));
 
@@ -124,6 +125,79 @@ TEST_CASE("orca.slicing is workflow-only: context exposes raw print/object; view
     py::object pyctx = py::cast(&ctx, py::return_value_policy::reference);
     CHECK(pyctx.attr("print").is_none());
     CHECK(pyctx.attr("object").is_none());
+}
+
+#include "libslic3r/PrintConfig.hpp"   // DynamicPrintConfig for the psGCodePostProcess context
+#include <boost/filesystem.hpp>
+#include <boost/nowide/fstream.hpp>
+#include <sstream>
+
+// psGCodePostProcess is the merged post-processing seam: no live Print (print/object are None), the
+// plugin edits the file at ctx.gcode_path in place, and ctx.config_value() falls back to the config
+// the export path handed in. Exercising the real bindings by calling the Python execute() directly
+// (not the C++ audit trampoline) keeps this a pure binding-surface test.
+TEST_CASE("orca.slicing psGCodePostProcess context: file edit in place + config fallback", "[slicing_pipeline]") {
+    namespace fs = boost::filesystem;
+    ensure_python_initialized();
+    import_orca_module();
+    py::gil_scoped_acquire gil;
+
+    const fs::path gpath = fs::temp_directory_path() / fs::unique_path("orca_pp_%%%%-%%%%.gcode");
+    {
+        boost::nowide::ofstream ofs(gpath.string());
+        ofs << "; header\nG1 X0 Y0\n";
+    }
+
+    // Config the plugin reads back through ctx.config_value() (there is no live Print at this step).
+    Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
+    config.set_key_value("layer_height", new Slic3r::ConfigOptionFloat(0.2));
+
+    Slic3r::SlicingPipelineContext ctx;
+    ctx.orca_version = "test";
+    ctx.step         = Slic3r::SlicingPipelineStepPlugin::psGCodePostProcess;
+    ctx.gcode_path   = gpath.string();
+    ctx.host         = "File";
+    ctx.output_name  = "final.gcode";
+    ctx.full_config  = &config;   // print stays null
+
+    py::object pyctx = py::cast(&ctx, py::return_value_policy::reference);
+    CHECK(pyctx.attr("gcode_path").cast<std::string>() == gpath.string());
+    CHECK(pyctx.attr("host").cast<std::string>() == "File");
+    CHECK(pyctx.attr("output_name").cast<std::string>() == "final.gcode");
+    CHECK(pyctx.attr("print").is_none());
+    CHECK(pyctx.attr("object").is_none());
+    CHECK(pyctx.attr("step").cast<Slic3r::SlicingPipelineStepPlugin>()
+          == Slic3r::SlicingPipelineStepPlugin::psGCodePostProcess);
+    CHECK_FALSE(pyctx.attr("cancelled")().cast<bool>());   // null print -> not cancelled
+    // config_value() resolves from full_config when print is null; unknown keys are None.
+    CHECK_FALSE(pyctx.attr("config_value")("layer_height").is_none());
+    CHECK(pyctx.attr("config_value")("this_key_does_not_exist").is_none());
+
+    // A Python capability edits the file in place through ctx.gcode_path. Calling execute() directly
+    // in Python dispatches to the Python method (no C++ trampoline), so this needs no audit context.
+    py::module_ main = py::module_::import("__main__");
+    main.attr("_pp_ctx") = pyctx;
+    py::exec(R"(
+import orca
+class Stamp(orca.slicing.SlicingPipelineCapabilityBase):
+    def get_name(self): return "stamp"
+    def execute(self, ctx):
+        assert ctx.step == orca.slicing.Step.psGCodePostProcess
+        assert ctx.print is None and ctx.object is None
+        with open(ctx.gcode_path, "a") as f:
+            f.write("; stamped by " + ctx.host + "\n")
+        return orca.ExecutionResult.success("ok")
+_pp_result = Stamp().execute(_pp_ctx)
+    )");
+    CHECK(main.attr("_pp_result").attr("message").cast<std::string>() == std::string("ok"));
+
+    std::string contents;
+    {
+        boost::nowide::ifstream ifs(gpath.string());
+        std::stringstream ss; ss << ifs.rdbuf(); contents = ss.str();
+    }
+    CHECK(contents.find("; stamped by File") != std::string::npos);
+    fs::remove(gpath);
 }
 
 // ---------------------------------------------------------------------------

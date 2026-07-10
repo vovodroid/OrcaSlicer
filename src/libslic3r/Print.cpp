@@ -125,8 +125,8 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
         "printing_by_object_gcode",
         "filament_end_gcode",
         "post_process",
-        "post_process_plugin",
-        // "plugins" is the manifest backing post_process_plugin; like it, it only affects G-code export.
+        // "plugins" is the derived manifest backing the plugin-picker options; on its own it only
+        // affects G-code export. The specific option (e.g. slicing_pipeline_plugin) drives any re-slice.
         "plugins",
         "extruder_clearance_height_to_rod",
         "extruder_clearance_height_to_lid",

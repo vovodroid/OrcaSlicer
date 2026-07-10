@@ -1794,7 +1794,7 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
     // always carries resolved "name;uuid;capability" references that full_config() and save_to_json()
     // then pass downstream as-is -- no separate rebuild anywhere else.
     if (const ConfigOptionDef* opt_def = m_config->def()->get(opt_key);
-        opt_def && opt_def->plugin_type != ConfigOptionDef::PluginType::None)
+        opt_def && opt_def->is_plugin_backed())
         m_config->update_plugin_manifest();
 
     if (opt_key == "gcode_flavor" && m_type == Preset::TYPE_PRINTER) {
@@ -3079,12 +3079,6 @@ void TabPrint::build()
         option.opt.is_code = true;
         option.opt.height = 15;
         optgroup->append_single_option_line(option, "others_settings_post_processing_scripts");
-
-        optgroup = page->new_optgroup(L("Post-processing Plugin"), L"param_gcode", 0);
-        optgroup->hide_labels();
-        option = optgroup->get_option("post_process_plugin");
-        option.opt.full_width = true;
-        optgroup->append_single_option_line(option, "others_settings_plugin_picker");
 
         optgroup = page->new_optgroup(L("Slicing Pipeline Plugin"), L"param_gcode", 0);
         optgroup->hide_labels();

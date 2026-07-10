@@ -5114,20 +5114,10 @@ void PrintConfigDef::init_fff_params()
     def->mode = comDevelop;
     def->set_default_value(new ConfigOptionStrings());
 
-    def = this->add("post_process_plugin", coStrings);
-    def->label = L("Post-processing Plugin");
-    def->tooltip = L("Select a Python plugin to process the output G-code. "
-                   "Plugins are loaded from the orca_plugins directory in your data folder. "
-                   "The plugin will receive the G-code file path and can modify it in place.");
-    def->gui_type = ConfigOptionDef::GUIType::plugin_picker;
-    def->plugin_type = "post-processing";
-    def->full_width = true;
-    def->mode = comAdvanced;
-    def->set_default_value(new ConfigOptionStrings());
-
     def = this->add("slicing_pipeline_plugin", coStrings);
     def->label = L("Slicing Pipeline Plugin");
-    def->tooltip = L("Python plugin(s) invoked at each slicing pipeline step to read and modify intermediate slicing data. Research/experimental.");
+    def->tooltip = L("Python plugin(s) invoked at each slicing pipeline step to read and modify intermediate slicing data, "
+                   "including a final G-code post-processing step. Research/experimental.");
     def->gui_type = ConfigOptionDef::GUIType::plugin_picker;
     def->plugin_type = "slicing-pipeline";
     def->full_width = true;

@@ -44,20 +44,22 @@ TEST_CASE("SlicingPipeline hook fires once per step per object in order", "[slic
 
     using S = Slic3r::SlicingPipelineStepPlugin;
     auto count = [&](S s){ return std::count_if(calls.begin(), calls.end(), [&](const Call& c){ return c.step == s; }); };
-    CHECK(count(S::Slice) == 1);
-    CHECK(count(S::Perimeters) == 1);
-    CHECK(count(S::PrepareInfill) == 1);   // the prepare-infill seam fires once per object
-    CHECK(count(S::Infill) == 1);
-    CHECK(count(S::WipeTower) == 1);
-    CHECK(count(S::SkirtBrim) == 1);
+    CHECK(count(S::posSlice) == 1);
+    CHECK(count(S::posPerimeters) == 1);
+    CHECK(count(S::posPrepareInfill) == 1);   // the prepare-infill seam fires once per object
+    CHECK(count(S::posInfill) == 1);
+    CHECK(count(S::psWipeTower) == 1);
+    CHECK(count(S::psSkirtBrim) == 1);
+    // psGCodePostProcess fires from the GUI export path, never from process():
+    CHECK(count(S::psGCodePostProcess) == 0);
     // print-wide steps carry a null object:
     for (const auto& c : calls)
-        if (c.step == S::WipeTower || c.step == S::SkirtBrim) CHECK(c.obj == nullptr);
+        if (c.step == S::psWipeTower || c.step == S::psSkirtBrim) CHECK(c.obj == nullptr);
     // Slice must fire before Perimeters for the same object:
     auto idx = [&](S s){ for (size_t i=0;i<calls.size();++i) if (calls[i].step==s) return (int)i; return -1; };
-    CHECK(idx(S::Slice) < idx(S::Perimeters));
-    CHECK(idx(S::Perimeters) < idx(S::PrepareInfill)); // prepare-infill fires after perimeters...
-    CHECK(idx(S::PrepareInfill) < idx(S::Infill));     // ...and before the fills are built
+    CHECK(idx(S::posSlice) < idx(S::posPerimeters));
+    CHECK(idx(S::posPerimeters) < idx(S::posPrepareInfill)); // prepare-infill fires after perimeters...
+    CHECK(idx(S::posPrepareInfill) < idx(S::posInfill));     // ...and before the fills are built
 }
 
 #include <sstream>
@@ -418,10 +420,10 @@ TEST_CASE("fill_surfaces mutation cascades at PrepareInfill but not at Infill", 
         return n;
     };
     using S = Slic3r::SlicingPipelineStepPlugin;
-    const size_t base = fill_paths(false, S::PrepareInfill); // active hook, no mutation
+    const size_t base = fill_paths(false, S::posPrepareInfill); // active hook, no mutation
     CHECK(base > 0);
-    CHECK(fill_paths(true, S::PrepareInfill) < base); // mutation before make_fills cascades
-    CHECK(fill_paths(true, S::Infill) == base);       // mutation after make_fills is a no-op (v1)
+    CHECK(fill_paths(true, S::posPrepareInfill) < base); // mutation before make_fills cascades
+    CHECK(fill_paths(true, S::posInfill) == base);       // mutation after make_fills is a no-op (v1)
 }
 
 // lslices (the layer's merged islands) are built once in slice() and never rebuilt by

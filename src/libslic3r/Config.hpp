@@ -2444,9 +2444,9 @@ public:
     // "serialized" - vector valued option is entered in a single edit field. Values are separated by a semicolon.
     // "show_value" - even if enum_values / enum_labels are set, still display the value, not the enum label.
     std::string                         gui_flags;
-    // Capability type of a plugin-backed option, e.g. "post-processing" / "slicing-pipeline" /
-    // "printer-connection" (empty for ordinary options). GUIType::plugin_picker filters the plugin
-    // list by it, and it resolves the option's "plugins" manifest reference; see is_plugin_backed().
+    // Capability type of a plugin-backed option, e.g. "slicing-pipeline" / "printer-connection"
+    // (empty for ordinary options). GUIType::plugin_picker filters the plugin list by it, and it
+    // resolves the option's "plugins" manifest reference; see is_plugin_backed().
     std::string                         plugin_type;
     // Whether this option holds plugin capability name(s) that feed the "plugins" manifest -- true
     // iff it declares a plugin_type. Setting plugin_type is the only step needed to add one.

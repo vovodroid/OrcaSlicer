@@ -410,14 +410,14 @@ TEST_CASE("save_to_json round-trips plugin capability references as strings", "[
     namespace fs = boost::filesystem;
     const fs::path tmp = fs::temp_directory_path() / fs::unique_path("orca_plugins_%%%%-%%%%.json");
     const std::vector<std::string> refs = {
-        "local_plugin;;post_process",
-        "cloud_plugin;550e8400-e29b-41d4-a716-446655440000;post_process"
+        "local_plugin;;inset",
+        "cloud_plugin;550e8400-e29b-41d4-a716-446655440000;inset"
     };
 
     std::unique_ptr<DynamicPrintConfig> config_ptr(
-        DynamicPrintConfig::new_from_defaults_keys({"post_process_plugin"}));
+        DynamicPrintConfig::new_from_defaults_keys({"slicing_pipeline_plugin"}));
     DynamicPrintConfig config = std::move(*config_ptr);
-    config.option<ConfigOptionStrings>("post_process_plugin", true)->values = refs;
+    config.option<ConfigOptionStrings>("slicing_pipeline_plugin", true)->values = refs;
     config.save_to_json(tmp.string(), "test_preset", "User", "1.0.0.0");
 
     nlohmann::json j;
@@ -425,7 +425,7 @@ TEST_CASE("save_to_json round-trips plugin capability references as strings", "[
         boost::nowide::ifstream ifs(tmp.string());
         ifs >> j;
     }
-    REQUIRE(j["post_process_plugin"] == nlohmann::json(refs));
+    REQUIRE(j["slicing_pipeline_plugin"] == nlohmann::json(refs));
     CHECK_FALSE(j.contains("plugins"));
 
     DynamicPrintConfig reloaded = DynamicPrintConfig::full_print_config();
@@ -434,7 +434,7 @@ TEST_CASE("save_to_json round-trips plugin capability references as strings", "[
     std::string reason;
     REQUIRE(reloaded.load_from_json(tmp.string(), substitutions, true, key_values, reason) == 0);
     CHECK(reason.empty());
-    CHECK(reloaded.option<ConfigOptionStrings>("post_process_plugin")->values == refs);
+    CHECK(reloaded.option<ConfigOptionStrings>("slicing_pipeline_plugin")->values == refs);
 
     fs::remove(tmp);
 }
@@ -446,17 +446,17 @@ TEST_CASE("plugin capability references survive string-map serialization", "[Con
     };
 
     DynamicPrintConfig original = DynamicPrintConfig::full_print_config();
-    original.option<ConfigOptionStrings>("post_process_plugin", true)->values = refs;
+    original.option<ConfigOptionStrings>("slicing_pipeline_plugin", true)->values = refs;
 
     std::map<std::string, std::string> serialized{
-        {"post_process_plugin", original.option<ConfigOptionStrings>("post_process_plugin")->serialize()}
+        {"slicing_pipeline_plugin", original.option<ConfigOptionStrings>("slicing_pipeline_plugin")->serialize()}
     };
-    CHECK(serialized["post_process_plugin"].find("\"master_plugin;;header-stamp\"") != std::string::npos);
+    CHECK(serialized["slicing_pipeline_plugin"].find("\"master_plugin;;header-stamp\"") != std::string::npos);
 
     DynamicPrintConfig reloaded = DynamicPrintConfig::full_print_config();
     reloaded.load_string_map(serialized, ForwardCompatibilitySubstitutionRule::Disable);
 
-    CHECK(reloaded.option<ConfigOptionStrings>("post_process_plugin")->values == refs);
+    CHECK(reloaded.option<ConfigOptionStrings>("slicing_pipeline_plugin")->values == refs);
 }
 
 TEST_CASE("parse_capability_ref parses local and cloud references", "[Config][plugin]") {
@@ -502,14 +502,13 @@ struct PluginResolverFixture {
 TEST_CASE_METHOD(PluginResolverFixture,
     "update_plugin_manifest derives references generically from plugin-backed options",
     "[Config][plugins]") {
-    // Both scalar (printer_agent) and vector (post_process_plugin, slicing_pipeline_plugin) options
-    // opt in via a non-empty ConfigOptionDef::plugin_type (is_plugin_backed) and are resolved with it
-    // -- there is no hardcoded per-option switch. printer_agent in particular relies on its plugin_type
-    // metadata being wired up (it is edited via a dedicated widget, not the plugin_picker).
+    // Both scalar (printer_agent) and vector (slicing_pipeline_plugin) options opt in via a non-empty
+    // ConfigOptionDef::plugin_type (is_plugin_backed) and are resolved with it -- there is no hardcoded
+    // per-option switch. printer_agent in particular relies on its plugin_type metadata being wired up
+    // (it is edited via a dedicated widget, not the plugin_picker).
     std::unique_ptr<DynamicPrintConfig> config_ptr(DynamicPrintConfig::new_from_defaults_keys(
-        {"post_process_plugin", "slicing_pipeline_plugin", "printer_agent"}));
+        {"slicing_pipeline_plugin", "printer_agent"}));
     DynamicPrintConfig config = std::move(*config_ptr);
-    config.option<ConfigOptionStrings>("post_process_plugin", true)->values    = {"pp"};
     config.option<ConfigOptionStrings>("slicing_pipeline_plugin", true)->values = {"sp"};
     config.option<ConfigOptionString>("printer_agent", true)->value            = "agent";
 
@@ -517,23 +516,22 @@ TEST_CASE_METHOD(PluginResolverFixture,
     const std::vector<std::string> manifest = config.option<ConfigOptionStrings>("plugins")->values;
 
     using Catch::Matchers::VectorContains;
-    REQUIRE_THAT(manifest, VectorContains(std::string("pp;;post-processing")));
     REQUIRE_THAT(manifest, VectorContains(std::string("sp;;slicing-pipeline")));
     REQUIRE_THAT(manifest, VectorContains(std::string("agent;;printer-connection")));
-    CHECK(manifest.size() == 3);
+    CHECK(manifest.size() == 2);
 }
 
 TEST_CASE_METHOD(PluginResolverFixture,
     "update_plugin_manifest de-duplicates references and skips unset options",
     "[Config][plugins]") {
     std::unique_ptr<DynamicPrintConfig> config_ptr(DynamicPrintConfig::new_from_defaults_keys(
-        {"post_process_plugin", "printer_agent"}));
+        {"slicing_pipeline_plugin", "printer_agent"}));
     DynamicPrintConfig config = std::move(*config_ptr);
-    config.option<ConfigOptionStrings>("post_process_plugin", true)->values = {"x", "x"};  // duplicate
+    config.option<ConfigOptionStrings>("slicing_pipeline_plugin", true)->values = {"x", "x"};  // duplicate
     // printer_agent stays at its default empty value -> contributes nothing to the manifest.
 
     config.update_plugin_manifest();
     const std::vector<std::string> manifest = config.option<ConfigOptionStrings>("plugins")->values;
 
-    CHECK(manifest == std::vector<std::string>{"x;;post-processing"});
+    CHECK(manifest == std::vector<std::string>{"x;;slicing-pipeline"});
 }

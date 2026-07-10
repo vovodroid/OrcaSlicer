@@ -26,6 +26,13 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
         .value("posSimplifyPath", SlicingPipelineStepPlugin::posSimplifyPath) // covers all simplify sub-steps
         .value("psWipeTower", SlicingPipelineStepPlugin::psWipeTower)
         .value("psSkirtBrim", SlicingPipelineStepPlugin::psSkirtBrim)
+        // Post-process seam: fires in the GUI export path AFTER the classic post_process scripts, on the
+        // exported G-code file. Unlike every step above it is NOT fired by Print::process(): ctx.print and
+        // ctx.object are None; instead ctx.gcode_path / ctx.host / ctx.output_name are set and the plugin
+        // edits the file at ctx.gcode_path IN PLACE. May fire more than once per slice (file export and/or
+        // upload each fire once, on separate working copies) and its output is not reflected in the G-code
+        // preview (the viewer maps the pre-post-process file). ctx.config_value()/ctx.params still work.
+        .value("psGCodePostProcess", SlicingPipelineStepPlugin::psGCodePostProcess)
         .export_values();
 
     // The read-graph data model (Surface / ExPolygon / the extrusion tree / LayerRegion /
@@ -44,6 +51,14 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
         .def_readonly("params", &SlicingPipelineContext::params,
             "read-only dict of this plugin's [tool.orcaslicer.plugin.settings] values "
             "(string->string). Parse the values you need, e.g. float(ctx.params['rate']).")
+        .def_readonly("gcode_path", &SlicingPipelineContext::gcode_path,
+            "Path to the working G-code file, set ONLY at Step.psGCodePostProcess. Edit it in "
+            "place; empty at every other step.")
+        .def_readonly("host", &SlicingPipelineContext::host,
+            "Target host at Step.psGCodePostProcess (\"File\", \"OctoPrint\", ...); empty otherwise.")
+        .def_readonly("output_name", &SlicingPipelineContext::output_name,
+            "Final output G-code name at Step.psGCodePostProcess (mirrors SLIC3R_PP_OUTPUT_NAME); "
+            "empty otherwise.")
         .def_property_readonly("print", [](const SlicingPipelineContext& ctx) -> py::object {
             if (ctx.print == nullptr)
                 return py::none();
@@ -61,9 +76,13 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
         }, "orca.host.PrintObject for object-scoped steps, or None for print-wide steps. "
            "Valid only during the execute(ctx) call.")
         .def("config_value", [](const SlicingPipelineContext& ctx, const std::string& key) -> py::object {
-            if (ctx.print == nullptr)
-                return py::none();
-            return config_value_or_none(ctx.print->full_print_config(), key);
+            // In-pipeline steps read the live Print's full config; at psGCodePostProcess (print == null)
+            // fall back to the config the export path handed in.
+            if (ctx.print != nullptr)
+                return config_value_or_none(ctx.print->full_print_config(), key);
+            if (ctx.full_config != nullptr)
+                return config_value_or_none(*ctx.full_config, key);
+            return py::none();
         }, py::arg("key"),
            "serialized value of a resolved (full) print config option for this slice, or "
            "None if absent. Shorthand for ctx.print.config_value(key).")

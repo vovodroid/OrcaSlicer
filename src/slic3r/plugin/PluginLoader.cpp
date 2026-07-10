@@ -610,7 +610,6 @@ bool PluginLoader::unload_plugin(const std::string& plugin_key, PluginCapability
         if (!torn_down_types.insert(cap_type).second)
             continue;
         switch (cap_type) {
-        case PluginCapabilityType::PostProcessing: break;
         case PluginCapabilityType::PrinterConnection: NetworkAgentFactory::deregister_python_plugin(plugin_key); break;
         default: break;
         }
