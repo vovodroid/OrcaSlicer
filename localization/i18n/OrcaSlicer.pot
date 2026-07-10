@@ -18475,6 +18475,24 @@ msgstr ""
 msgid "Whether this printer supports fast purge mode with optimized temperature and multiplier."
 msgstr ""
 
+msgid "Purge mode"
+msgstr ""
+
+msgid "Purge Mode Settings"
+msgstr ""
+
+msgid "Prime Saving"
+msgstr ""
+
+msgid "Perform full purging with speed and temperature transition for the best print quality."
+msgstr ""
+
+msgid "Uses optimized purge temperature, multiplier and stronger extrusion for faster purging. May cause slight color mixing in some extreme cases."
+msgstr ""
+
+msgid "Reduces prime waste and prints faster. May cause slight color mixing or small surface defects."
+msgstr ""
+
 msgid "Deretraction speed (extruder change)"
 msgstr ""
 

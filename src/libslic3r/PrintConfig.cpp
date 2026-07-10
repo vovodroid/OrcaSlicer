@@ -7882,7 +7882,8 @@ void PrintConfigDef::init_fff_params()
     def->set_default_value(new ConfigOptionIntsNullable{ 1 });
 
     // Printer flag gating the fast-purge mode selector in the Multi-Filament
-    // UI. comDevelop, default false; no shipping profile sets it, so the UI stays hidden.
+    // UI. comDevelop, default false; profiles of printers that support fast purge
+    // enable it, which shows the purge-mode selector for those printers.
     def = this->add("support_fast_purge_mode", coBool);
     def->label = L("Support fast purge mode");
     def->tooltip = L("Whether this printer supports fast purge mode with optimized temperature and multiplier.");

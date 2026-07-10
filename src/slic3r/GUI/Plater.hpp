@@ -208,6 +208,7 @@ public:
     // Orca
     static bool should_show_SEMM_buttons();
     void show_SEMM_buttons();
+    void enable_purge_mode_btn(bool enable);
     void update_dynamic_filament_list();
 
     PlaterPresetComboBox *  printer_combox();
