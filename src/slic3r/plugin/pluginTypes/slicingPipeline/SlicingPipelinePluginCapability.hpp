@@ -1,6 +1,6 @@
 #pragma once
 #include "slic3r/plugin/PythonPluginInterface.hpp"
-#include "libslic3r/Print.hpp"      // SlicingPipelineStep, Print, PrintObject
+#include "libslic3r/Print.hpp"      // SlicingPipelineStepPlugin, Print, PrintObject
 #include <pybind11/pybind11.h>
 #include <map>
 #include <string>
@@ -15,7 +15,7 @@ namespace Slic3r {
 // src/slic3r/plugin/PluginHostSlicing.cpp.
 struct SlicingPipelineContext {
     std::string          orca_version;
-    SlicingPipelineStep  step { SlicingPipelineStep::Slice };
+    SlicingPipelineStepPlugin  step { SlicingPipelineStepPlugin::posSlice };
     Print*               print  { nullptr };   // always present when dispatched
     const PrintObject*   object { nullptr };   // null for print-wide steps
     // read-only per-plugin settings, populated by the dispatcher from the

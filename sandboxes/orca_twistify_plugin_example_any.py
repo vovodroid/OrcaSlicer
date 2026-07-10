@@ -17,7 +17,7 @@
 # ///
 """Twistify -- twist/taper/wobble any model at slice time.
 
-At Step.Slice, every layer's sliced surfaces are transformed by a similarity
+At Step.posSlice, every layer's sliced surfaces are transformed by a similarity
 about the object's bounding-box center as a function of Z -- edited IN PLACE
 through the host geometry classes (ExPolygon.rotate/scale/translate). Each
 surface is rotated about the center, then (if tapering) translated to the
@@ -81,7 +81,7 @@ class Twistify(orca.slicing.SlicingPipelineCapabilityBase):
         return "Twistify"
 
     def execute(self, ctx):
-        if ctx.step != orca.slicing.Step.Slice or ctx.object is None:
+        if ctx.step != orca.slicing.Step.posSlice or ctx.object is None:
             return orca.ExecutionResult.success()
 
         p = _params(ctx)

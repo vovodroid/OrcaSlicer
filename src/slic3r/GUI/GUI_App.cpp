@@ -3130,7 +3130,7 @@ bool GUI_App::on_init_inner()
     // cancellation, and convert a plugin failure into a (non-critical) SlicingError so it surfaces as a
     // slicing-error notification rather than the fatal-crash dialog.
     Slic3r::Print::set_slicing_pipeline_hook_fn(
-        [](Slic3r::Print& print, const Slic3r::PrintObject* object, Slic3r::SlicingPipelineStep step) {
+        [](Slic3r::Print& print, const Slic3r::PrintObject* object, Slic3r::SlicingPipelineStepPlugin step) {
             const auto* caps  = print.config().option<ConfigOptionStrings>("slicing_pipeline_plugin");
             // `plugins` is a dynamic-only manifest key (not a static PrintConfig member), so it
             // must be read from the full/dynamic config -- reading it off print.config() (the
@@ -3180,10 +3180,10 @@ bool GUI_App::on_init_inner()
                     // out in Release), so it must NOT be called from a pipeline hook.
                     if (!r.message.empty()) {
                         static const char* const kStepNames[] = {
-                            "Slice", "Perimeters", "EstimateCurledExtrusions", "PrepareInfill", "Infill",
-                            "Ironing", "Contouring", "SupportMaterial", "DetectOverhangsForLift",
-                            "SimplifyPath", "WipeTower", "SkirtBrim"
-                        }; // order must match Slic3r::SlicingPipelineStep
+                            "posSlice", "posPerimeters", "posEstimateCurledExtrusions", "posPrepareInfill", "posInfill",
+                            "posIroning", "posContouring", "posSupportMaterial", "posDetectOverhangsForLift",
+                            "posSimplifyPath", "psWipeTower", "psSkirtBrim"
+                        }; // order must match Slic3r::SlicingPipelineStepPlugin
                         const char* step_name = static_cast<size_t>(step) < sizeof(kStepNames) / sizeof(kStepNames[0])
                                                     ? kStepNames[static_cast<int>(step)] : "Unknown";
                         BOOST_LOG_TRIVIAL(info) << "Slicing pipeline plugin '" << ref.capability_name

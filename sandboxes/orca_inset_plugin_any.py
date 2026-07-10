@@ -10,12 +10,12 @@
 # ///
 """Inset Every Slice -- a small, WORKING SlicingPipeline sample plugin.
 
-At Step.Slice, for every layer/region of the sliced object, this shrinks each
+At Step.posSlice, for every layer/region of the sliced object, this shrinks each
 sliced surface by INSET_MM using a real polygon offset (ExPolygon.offset) and
 writes the result back with SurfaceCollection.set(). After the per-region edits,
 layer.make_slices() re-derives the layer's merged islands (lslices) so
 overhang/bridge detection, skirt/brim and support stay coherent with the inset
-geometry. At Step.Slice the split slice loop runs make_perimeters() right after
+geometry. At Step.posSlice the split slice loop runs make_perimeters() right after
 the hook, so the change cascades into perimeters, infill and the final G-code
 -- the toolpath preview shrinks.
 
@@ -35,7 +35,7 @@ class InsetEverySlice(orca.slicing.SlicingPipelineCapabilityBase):
         return "Inset Every Slice"
 
     def execute(self, ctx):
-        if ctx.step != orca.slicing.Step.Slice or ctx.object is None:
+        if ctx.step != orca.slicing.Step.posSlice or ctx.object is None:
             return orca.ExecutionResult.success()
 
         # Millimeters -> scaled integer units via the *live* scale (never hardcode 1e6).

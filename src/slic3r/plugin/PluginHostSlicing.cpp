@@ -414,7 +414,7 @@ void PluginHostSlicing::RegisterBindings(py::module_& host)
     layer_region
         .def_readonly("slices", &LayerRegion::slices,
             "Sliced, typed surfaces (SurfaceCollection). Edit in place, or replace with "
-            "slices.set(expolygons, surface_type). At Step.Slice this is the primary mutation "
+            "slices.set(expolygons, surface_type). At Step.posSlice this is the primary mutation "
             "target; the split slice loop runs make_perimeters() afterward so edits cascade downstream.")
         .def_readonly("fill_surfaces", &LayerRegion::fill_surfaces,
             "Surfaces prepared for infill (SurfaceCollection). Edit in place or via fill_surfaces.set(...).")

@@ -2319,7 +2319,7 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
     BOOST_LOG_TRIVIAL(info) << "Starting the slicing process." << log_memory_info();
     if (!use_cache) {
         // Fire the SlicingPipeline hook for `obj` iff it just (re)computed `pstep` this pass.
-        auto hook_after = [this](PrintObject* obj, bool was_done, PrintObjectStep pstep, SlicingPipelineStep sstep) {
+        auto hook_after = [this](PrintObject* obj, bool was_done, PrintObjectStep pstep, SlicingPipelineStepPlugin sstep) {
             if (m_pipeline_plugin_active && !was_done && obj->is_step_done(pstep))
                 run_pipeline_hook(sstep, obj);
         };
@@ -2329,7 +2329,7 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             if (need_slicing_objects.count(obj) != 0) {
                 const bool was_done = obj->is_step_done(posSlice);
                 obj->slice();
-                hook_after(obj, was_done, posSlice, SlicingPipelineStep::Slice);
+                hook_after(obj, was_done, posSlice, SlicingPipelineStepPlugin::posSlice);
                 // re-snapshot each layer's raw_slices AFTER the Slice hook ran, so the
                 // plugin's mutation becomes the untyped baseline. Without this, a later
                 // perimeter-only re-run (make_perimeters -> restore_untyped_slices) reverts
@@ -2349,7 +2349,7 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             if (need_slicing_objects.count(obj) != 0) {
                 const bool was_done = obj->is_step_done(posPerimeters);
                 obj->make_perimeters();   // slice() inside is a no-op: posSlice already DONE
-                hook_after(obj, was_done, posPerimeters, SlicingPipelineStep::Perimeters);
+                hook_after(obj, was_done, posPerimeters, SlicingPipelineStepPlugin::posPerimeters);
             } else {
                 if (obj->set_started(posPerimeters)) obj->set_done(posPerimeters);
             }
@@ -2358,7 +2358,7 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             if (need_slicing_objects.count(obj) != 0) {
                 const bool was_done = obj->is_step_done(posEstimateCurledExtrusions);
                 obj->estimate_curled_extrusions();
-                hook_after(obj, was_done, posEstimateCurledExtrusions, SlicingPipelineStep::EstimateCurledExtrusions);
+                hook_after(obj, was_done, posEstimateCurledExtrusions, SlicingPipelineStepPlugin::posEstimateCurledExtrusions);
             }
             else {
                 if (obj->set_started(posEstimateCurledExtrusions))
@@ -2374,10 +2374,10 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
                 // is DONE, so this is a mechanical split mirroring the slice/perimeters loop.
                 const bool prepare_was_done = obj->is_step_done(posPrepareInfill);
                 obj->prepare_infill();
-                hook_after(obj, prepare_was_done, posPrepareInfill, SlicingPipelineStep::PrepareInfill);
+                hook_after(obj, prepare_was_done, posPrepareInfill, SlicingPipelineStepPlugin::posPrepareInfill);
                 const bool was_done = obj->is_step_done(posInfill);
                 obj->infill();
-                hook_after(obj, was_done, posInfill, SlicingPipelineStep::Infill);
+                hook_after(obj, was_done, posInfill, SlicingPipelineStepPlugin::posInfill);
             }
             else {
                 if (obj->set_started(posPrepareInfill))
@@ -2390,7 +2390,7 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             if (need_slicing_objects.count(obj) != 0) {
                 const bool was_done = obj->is_step_done(posIroning);
                 obj->ironing();
-                hook_after(obj, was_done, posIroning, SlicingPipelineStep::Ironing);
+                hook_after(obj, was_done, posIroning, SlicingPipelineStepPlugin::posIroning);
             }
             else {
                 if (obj->set_started(posIroning))
@@ -2404,7 +2404,7 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             if (need_contouring) {
                 const bool was_done = obj->is_step_done(posContouring);
                 obj->contour_z();
-                hook_after(obj, was_done, posContouring, SlicingPipelineStep::Contouring);
+                hook_after(obj, was_done, posContouring, SlicingPipelineStepPlugin::posContouring);
             } else {
                 if (obj->set_started(posContouring))
                     obj->set_done(posContouring);
@@ -2437,13 +2437,13 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             for (size_t i = 0; i < m_objects.size(); ++i)
                 if (need_slicing_objects.count(m_objects[i]) != 0 && !sup_was_done[i]
                     && m_objects[i]->is_step_done(posSupportMaterial))
-                    run_pipeline_hook(SlicingPipelineStep::SupportMaterial, m_objects[i]);
+                    run_pipeline_hook(SlicingPipelineStepPlugin::posSupportMaterial, m_objects[i]);
 
         for (PrintObject* obj : m_objects) {
             if (need_slicing_objects.count(obj) != 0) {
                 const bool was_done = obj->is_step_done(posDetectOverhangsForLift);
                 obj->detect_overhangs_for_lift();
-                hook_after(obj, was_done, posDetectOverhangsForLift, SlicingPipelineStep::DetectOverhangsForLift);
+                hook_after(obj, was_done, posDetectOverhangsForLift, SlicingPipelineStepPlugin::posDetectOverhangsForLift);
             }
             else {
                 if (obj->set_started(posDetectOverhangsForLift))
@@ -2520,7 +2520,7 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
 
         }
         this->set_done(psWipeTower);
-        if (m_pipeline_plugin_active) run_pipeline_hook(SlicingPipelineStep::WipeTower, nullptr);
+        if (m_pipeline_plugin_active) run_pipeline_hook(SlicingPipelineStepPlugin::psWipeTower, nullptr);
     }
 
     if (this->has_wipe_tower()) {
@@ -2646,7 +2646,7 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
 
         this->finalize_first_layer_convex_hull();
         this->set_done(psSkirtBrim);
-        if (m_pipeline_plugin_active) run_pipeline_hook(SlicingPipelineStep::SkirtBrim, nullptr);
+        if (m_pipeline_plugin_active) run_pipeline_hook(SlicingPipelineStepPlugin::psSkirtBrim, nullptr);
 
         if (time_cost_with_cache) {
             end_time = (long long)Slic3r::Utils::get_current_time_utc();
@@ -2663,7 +2663,7 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             // shared with the use_cache path (re_slicing_objects), so `!use_cache` must be checked
             // explicitly here to keep hooks from ever firing on cache-loaded (plugin-final) objects.
             if (!use_cache && m_pipeline_plugin_active && !was_done && obj->is_step_done(posSimplifyPath))
-                run_pipeline_hook(SlicingPipelineStep::SimplifyPath, obj);
+                run_pipeline_hook(SlicingPipelineStepPlugin::posSimplifyPath, obj);
         }
         else {
             if (obj->set_started(posSimplifyPath))

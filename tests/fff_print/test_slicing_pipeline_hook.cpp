@@ -19,7 +19,7 @@ TEST_CASE("slicing_pipeline_plugin option exists and defaults empty", "[slicing_
 TEST_CASE("slicing pipeline hook setter is a no-op-safe injection", "[slicing_pipeline]") {
     int calls = 0;
     Slic3r::Print::set_slicing_pipeline_hook_fn(
-        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep){ ++calls; });
+        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStepPlugin){ ++calls; });
     Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr); // reset — must be legal
     CHECK(calls == 0);
 }
@@ -30,10 +30,10 @@ TEST_CASE("slicing pipeline hook setter is a no-op-safe injection", "[slicing_pi
 using namespace Slic3r::Test;
 
 TEST_CASE("SlicingPipeline hook fires once per step per object in order", "[slicing_pipeline]") {
-    struct Call { const Slic3r::PrintObject* obj; Slic3r::SlicingPipelineStep step; };
+    struct Call { const Slic3r::PrintObject* obj; Slic3r::SlicingPipelineStepPlugin step; };
     std::vector<Call> calls;
     Slic3r::Print::set_slicing_pipeline_hook_fn(
-        [&](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStep s){ calls.push_back({o, s}); });
+        [&](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStepPlugin s){ calls.push_back({o, s}); });
 
     Slic3r::Print print; Slic3r::Model model;
     Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
@@ -42,7 +42,7 @@ TEST_CASE("SlicingPipeline hook fires once per step per object in order", "[slic
     print.process();
     Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
 
-    using S = Slic3r::SlicingPipelineStep;
+    using S = Slic3r::SlicingPipelineStepPlugin;
     auto count = [&](S s){ return std::count_if(calls.begin(), calls.end(), [&](const Call& c){ return c.step == s; }); };
     CHECK(count(S::Slice) == 1);
     CHECK(count(S::Perimeters) == 1);
@@ -97,7 +97,7 @@ TEST_CASE("Inactive hook: process output is byte-identical (no-op hook == unset)
         if (activate)
             config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
         if (set_noop_hook)
-            Slic3r::Print::set_slicing_pipeline_hook_fn([](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep){});
+            Slic3r::Print::set_slicing_pipeline_hook_fn([](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStepPlugin){});
         else
             Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
         init_print({TestMesh::cube_20x20x20}, print, model, config);
@@ -120,7 +120,7 @@ TEST_CASE("Inactive hook: process output is byte-identical (no-op hook == unset)
 TEST_CASE("Empty option: registered hook is gated off and never fires", "[slicing_pipeline]") {
     int calls = 0;
     Slic3r::Print::set_slicing_pipeline_hook_fn(
-        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep){ ++calls; });
+        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStepPlugin){ ++calls; });
     Slic3r::Print print; Slic3r::Model model;
     auto config = Slic3r::DynamicPrintConfig::full_print_config();
     // option left EMPTY -> inactive regardless of the registered hook.
@@ -138,9 +138,9 @@ TEST_CASE("Empty option: registered hook is gated off and never fires", "[slicin
 TEST_CASE("Duplicate objects share a slice: Slice hook fires exactly once", "[slicing_pipeline]") {
     int slice_calls = 0, perim_calls = 0;
     Slic3r::Print::set_slicing_pipeline_hook_fn(
-        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStep s){
-            if (s == Slic3r::SlicingPipelineStep::Slice)      ++slice_calls;
-            if (s == Slic3r::SlicingPipelineStep::Perimeters) ++perim_calls;
+        [&](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStepPlugin s){
+            if (s == Slic3r::SlicingPipelineStepPlugin::posSlice)      ++slice_calls;
+            if (s == Slic3r::SlicingPipelineStepPlugin::posPerimeters) ++perim_calls;
         });
 
     Slic3r::Print print; Slic3r::Model model;
@@ -186,8 +186,8 @@ TEST_CASE("Mutating slices at the Slice boundary cascades downstream", "[slicing
         auto config = Slic3r::DynamicPrintConfig::full_print_config();
         config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
         if (inset) Slic3r::Print::set_slicing_pipeline_hook_fn(
-            [](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStep s){
-                if (s != Slic3r::SlicingPipelineStep::Slice || !o) return;
+            [](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStepPlugin s){
+                if (s != Slic3r::SlicingPipelineStepPlugin::posSlice || !o) return;
                 for (Slic3r::Layer* l : const_cast<Slic3r::PrintObject*>(o)->layers())
                     for (Slic3r::LayerRegion* r : l->regions()) {
                         Slic3r::Surfaces in = r->slices.surfaces;
@@ -219,7 +219,7 @@ TEST_CASE("Changing slicing_pipeline_plugin invalidates posSlice", "[slicing_pip
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 // §3.6 (Twistify design): Twistify's effect is a similarity transform (rotate + uniform
-// scale) applied to slices at Step.Slice. This C++ analogue rotates every region's slices a
+// scale) applied to slices at Step.posSlice. This C++ analogue rotates every region's slices a
 // fixed 45 deg about the object's base-footprint center -- the same seam and cascade that
 // Twistify.py drives through the slices.set() + Layer::make_slices() path. Two end-to-end invariants after
 // process() confirm the approach:
@@ -235,8 +235,8 @@ TEST_CASE("Rotating slices at the Slice boundary cascades (area preserved, bbox 
         auto config = Slic3r::DynamicPrintConfig::full_print_config();
         config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
         if (rotate) Slic3r::Print::set_slicing_pipeline_hook_fn(
-            [](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStep s){
-                if (s != Slic3r::SlicingPipelineStep::Slice || !o) return;
+            [](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStepPlugin s){
+                if (s != Slic3r::SlicingPipelineStepPlugin::posSlice || !o) return;
                 auto* obj = const_cast<Slic3r::PrintObject*>(o);
                 // Twist axis = center of the first sliced layer's footprint (Twistify's anchor).
                 coord_t nx=0, xx=0, ny=0, xy=0; bool seeded=false;
@@ -310,8 +310,8 @@ TEST_CASE("Identity round-trip through set_slices is byte-identical", "[slicing_
         auto config = Slic3r::DynamicPrintConfig::full_print_config();
         config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"})); // active in both runs
         Slic3r::Print::set_slicing_pipeline_hook_fn(
-            [roundtrip](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStep s){
-                if (!roundtrip || s != Slic3r::SlicingPipelineStep::Slice || !o) return;
+            [roundtrip](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStepPlugin s){
+                if (!roundtrip || s != Slic3r::SlicingPipelineStepPlugin::posSlice || !o) return;
                 for (Slic3r::Layer* l : const_cast<Slic3r::PrintObject*>(o)->layers())
                     for (Slic3r::LayerRegion* r : l->regions()) {
                         Slic3r::Surfaces in = r->slices.surfaces; // copy current (already-normalized) geometry
@@ -359,8 +359,8 @@ static double outer_slices_width(const Slic3r::Print& print) {
 TEST_CASE("raw_slices captures post-hook geometry so a perimeter re-run keeps the mutation", "[slicing_pipeline]") {
     using Catch::Matchers::WithinRel;
     Slic3r::Print::set_slicing_pipeline_hook_fn(
-        [](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStep s){
-            if (s != Slic3r::SlicingPipelineStep::Slice || !o) return;
+        [](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStepPlugin s){
+            if (s != Slic3r::SlicingPipelineStepPlugin::posSlice || !o) return;
             for (Slic3r::Layer* l : const_cast<Slic3r::PrintObject*>(o)->layers())
                 for (Slic3r::LayerRegion* r : l->regions()) {
                     Slic3r::Surfaces in = r->slices.surfaces;
@@ -391,12 +391,12 @@ TEST_CASE("raw_slices captures post-hook geometry so a perimeter re-run keeps th
 // them, whereas the pre-existing Infill seam fires after the fills are already built (v1 limit).
 // All three runs register a hook (active path) so the comparison isolates only the mutation.
 TEST_CASE("fill_surfaces mutation cascades at PrepareInfill but not at Infill", "[slicing_pipeline]") {
-    auto fill_paths = [](bool shrink, Slic3r::SlicingPipelineStep at) {
+    auto fill_paths = [](bool shrink, Slic3r::SlicingPipelineStepPlugin at) {
         Slic3r::Print print; Slic3r::Model model;
         auto config = Slic3r::DynamicPrintConfig::full_print_config();
         config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
         Slic3r::Print::set_slicing_pipeline_hook_fn(
-            [shrink, at](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStep s){
+            [shrink, at](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStepPlugin s){
                 if (!shrink || s != at || !o) return;
                 for (Slic3r::Layer* l : const_cast<Slic3r::PrintObject*>(o)->layers())
                     for (Slic3r::LayerRegion* r : l->regions()) {
@@ -417,7 +417,7 @@ TEST_CASE("fill_surfaces mutation cascades at PrepareInfill but not at Infill", 
         Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
         return n;
     };
-    using S = Slic3r::SlicingPipelineStep;
+    using S = Slic3r::SlicingPipelineStepPlugin;
     const size_t base = fill_paths(false, S::PrepareInfill); // active hook, no mutation
     CHECK(base > 0);
     CHECK(fill_paths(true, S::PrepareInfill) < base); // mutation before make_fills cascades
@@ -434,8 +434,8 @@ TEST_CASE("refreshing lslices after a slice mutation makes islands track the geo
         auto config = Slic3r::DynamicPrintConfig::full_print_config();
         config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
         Slic3r::Print::set_slicing_pipeline_hook_fn(
-            [refresh](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStep s){
-                if (s != Slic3r::SlicingPipelineStep::Slice || !o) return;
+            [refresh](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStepPlugin s){
+                if (s != Slic3r::SlicingPipelineStepPlugin::posSlice || !o) return;
                 for (Slic3r::Layer* l : const_cast<Slic3r::PrintObject*>(o)->layers()) {
                     for (Slic3r::LayerRegion* r : l->regions()) {
                         Slic3r::Surfaces in = r->slices.surfaces;

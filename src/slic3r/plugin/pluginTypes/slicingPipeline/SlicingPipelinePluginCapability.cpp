@@ -13,19 +13,19 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
     (void) pluginTypes; // matches gcode/script/printerAgent; Step is a fresh enum below.
     auto slicing = module.def_submodule("slicing", "Slicing pipeline API (research/experimental).");
 
-    py::enum_<SlicingPipelineStep>(slicing, "Step")
-        .value("Slice", SlicingPipelineStep::Slice)
-        .value("Perimeters", SlicingPipelineStep::Perimeters)
-        .value("EstimateCurledExtrusions", SlicingPipelineStep::EstimateCurledExtrusions)
-        .value("PrepareInfill", SlicingPipelineStep::PrepareInfill) // after prepare_infill, before make_fills: editing fill_surfaces here CASCADES
-        .value("Infill", SlicingPipelineStep::Infill)          // after make_fills: editing fill_surfaces here does NOT regenerate fills (v1)
-        .value("Ironing", SlicingPipelineStep::Ironing)
-        .value("Contouring", SlicingPipelineStep::Contouring)
-        .value("SupportMaterial", SlicingPipelineStep::SupportMaterial)
-        .value("DetectOverhangsForLift", SlicingPipelineStep::DetectOverhangsForLift)
-        .value("SimplifyPath", SlicingPipelineStep::SimplifyPath) // covers all simplify sub-steps
-        .value("WipeTower", SlicingPipelineStep::WipeTower)
-        .value("SkirtBrim", SlicingPipelineStep::SkirtBrim)
+    py::enum_<SlicingPipelineStepPlugin>(slicing, "Step")
+        .value("posSlice", SlicingPipelineStepPlugin::posSlice)
+        .value("posPerimeters", SlicingPipelineStepPlugin::posPerimeters)
+        .value("posEstimateCurledExtrusions", SlicingPipelineStepPlugin::posEstimateCurledExtrusions)
+        .value("posPrepareInfill", SlicingPipelineStepPlugin::posPrepareInfill) // after prepare_infill, before make_fills: editing fill_surfaces here CASCADES
+        .value("posInfill", SlicingPipelineStepPlugin::posInfill)          // after make_fills: editing fill_surfaces here does NOT regenerate fills (v1)
+        .value("posIroning", SlicingPipelineStepPlugin::posIroning)
+        .value("posContouring", SlicingPipelineStepPlugin::posContouring)
+        .value("posSupportMaterial", SlicingPipelineStepPlugin::posSupportMaterial)
+        .value("posDetectOverhangsForLift", SlicingPipelineStepPlugin::posDetectOverhangsForLift)
+        .value("posSimplifyPath", SlicingPipelineStepPlugin::posSimplifyPath) // covers all simplify sub-steps
+        .value("psWipeTower", SlicingPipelineStepPlugin::psWipeTower)
+        .value("psSkirtBrim", SlicingPipelineStepPlugin::psSkirtBrim)
         .export_values();
 
     // The read-graph data model (Surface / ExPolygon / the extrusion tree / LayerRegion /

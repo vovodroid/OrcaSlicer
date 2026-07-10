@@ -99,6 +99,11 @@ enum PrintObjectStep {
     posCount,
 };
 
+enum class SlicingPipelineStepPlugin {
+    posSlice, posPerimeters, posEstimateCurledExtrusions, posPrepareInfill, posInfill, posIroning, posContouring,
+    posSupportMaterial, posDetectOverhangsForLift, posSimplifyPath, psWipeTower, psSkirtBrim
+};
+
 // A PrintRegion object represents a group of volumes to print
 // sharing the same config (including the same assigned extruder(s))
 class PrintRegion
@@ -882,11 +887,6 @@ enum FilamentCompatibilityType {
     InvalidTemperatureRange
 };
 
-enum class SlicingPipelineStep {
-    Slice, Perimeters, EstimateCurledExtrusions, PrepareInfill, Infill, Ironing, Contouring,
-    SupportMaterial, DetectOverhangsForLift, SimplifyPath, WipeTower, SkirtBrim
-};
-
 // The complete print tray with possibly multiple objects.
 class Print : public PrintBaseWithState<PrintStep, psCount>
 {
@@ -896,7 +896,7 @@ private: // Prevents erroneous use by other classes.
     typedef std::pair<PrintObject *, bool>         PrintObjectInfo;
 
 public:
-    using SlicingPipelineHookFn = std::function<void(Print&, const PrintObject*, SlicingPipelineStep)>;
+    using SlicingPipelineHookFn = std::function<void(Print&, const PrintObject*, SlicingPipelineStepPlugin)>;
     // Cross-layer injection (mirrors ConfigBase::set_resolve_capability_fn): the GUI/plugin
     // layer registers a dispatcher; libslic3r stays free of any plugin/Python dependency.
     static void set_slicing_pipeline_hook_fn(SlicingPipelineHookFn fn) { s_slicing_pipeline_hook_fn = std::move(fn); }
@@ -1159,7 +1159,7 @@ private:
 
     static SlicingPipelineHookFn s_slicing_pipeline_hook_fn;
     bool m_pipeline_plugin_active { false };
-    void run_pipeline_hook(SlicingPipelineStep step, const PrintObject* object) {
+    void run_pipeline_hook(SlicingPipelineStepPlugin step, const PrintObject* object) {
         if (m_pipeline_plugin_active && s_slicing_pipeline_hook_fn)
             s_slicing_pipeline_hook_fn(*this, object, step);
     }
