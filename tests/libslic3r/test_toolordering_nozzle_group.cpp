@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 
+#include "libslic3r/FilamentGroupUtils.hpp"
 #include "libslic3r/MultiNozzleUtils.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/GCode/ToolOrdering.hpp"
@@ -347,4 +348,46 @@ TEST_CASE("NozzleStatusRecorder tracks nozzle/extruder occupancy", "[MultiNozzle
     REQUIRE(rec.get_filament_in_nozzle(2) == -1);
     // Clearing a nozzle leaves the extruder->nozzle association intact.
     REQUIRE(rec.get_nozzle_in_extruder(1) == 2);
+}
+
+TEST_CASE("Hybrid nozzle stats resolve to concrete volume types", "[ToolOrdering][H2C]")
+{
+    // Extruder 0 is Standard-only; extruder 1 carries a mixed Standard + High Flow inventory
+    // (the "Hybrid" flow selection). The write-back pipeline persists get_volume_map(), so the
+    // result must always carry concrete per-filament volume types, never the Hybrid seed.
+    auto stats = get_extruder_nozzle_stats({"Standard#1", "Standard#1|High Flow#1"});
+    REQUIRE(stats.size() == 2);
+    REQUIRE(stats[1].size() == 2);
+
+    std::vector<unsigned int> used_filaments = {0, 1, 2};
+    std::vector<int> filament_map    = {0, 1, 1}; // 0-based extruder ids
+    std::vector<int> volume_requests = {(int) nvtStandard, (int) nvtHighFlow, (int) nvtStandard};
+    std::vector<int> nozzle_requests = {0, 1, 2}; // distinct logical nozzles
+
+    auto group = LayeredNozzleGroupResult::create(used_filaments, filament_map, volume_requests, nozzle_requests, stats, 0.4f);
+    REQUIRE(group.has_value());
+
+    auto volume_map = group->get_volume_map();
+    REQUIRE(volume_map == volume_requests);
+    for (auto fid : used_filaments)
+        REQUIRE(volume_map[fid] != (int) nvtHybrid);
+
+    // The Hybrid seed itself matches no physical nozzle: such a request is unsatisfiable.
+    std::vector<int> hybrid_requests = {(int) nvtStandard, (int) nvtHybrid, (int) nvtStandard};
+    REQUIRE_FALSE(LayeredNozzleGroupResult::create(used_filaments, filament_map, hybrid_requests, nozzle_requests, stats, 0.4f).has_value());
+}
+
+TEST_CASE("update_used_filament_values merges only used filaments", "[ToolOrdering][H2C]")
+{
+    // The config write-back merges the engine's per-filament values over the config baseline:
+    // used filaments adopt the engine value, unused filaments keep their config assignment.
+    std::vector<int>          old_values = {1, 1, 2, 1};
+    std::vector<int>          new_values = {2, 2, 1, 2};
+    std::vector<unsigned int> used       = {0, 2};
+
+    auto merged = FilamentGroupUtils::update_used_filament_values(old_values, new_values, used);
+    REQUIRE(merged == std::vector<int>{2, 1, 1, 1});
+
+    // No used filaments => the config baseline is returned untouched.
+    REQUIRE(FilamentGroupUtils::update_used_filament_values(old_values, new_values, {}) == old_values);
 }

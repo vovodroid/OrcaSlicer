@@ -10467,6 +10467,9 @@ msgstr ""
 msgid "Grouping error: "
 msgstr ""
 
+msgid "Group error in manual mode. Please check nozzle count or regroup."
+msgstr ""
+
 msgid " can not be placed in the "
 msgstr ""
 

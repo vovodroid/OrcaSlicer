@@ -4512,8 +4512,10 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                 if (m_curr_plater){
                     auto filament_volume_map = get_vector_from_string(value);
                     for (size_t idx = 0; idx < filament_volume_map.size(); ++idx) {
-                        // Only Standard(0)/High Flow(1) are currently supported; clamp any higher
-                        // volume-type (TPU High Flow/Hybrid) back to Standard until they are wired in.
+                        // The map feeds per-filament slot resolution and grouping. Clamp any
+                        // higher volume-type back to Standard(0) on load: Hybrid(2) is only an
+                        // in-memory grouping seed that is never persisted, and TPU High Flow(3)
+                        // is clamped with the same information loss on every load.
                         if (filament_volume_map[idx] > 1) {
                             filament_volume_map[idx] = 0;
                         }

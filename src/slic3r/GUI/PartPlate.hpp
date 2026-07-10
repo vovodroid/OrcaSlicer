@@ -253,6 +253,7 @@ public:
     PrintSequence get_real_print_seq(bool* plate_same_as_global=nullptr) const;
 
     std::vector<int> get_real_filament_maps(const DynamicConfig& g_config, bool* use_global_param = nullptr)const;
+    std::vector<int> get_real_filament_volume_maps(const DynamicConfig& g_config, bool* use_global_param = nullptr) const;
     FilamentMapMode  get_real_filament_map_mode(const DynamicConfig& g_config,bool * use_global_param = nullptr) const;
 
     FilamentMapMode get_filament_map_mode() const;
@@ -261,6 +262,15 @@ public:
     // get filament map, 0 based filament ids, 1 based extruder ids
     std::vector<int> get_filament_maps() const;
     void set_filament_maps(const std::vector<int>& f_maps);
+
+    // per-filament nozzle-volume choice (NozzleVolumeType values, 0 based filament ids)
+    std::vector<int> get_filament_volume_maps() const;
+    void set_filament_volume_maps(const std::vector<int>& f_maps);
+    void clear_filament_volume_map();
+
+    // per-filament nozzle-group choice (0 based filament and nozzle ids)
+    std::vector<int> get_filament_nozzle_maps() const;
+    void set_filament_nozzle_maps(const std::vector<int>& f_maps);
 
     void clear_filament_map();
     void clear_filament_map_mode();

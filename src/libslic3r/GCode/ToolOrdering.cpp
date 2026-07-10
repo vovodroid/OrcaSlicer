@@ -1332,12 +1332,12 @@ static FilamentGroupContext build_filament_group_context(
     context.group_info.has_filament_switcher = has_filament_switcher;
 
     // hybrid flow means no special per-filament nozzle-volume request.
-    // Orca: in manual mode the config's per-filament volume map is honoured only when a producer
-    // sized it to a multi-filament count (the trust guard used by
-    // update_values_to_printer_extruders_for_multiple_filaments): the registered default is a
-    // 1-element vector ({Standard}) that a single-filament count cannot tell apart from a real
-    // map, and it must not displace the hybrid fallback rebuild_nozzle_unprintables relies on.
-    if (mode == FilamentMapMode::fmmManual && filament_nums > 1 &&
+    // Orca: honour the config's per-filament volume map only when it is sized to the filament
+    // count. The full-config producers (PresetBundle injection, engine write-back) always size
+    // it; a mis-sized map (stale project value, CLI runs until the per-filament synthesis lands
+    // there) must not displace the hybrid fallback rebuild_nozzle_unprintables relies on, nor be
+    // indexed out of bounds.
+    if (mode == FilamentMapMode::fmmManual &&
         print_config.filament_volume_map.values.size() == filament_nums)
         context.group_info.filament_volume_map = print_config.filament_volume_map.values;
     else
@@ -1487,12 +1487,12 @@ MultiNozzleUtils::LayeredNozzleGroupResult ToolOrdering::get_recommended_filamen
         std::transform(manual_filament_map.begin(), manual_filament_map.end(), manual_filament_map.begin(), [](int v) { return v - 1; });
         float diameter = print_config.nozzle_diameter.values.empty() ? 0.4f : (float)print_config.nozzle_diameter.values.front();
         // Orca: create() indexes the volume/nozzle maps per used filament with no bounds check, so
-        // pass them only when a producer sized them to a multi-filament count — the registered
-        // 1-element defaults are indistinguishable by size from a real single-filament map.
+        // pass them only when a producer sized them to the filament count (mis-sized maps can
+        // arrive from stale projects or CLI runs until the per-filament synthesis lands there).
         // Without valid maps the fully-manual request cannot be honoured; return the empty result,
         // the same failure an unsatisfiable create() yields.
         std::optional<LayeredNozzleGroupResult> nozzle_result;
-        if (filament_nums > 1 && print_config.filament_volume_map.values.size() == filament_nums &&
+        if (print_config.filament_volume_map.values.size() == filament_nums &&
             print_config.filament_nozzle_map.values.size() == filament_nums)
             nozzle_result = LayeredNozzleGroupResult::create(used_filaments, manual_filament_map, print_config.filament_volume_map.values, print_config.filament_nozzle_map.values, get_extruder_nozzle_stats(print_config.extruder_nozzle_stats.values), diameter);
         if (!nozzle_result)
@@ -1556,7 +1556,21 @@ MultiNozzleUtils::LayeredNozzleGroupResult ToolOrdering::get_recommended_filamen
 
         if (has_multiple_nozzle) {
             auto result_opt = LayeredNozzleGroupResult::create(ret, context.nozzle_info.nozzle_list, used_filaments);
-            return result_opt ? *result_opt : LayeredNozzleGroupResult();
+            if (!result_opt)
+                return LayeredNozzleGroupResult();
+            auto result = *result_opt;
+            if (mode == FilamentMapMode::fmmManual) {
+                // Manual grouping must reproduce the user's filament->extruder map exactly; a
+                // deviation means the requested assignment cannot be satisfied by the nozzle
+                // inventory, which must surface as a slicing error instead of silently regrouping.
+                auto result_map = result.get_extruder_map();
+                for (auto fid : used_filaments) {
+                    if (result_map[fid] != print_config.filament_map.values[fid] - 1) {
+                        throw Slic3r::RuntimeError(_L("Group error in manual mode. Please check nozzle count or regroup."));
+                    }
+                }
+            }
+            return result;
         }
     }
 
@@ -1617,11 +1631,11 @@ static MultiNozzleUtils::LayeredNozzleGroupResult build_group_result_from_map(
     const size_t filament_nums = print_config.filament_colour.values.size();
     const bool   has_multiple_nozzle = std::any_of(print_config.extruder_max_nozzle_count.values.begin(), print_config.extruder_max_nozzle_count.values.end(),
                                                    [](int v) { return v > 1; });
-    // Orca: same trust guard as the manual grouping paths — create() indexes the volume/nozzle
-    // maps per used filament with no bounds check, and the registered 1-element defaults must not
-    // be mistaken for a real single-filament map. Unsized maps fall through to the extruder-level
-    // wrap below.
-    if (has_multiple_nozzle && filament_nums > 1 &&
+    // Orca: same sizing guard as the manual grouping paths — create() indexes the volume/nozzle
+    // maps per used filament with no bounds check, so only maps sized to the filament count are
+    // trusted (mis-sized maps can arrive from stale projects or CLI runs until the per-filament
+    // synthesis lands there). Unsized maps fall through to the extruder-level wrap below.
+    if (has_multiple_nozzle &&
         print_config.filament_volume_map.values.size() == filament_nums &&
         print_config.filament_nozzle_map.values.size() == filament_nums) {
         float diameter = print_config.nozzle_diameter.values.empty() ? 0.4f : static_cast<float>(print_config.nozzle_diameter.values.front());
@@ -2042,8 +2056,10 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
         auto result   = MultiNozzleUtils::LayeredNozzleGroupResult::create(nozzle_map_per_layer, grouping_context.nozzle_info.nozzle_list, used_filaments, filament_sequences);
         grouping_result = result ? *result : MultiNozzleUtils::LayeredNozzleGroupResult();
 
-        // Derive the extruder-level map (0-based) for the stats path + config write-back. The full
-        // per-nozzle config write-back is not yet wired.
+        // Derive the extruder-level map for the stats path + config write-back.
+        // Orca: the dynamic (per-layer) result carries no single volume/nozzle map, so only the
+        // extruder map is written back here; the full per-nozzle config write-back
+        // (a dedicated dynamic-map path) is a follow-up behind the dev flag.
         std::vector<int> derived_maps = grouping_result.get_extruder_map(false); // 1-based
         if (!derived_maps.empty()) {
             filament_maps = derived_maps;
@@ -2060,10 +2076,33 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
             if (derived_maps.empty())
                 return;
             filament_maps = derived_maps;
-            m_print->update_filament_maps_to_config(filament_maps);
         } else if (!derived_maps.empty()) {
             // Manual modes: the result mirrors the user's config map; adopt it for consistency.
             filament_maps = derived_maps;
+        }
+        // Write the maps back for every mode: used filaments adopt the engine's extruder/nozzle
+        // choice, unused ones keep their config assignment. In manual modes the extruder map
+        // mirrors the user's map (a deviation throws in get_recommended_filament_maps).
+        if (!derived_maps.empty()) {
+            // Orca: the config maps are the merge base; fall back to a synthesized base when no
+            // producer sized them to the filament count (CLI runs until the per-filament
+            // synthesis lands there), where indexing per filament would run out of bounds.
+            std::vector<int> base_filament_map = print_config->filament_map.values;
+            if (base_filament_map.size() != derived_maps.size())
+                base_filament_map.assign(derived_maps.size(), 1);
+            std::vector<int> base_volume_map = print_config->filament_volume_map.values;
+            if (base_volume_map.size() != derived_maps.size())
+                base_volume_map.assign(derived_maps.size(), (int)nvtStandard);
+            // Orca: the engine's concrete per-filament volume assignment (get_volume_map()) is
+            // deliberately NOT merged into the write-back yet. The write-back re-expands the
+            // per-filament filament_* arrays from these maps, and those arrays are already
+            // consumed by filament id, so materializing a High Flow assignment here would alter
+            // motion g-code before the layer-aware g-code resolvers consume the assignment.
+            // Until those consumers land, the config keeps its own (GUI-injected or project)
+            // volume map, size-corrected above.
+            m_print->update_filament_maps_to_config(FilamentGroupUtils::update_used_filament_values(base_filament_map, derived_maps, used_filaments),
+                                                    base_volume_map,
+                                                    grouping_result.get_nozzle_map());
         }
         std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) { return value - 1; });
 

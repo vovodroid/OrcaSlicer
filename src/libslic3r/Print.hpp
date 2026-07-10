@@ -1005,7 +1005,7 @@ public:
     const WipeTowerData&        wipe_tower_data(size_t filaments_cnt = 0) const;
     const ToolOrdering& 		tool_ordering() const { return m_tool_ordering; }
 
-    void update_filament_maps_to_config(std::vector<int> f_maps);
+    void update_filament_maps_to_config(std::vector<int> f_maps, std::vector<int> f_volume_maps = std::vector<int>{}, std::vector<int> f_nozzle_maps = std::vector<int>{});
     void apply_config_for_render(const DynamicConfig &config);
 
     // 1 based group ids

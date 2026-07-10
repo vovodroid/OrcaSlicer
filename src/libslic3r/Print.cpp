@@ -334,8 +334,11 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
             || opt_key == "other_layers_print_sequence_nums" 
             || opt_key == "toolchange_ordering"
             || opt_key == "extruder_ams_count"
+            || opt_key == "extruder_nozzle_stats"
             || opt_key == "filament_map_mode"
             || opt_key == "filament_map"
+            || opt_key == "filament_nozzle_map"
+            || opt_key == "filament_volume_map"
             || opt_key == "filament_adhesiveness_category"
             || opt_key == "filament_tower_interface_pre_extrusion_dist"
             || opt_key == "filament_tower_interface_pre_extrusion_length"
@@ -2509,6 +2512,10 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             std::vector<int>filament_maps = this->get_filament_maps();
             auto map_mode = get_filament_map_mode();
             // get recommended filament map
+            // Orca: the sequential write-back stays gated to auto modes. In manual modes the
+            // config maps already carry the user's assignment (the per-object ToolOrdering below
+            // consumes them directly), so a write-back would only re-store the pre-slice values;
+            // keeping the gate avoids churning the config on every sequential manual slice.
             if (map_mode < FilamentMapMode::fmmManual) {
                 // Grouping returns a nozzle-aware result; the 1-based extruder map
                 // for the by-object path is derived from it.
@@ -2516,7 +2523,25 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
                 auto derived_maps = grouping_result.get_extruder_map(false);
                 if (!derived_maps.empty()) {
                     filament_maps = derived_maps;
-                    update_filament_maps_to_config(filament_maps);
+                    // Write the maps back: used filaments adopt the engine's extruder/nozzle
+                    // choice, unused ones keep their config assignment.
+                    // Orca: the config maps are the merge base; fall back to a synthesized base
+                    // when no producer sized them to the filament count (CLI runs until the
+                    // per-filament synthesis lands there), where indexing per filament would
+                    // run out of bounds.
+                    std::vector<int> base_filament_map = m_config.filament_map.values;
+                    if (base_filament_map.size() != derived_maps.size())
+                        base_filament_map.assign(derived_maps.size(), 1);
+                    std::vector<int> base_volume_map = m_config.filament_volume_map.values;
+                    if (base_volume_map.size() != derived_maps.size())
+                        base_volume_map.assign(derived_maps.size(), (int)nvtStandard);
+                    // Orca: as on the non-sequential path, the engine's concrete volume
+                    // assignment (get_volume_map()) is deliberately not merged in until the
+                    // layer-aware g-code resolvers consume it; the config keeps its own
+                    // (GUI-injected or project) volume map, size-corrected above.
+                    update_filament_maps_to_config(FilamentGroupUtils::update_used_filament_values(base_filament_map, derived_maps, used_filaments),
+                                                   base_volume_map,
+                                                   grouping_result.get_nozzle_map());
                 }
             }
             // check map valid both in auto and mannual mode
@@ -3198,14 +3223,30 @@ void Print::finalize_first_layer_convex_hull()
     m_first_layer_convex_hull = Geometry::convex_hull(m_first_layer_convex_hull.points);
 }
 
-void Print::update_filament_maps_to_config(std::vector<int> f_maps)
+void Print::update_filament_maps_to_config(std::vector<int> f_maps, std::vector<int> f_volume_maps, std::vector<int> f_nozzle_maps)
 {
-    if (m_config.filament_map.values != f_maps)
+    if ((m_config.filament_map.values != f_maps) || (m_config.filament_volume_map.values != f_volume_maps) || (m_config.filament_nozzle_map.values != f_nozzle_maps))
     {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": filament maps changed after pre-slicing.");
         m_ori_full_print_config.option<ConfigOptionInts>("filament_map", true)->values = f_maps;
         m_config.filament_map.values = f_maps;
 
+        if (!f_volume_maps.empty()) {
+            m_ori_full_print_config.option<ConfigOptionInts>("filament_volume_map", true)->values = f_volume_maps;
+            m_config.filament_volume_map.values = f_volume_maps;
+        }
+        else {
+            m_ori_full_print_config.option<ConfigOptionInts>("filament_volume_map", true)->values.resize(f_maps.size(), nvtStandard);
+            m_config.filament_volume_map.values.resize(f_maps.size(), nvtStandard);
+        }
+
+        if (!f_nozzle_maps.empty()) {
+            m_ori_full_print_config.option<ConfigOptionInts>("filament_nozzle_map", true)->values = f_nozzle_maps;
+            m_config.filament_nozzle_map.values = f_nozzle_maps;
+        }
+    }
+
+    {
         int extruder_count = 1, extruder_volume_type_count = 1;
         bool support_multi = m_ori_full_print_config.support_different_extruders(extruder_count);
         std::vector<std::vector<NozzleVolumeType>> nozzle_volume_types;
@@ -3221,15 +3262,22 @@ void Print::update_filament_maps_to_config(std::vector<int> f_maps)
         auto opt_extruder_type = dynamic_cast<const ConfigOptionEnumsGeneric*>(m_ori_full_print_config.option("extruder_type"));
         auto opt_nozzle_volume_type = dynamic_cast<const ConfigOptionEnumsGeneric*>(m_ori_full_print_config.option("nozzle_volume_type"));
         // Orca: the loop tolerates configs without the extruder options (unit tests, degenerate
-        // presets); the volume-map override keeps the sizing guard used everywhere else, and the
-        // grouping engine does not produce per-filament volume maps yet, so m_config only carries
-        // a map when the project supplied one.
+        // presets); the backfill and the override are bounds-checked because the change block above
+        // is skipped when the maps are unchanged, in which case the stored map may be shorter than
+        // the filament count.
+        auto* ori_volume_map = m_ori_full_print_config.option<ConfigOptionInts>("filament_volume_map", true);
         for (int index = 0; opt_extruder_type && opt_nozzle_volume_type && index < f_maps.size(); index++)
         {
             ExtruderType extruder_type = (ExtruderType)(opt_extruder_type->get_at(f_maps[index] - 1));
             NozzleVolumeType nozzle_volume_type = (NozzleVolumeType)(opt_nozzle_volume_type->get_at(f_maps[index] - 1));
-            if ((extruder_volume_type_count > extruder_count)
-                && f_maps.size() > 1 && m_config.filament_volume_map.values.size() == f_maps.size())
+            if (f_volume_maps.empty()) {
+                // No per-filament map supplied: backfill from the extruder's own volume type.
+                if (m_config.filament_volume_map.values.size() > index)
+                    m_config.filament_volume_map.values[index] = nozzle_volume_type;
+                if (ori_volume_map->values.size() > index)
+                    ori_volume_map->values[index] = nozzle_volume_type;
+            }
+            else if ((extruder_volume_type_count > extruder_count) && (m_config.filament_volume_map.values.size() > index))
                 nozzle_volume_type = (NozzleVolumeType)(m_config.filament_volume_map.values[index]);
             m_config.filament_map_2.values[index] = m_ori_full_print_config.get_index_for_extruder(f_maps[index], "print_extruder_id", extruder_type, nozzle_volume_type, "print_extruder_variant");
         }
@@ -3254,8 +3302,11 @@ void Print::update_filament_maps_to_config(std::vector<int> f_maps)
                 compute_filament_override_value(opt_key, opt_old_machine, opt_new_machine, opt_new_filament, m_full_print_config, print_diff, filament_overrides, m_config.filament_map_2.values);
         }
 
-        t_config_option_keys keys(filament_options_with_variant.begin(), filament_options_with_variant.end());
-        m_config.apply_only(m_full_print_config, keys, true);
+        if ((extruder_count > 1) || support_multi) {
+            t_config_option_keys keys(filament_options_with_variant.begin(), filament_options_with_variant.end());
+            keys.push_back("filament_self_index");
+            m_config.apply_only(m_full_print_config, keys, true);
+        }
         if (!print_diff.empty()) {
             m_placeholder_parser.apply_config(filament_overrides);
             m_config.apply(filament_overrides);

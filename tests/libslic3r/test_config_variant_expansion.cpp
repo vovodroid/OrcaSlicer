@@ -288,14 +288,15 @@ TEST_CASE("update_values_to_printer_extruders_for_multiple_filaments resolves pe
         REQUIRE(config.option<ConfigOptionInts>("filament_self_index")->values == std::vector<int>({1, 2}));
     }
 
-    SECTION("a single-filament map matches the registered default's shape and is ignored") {
+    SECTION("a single-filament explicit assignment on a Hybrid extruder is honored") {
         DynamicPrintConfig config = make_hybrid_printer_config();
         config.option<ConfigOptionInts>("filament_self_index", true)->values = {1, 1};
         config.option<ConfigOptionStrings>("filament_extruder_variant", true)->values = {"Direct Drive Standard", "Direct Drive High Flow"};
         config.option<ConfigOptionFloats>("filament_max_volumetric_speed", true)->values = {12., 20.};
         config.option<ConfigOptionInts>("filament_map", true)->values = {2};
-        // sized to the (single) filament count, but indistinguishable from the registered
-        // 1-element default, so it must not override slot resolution
+        // sized to the (single) filament count: the producers guarantee sizing, so a
+        // single-filament map is as trustworthy as any other and the explicit High Flow
+        // request must win over the Hybrid->Standard fallback
         config.option<ConfigOptionInts>("filament_volume_map", true)->values = {nvtHighFlow};
 
         std::vector<std::vector<NozzleVolumeType>> nozzle_volume_types;
@@ -305,8 +306,7 @@ TEST_CASE("update_values_to_printer_extruders_for_multiple_filaments resolves pe
         config.update_values_to_printer_extruders_for_multiple_filaments(config, extruder_count, count, filament_keys,
             "filament_self_index", "filament_extruder_variant");
 
-        // Hybrid resolves as Standard, exactly as if no map were present
-        REQUIRE(config.option<ConfigOptionFloats>("filament_max_volumetric_speed")->values == std::vector<double>({12.}));
+        REQUIRE(config.option<ConfigOptionFloats>("filament_max_volumetric_speed")->values == std::vector<double>({20.}));
         REQUIRE(config.option<ConfigOptionInts>("filament_self_index")->values == std::vector<int>({1}));
     }
 

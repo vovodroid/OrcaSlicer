@@ -2743,8 +2743,10 @@ void PrintConfigDef::init_fff_params()
 
     // Per-filament nozzle-volume-type override (multi-volume/Hybrid). Round-trips through .3mf
     // plate metadata (filament_volume_maps) and steers per-filament slot resolution when an
-    // extruder exposes several volume types; inert for existing printers (no producer sizes it
-    // to the filament count until the write-back pipeline lands).
+    // extruder exposes several volume types. Producers: the GUI full-config composition injects
+    // a filament-count-sized map (plate map, else per-extruder defaults) and the project config
+    // keeps it sized; expansion trusts the map only when its size matches the filament count
+    // (CLI runs may still carry the 1-element default).
     def = this->add("filament_volume_map", coInts);
     def->mode = comDevelop;
     def->set_default_value(new ConfigOptionInts{(int)(NozzleVolumeType::nvtStandard)});
@@ -2774,8 +2776,10 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionEnum<FilamentMapMode>(fmmAutoForFlush));
 
-    // Fully-manual mode (fmmNozzleManual): per-filament -> physical-nozzle assignment.
-    // Inert until the nozzle-assignment engine consumes it. Internal use only, no translation.
+    // Per-filament -> physical-nozzle assignment. Written back by the grouping engine after
+    // slicing (all non-sequential modes) and read back to the plate config; a user input only
+    // in fully-manual mode (fmmNozzleManual). Dumped in the g-code header for diagnostics.
+    // Internal use only, no translation.
     def = this->add("filament_nozzle_map", coInts);
     def->mode = comDevelop;
     def->set_default_value(new ConfigOptionInts{1});
@@ -10533,12 +10537,12 @@ void DynamicPrintConfig::update_values_to_printer_extruders_for_multiple_filamen
 
         auto opt_filament_volume_maps = dynamic_cast<const ConfigOptionInts*>(printer_config.option("filament_volume_map"));
         std::vector<int> filament_volume_maps;
-        // Orca: the per-filament volume map is only trustworthy when a producer explicitly
-        // sized it to the filament count; the registered default is a 1-element vector and
-        // stale project values may be mis-sized. A single-filament config cannot be told
-        // apart from that default by size, so it is ignored too until the pipeline that
-        // seeds the map lands; anything untrusted must not distort slot resolution.
-        if (opt_filament_volume_maps && filament_count > 1 && opt_filament_volume_maps->values.size() == filament_count)
+        // Orca: honour the per-filament volume map only when a producer sized it to the
+        // filament count. The full-config producers (PresetBundle injection, engine
+        // write-back) always size it; mis-sized maps (stale project values, CLI runs until
+        // the per-filament synthesis lands there) must not distort slot resolution nor be
+        // indexed out of bounds.
+        if (opt_filament_volume_maps && opt_filament_volume_maps->values.size() == filament_count)
             filament_volume_maps = opt_filament_volume_maps->values;
         auto opt_ids = id_name.empty()? nullptr: dynamic_cast<const ConfigOptionInts*>(this->option(id_name));
         std::vector<int> variant_index;
