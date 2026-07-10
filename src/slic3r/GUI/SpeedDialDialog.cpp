@@ -254,30 +254,29 @@ private:
         const AppAction* a = reg.by_id(id);
         if (!a)
             return;
-        const std::string key = a->plugin_key;
-        const std::string cap = a->capability;
-        const bool ask = reg.should_ask(key);
+        const bool        ask    = reg.should_ask(id);
+        const std::string atitle = a->title;   // capture before Dismiss; `a` may not outlive it
         Dismiss(); // launcher gone before the modal / the script's own UI
 
         if (ask) {
-            const wxString label = title.empty() ? from_u8(cap) : from_u8(title);
+            const wxString label = title.empty() ? from_u8(atitle) : from_u8(title);
             RichMessageDialog dlg(wxGetApp().mainframe, wxString::Format(_L("Run \"%s\"?"), label),
                                   _L("Run plugin"), wxOK | wxCANCEL);
-            dlg.ShowCheckBox(_L("Don't ask again for this plugin"));
+            dlg.ShowCheckBox(_L("Don't ask again for this action"));
             if (dlg.ShowModal() != wxID_OK)
                 return;
             if (dlg.IsCheckBoxChecked())
-                wxGetApp().action_registry().suppress_ask(key);
+                wxGetApp().action_registry().suppress_ask(id);
         }
         // why: value-capture only. Script execution may outlive this popup if the app is closing.
         wxGetApp().CallAfter([id] {
-            ScriptRunOutcome o = wxGetApp().action_registry().run(id);
-            if (o.level == ScriptRunOutcome::Level::Busy)
+            AppActionRunResult o = wxGetApp().action_registry().run(id);
+            if (o.level == AppActionRunResult::Level::Busy)
                 return;
             if (!o.message.IsEmpty())
                 wxGetApp().plater()->get_notification_manager()->push_notification(
                     NotificationType::CustomNotification,
-                    o.level == ScriptRunOutcome::Level::Error ? NotificationManager::NotificationLevel::ErrorNotificationLevel :
+                    o.level == AppActionRunResult::Level::Error ? NotificationManager::NotificationLevel::ErrorNotificationLevel :
                                                                 NotificationManager::NotificationLevel::RegularNotificationLevel,
                     into_u8(o.message));
         });
