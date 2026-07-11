@@ -6,6 +6,7 @@
 
 #include <pybind11/stl.h>
 
+#include <memory>
 #include <string>
 
 namespace py = pybind11;
@@ -52,7 +53,11 @@ void host_bindings::register_model(py::module_& host)
         .def("is_manifold", [](const ModelVolume& volume) { return volume.mesh().stats().manifold(); })
         // Full mesh geometry (vertices/triangles) as an immutable snapshot.
         .def("mesh", [](const ModelVolume& volume) {
-            return HostTriangleMesh{ volume.get_mesh_shared_ptr() };
+            // The volume stores its mesh as shared_ptr<const TriangleMesh> (a
+            // copy-on-write snapshot); the const_pointer_cast only serves the
+            // binding's shared_ptr holder — the TriangleMesh binding exposes
+            // read-only methods (see the immutability rule in PluginHostMesh.cpp).
+            return std::const_pointer_cast<TriangleMesh>(volume.get_mesh_shared_ptr());
         }, "Return the volume's TriangleMesh (local coordinates) for vertex/triangle access.")
         .def("mesh_errors_count", [](const ModelVolume& volume) { return volume.get_repaired_errors_count(); })
         .def("is_fdm_support_painted", &ModelVolume::is_fdm_support_painted)
