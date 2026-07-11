@@ -460,3 +460,39 @@ TEST_CASE("Print config-index resolvers pick per-filament Hybrid slots", "[Print
         REQUIRE(print.get_nozzle_config_index(2, 0) == 1); // extruder slot, not the High Flow slot
     }
 }
+
+TEST_CASE("Re-applying an unchanged config after slicing keeps the result valid", "[Print][H2C]")
+{
+    // apply() rebuilds m_config.filament_map_2 to the real per-filament slot map, while the
+    // incoming full config only ever carries the ConfigDef default for it. The engine-derived
+    // key must therefore be kept out of the apply diff: the GUI re-applies right after slicing
+    // completes, and a phantom filament_map_2 diff would invalidate every freshly sliced result
+    // on any multi-extruder printer.
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.option<ConfigOptionFloats>("nozzle_diameter", true)->values = {0.4, 0.4};
+    config.option<ConfigOptionStrings>("extruder_nozzle_stats", true)->values = {"Standard#1", "Standard#1|High Flow#2"};
+    config.option<ConfigOptionEnumsGeneric>("extruder_type", true)->values = {etDirectDrive, etDirectDrive};
+    config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type", true)->values = {nvtStandard, nvtHybrid};
+    config.option<ConfigOptionStrings>("extruder_variant_list", true)->values = {"Direct Drive Standard,Direct Drive High Flow",
+                                                                                 "Direct Drive Standard,Direct Drive High Flow"};
+    config.option<ConfigOptionInts>("print_extruder_id", true)->values = {1, 1, 2, 2};
+    config.option<ConfigOptionStrings>("print_extruder_variant", true)->values = {"Direct Drive Standard", "Direct Drive High Flow",
+                                                                                  "Direct Drive Standard", "Direct Drive High Flow"};
+    config.option<ConfigOptionFloats>("filament_diameter", true)->values = {1.75, 1.75, 1.75};
+    config.option<ConfigOptionStrings>("filament_colour", true)->values = {"#FF0000", "#00FF00", "#0000FF"};
+    config.option<ConfigOptionInts>("filament_map", true)->values = {1, 2, 2};
+    config.option<ConfigOptionInts>("filament_volume_map", true)->values = {(int) nvtStandard, (int) nvtStandard, (int) nvtHighFlow};
+
+    Model model;
+    ModelObject *object = model.add_object("cube", "", make_cube(20, 20, 20));
+    object->add_instance()->set_offset(Vec3d(100., 100., 0.));
+
+    Print print;
+    print.apply(model, config);
+    print.process();
+    REQUIRE(print.is_step_done(psSlicingFinished));
+
+    auto status = print.apply(model, config);
+    REQUIRE(status != PrintBase::APPLY_STATUS_INVALIDATED);
+    REQUIRE(print.is_step_done(psSlicingFinished));
+}

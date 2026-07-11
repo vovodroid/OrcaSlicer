@@ -1205,6 +1205,13 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
     DynamicPrintConfig   filament_overrides;
     //BBS: add plate index
     t_config_option_keys print_diff       = print_config_diffs(m_config, new_full_config, filament_overrides, this->m_plate_index, filament_maps);
+    // Orca: filament_map_2 is engine-derived state, never a user input: the rebuild below
+    // recomputes it from filament_map/filament_volume_map/the variant slots on every apply
+    // (all of which are diffed and invalidation-listed on their own), and the grouping
+    // write-back overwrites it during process(). The incoming full config only ever carries
+    // the ConfigDef default, so diffing it would invalidate every print step on each apply
+    // for any multi-extruder printer and permanently invalidate fresh slice results.
+    print_diff.erase(std::remove(print_diff.begin(), print_diff.end(), "filament_map_2"), print_diff.end());
     t_config_option_keys full_config_diff = full_print_config_diffs(m_full_print_config, new_full_config, this->m_plate_index);
     // Collect changes to object and region configs.
     t_config_option_keys object_diff      = m_default_object_config.diff(new_full_config);
