@@ -2535,12 +2535,8 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
                     std::vector<int> base_volume_map = m_config.filament_volume_map.values;
                     if (base_volume_map.size() != derived_maps.size())
                         base_volume_map.assign(derived_maps.size(), (int)nvtStandard);
-                    // Orca: as on the non-sequential path, the engine's concrete volume
-                    // assignment (get_volume_map()) is deliberately not merged in until the
-                    // layer-aware g-code resolvers consume it; the config keeps its own
-                    // (GUI-injected or project) volume map, size-corrected above.
                     update_filament_maps_to_config(FilamentGroupUtils::update_used_filament_values(base_filament_map, derived_maps, used_filaments),
-                                                   base_volume_map,
+                                                   FilamentGroupUtils::update_used_filament_values(base_volume_map, grouping_result.get_volume_map(), used_filaments),
                                                    grouping_result.get_nozzle_map());
                 }
             }

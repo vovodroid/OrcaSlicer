@@ -395,6 +395,12 @@ private:
     void check_placeholder_parser_failed();
     size_t cur_extruder_index() const;
     size_t get_extruder_id(unsigned int filament_id) const;
+    // Per-filament config-slot resolvers for the current layer (m_cur_layer_idx): the filament
+    // resolver keys filament-indexed arrays, the nozzle resolver keys (extruder x volume-type)
+    // slot arrays. Both degenerate to filament_id / extruder index on single-volume printers.
+    size_t get_filament_config_index(int filament_id) const;
+    size_t get_nozzle_config_index(int filament_id) const;
+    void   update_placeholder_parser_with_variant_params();
 
     void            set_last_pos(const Point &pos) { m_last_pos = Point3(pos, 0); m_last_pos_defined = true; }
     void            set_last_pos(const Point3 &pos) { m_last_pos = pos; m_last_pos_defined = true; }
@@ -701,11 +707,17 @@ private:
     int m_start_gcode_filament = -1;
     std::string m_filament_instances_code;
 
+    // Object layer id of the layer being generated; keys the per-filament config-slot
+    // resolvers. Distinct from m_layer_index (an export progress counter starting at -1).
+    size_t m_cur_layer_idx{0};
+
     std::set<unsigned int>                  m_initial_layer_extruders;
     std::vector<std::vector<unsigned int>>  m_sorted_layer_filaments;
     // BBS
     int get_bed_temperature(const int extruder_id, const bool is_first_layer, const BedType bed_type) const;
     int get_highest_bed_temperature(const bool is_first_layer,const Print &print) const;
+
+    void update_layer_related_config(int layer_id);
 
     double      calc_max_volumetric_speed(const double layer_height, const double line_width, const std::string co_str);
     std::string _extrude(const ExtrusionPath &path, std::string description = "", double speed = -1);

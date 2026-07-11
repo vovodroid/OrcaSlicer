@@ -4,6 +4,9 @@
 #include "libslic3r/MultiNozzleUtils.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/GCode/ToolOrdering.hpp"
+#include "libslic3r/Model.hpp"
+#include "libslic3r/Print.hpp"
+#include "libslic3r/TriangleMesh.hpp"
 
 #include <algorithm>
 #include <map>
@@ -390,4 +393,70 @@ TEST_CASE("update_used_filament_values merges only used filaments", "[ToolOrderi
 
     // No used filaments => the config baseline is returned untouched.
     REQUIRE(FilamentGroupUtils::update_used_filament_values(old_values, new_values, {}) == old_values);
+}
+
+TEST_CASE("Print config-index resolvers pick per-filament Hybrid slots", "[Print][H2C]")
+{
+    // A 2-extruder printer whose second extruder is Hybrid (Standard + High Flow nozzles).
+    // The preset-style variant columns carry one column per (extruder x volume type); apply()
+    // expands them to the 3-slot layout [e1-Std, e2-Std, e2-HF].
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.option<ConfigOptionFloats>("nozzle_diameter", true)->values = {0.4, 0.4};
+    config.option<ConfigOptionStrings>("extruder_nozzle_stats", true)->values = {"Standard#1", "Standard#1|High Flow#2"};
+    config.option<ConfigOptionEnumsGeneric>("extruder_type", true)->values = {etDirectDrive, etDirectDrive};
+    config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type", true)->values = {nvtStandard, nvtHybrid};
+    config.option<ConfigOptionStrings>("extruder_variant_list", true)->values = {"Direct Drive Standard,Direct Drive High Flow",
+                                                                                 "Direct Drive Standard,Direct Drive High Flow"};
+    config.option<ConfigOptionInts>("print_extruder_id", true)->values = {1, 1, 2, 2};
+    config.option<ConfigOptionStrings>("print_extruder_variant", true)->values = {"Direct Drive Standard", "Direct Drive High Flow",
+                                                                                  "Direct Drive Standard", "Direct Drive High Flow"};
+    config.option<ConfigOptionFloats>("outer_wall_speed", true)->values = {30., 200., 50., 500.};
+
+    // Three filaments: 0 -> extruder 1 (Std), 1 -> extruder 2 (Std), 2 -> extruder 2 (High Flow).
+    config.option<ConfigOptionFloats>("filament_diameter", true)->values = {1.75, 1.75, 1.75};
+    config.option<ConfigOptionStrings>("filament_colour", true)->values = {"#FF0000", "#00FF00", "#0000FF"};
+    config.option<ConfigOptionInts>("filament_map", true)->values = {1, 2, 2};
+    config.option<ConfigOptionInts>("filament_volume_map", true)->values = {(int) nvtStandard, (int) nvtStandard, (int) nvtHighFlow};
+
+    Model model;
+    model.add_object("cube", "", make_cube(20, 20, 20))->add_instance();
+
+    Print print;
+    print.apply(model, config);
+
+    // Stub grouping result mirroring the maps above: one nozzle per (extruder, volume type).
+    std::vector<NozzleInfo> nozzle_list;
+    {
+        NozzleInfo n;
+        n.diameter = "0.4";
+        n.volume_type = nvtStandard; n.extruder_id = 0; n.group_id = 0; nozzle_list.push_back(n);
+        n.volume_type = nvtStandard; n.extruder_id = 1; n.group_id = 1; nozzle_list.push_back(n);
+        n.volume_type = nvtHighFlow; n.extruder_id = 1; n.group_id = 2; nozzle_list.push_back(n);
+    }
+    std::vector<unsigned int> used_filaments = {0, 1, 2};
+    auto group = LayeredNozzleGroupResult::create(std::vector<int>{0, 1, 2}, nozzle_list, used_filaments);
+    REQUIRE(group.has_value());
+    print.set_nozzle_group_result(std::make_shared<LayeredNozzleGroupResult>(*group));
+
+    // The write-back re-expands the config and refreshes the resolver caches.
+    print.update_filament_maps_to_config({1, 2, 2}, {(int) nvtStandard, (int) nvtStandard, (int) nvtHighFlow}, {0, 1, 2});
+
+    // The expansion must have produced the 3-slot layout the resolvers index into.
+    const auto &region_config = print.default_region_config();
+    REQUIRE(region_config.print_extruder_variant.values ==
+            std::vector<std::string>({"Direct Drive Standard", "Direct Drive Standard", "Direct Drive High Flow"}));
+    REQUIRE(region_config.print_extruder_id.values == std::vector<int>({1, 2, 2}));
+
+    SECTION("each filament resolves to its own (extruder x volume type) slot") {
+        REQUIRE(print.get_nozzle_config_index(0, 0) == 0); // extruder 1, Standard
+        REQUIRE(print.get_nozzle_config_index(1, 0) == 1); // extruder 2, Standard
+        REQUIRE(print.get_nozzle_config_index(2, 0) == 2); // extruder 2, High Flow
+    }
+
+    SECTION("without a group result the resolver falls back to the filament's extruder slot") {
+        print.set_nozzle_group_result(nullptr);
+        REQUIRE(print.get_nozzle_config_index(0, 0) == 0);
+        REQUIRE(print.get_nozzle_config_index(1, 0) == 1);
+        REQUIRE(print.get_nozzle_config_index(2, 0) == 1); // extruder slot, not the High Flow slot
+    }
 }

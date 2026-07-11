@@ -331,6 +331,10 @@ namespace FilamentGroupUtils
     {
         std::vector<int> res = old_values;
         for (size_t i = 0; i < used_filaments.size(); ++i) {
+            // Orca: guard against filament ids beyond the map sizes (possible with
+            // mis-normalized per-filament arrays from CLI inputs); skip instead of UB.
+            if (used_filaments[i] >= res.size() || used_filaments[i] >= new_values.size())
+                continue;
             res[used_filaments[i]] = new_values[used_filaments[i]];
         }
         return res;

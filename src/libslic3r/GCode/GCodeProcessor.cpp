@@ -6940,10 +6940,12 @@ float GCodeProcessor::minimum_travel_feedrate(PrintEstimatedStatistics::ETimeMod
 }
 
 // Machine limit arrays hold 2 values: [0]=Normal, [1]=Stealth. Index by mode only.
-// BambuStudio used extruder_id*2+mode to support per-nozzle limits, but OrcaSlicer
-// never ported that system (filament_map_2 / get_config_idx_for_filament), so the
-// extruder_id offset was always wrong: uninitialized extruder (255) or extruder > 0
-// would overshoot the array and fall back to values.back() (stealth limits).
+// Orca: per-(extruder x volume-type) machine limits are deliberately not resolved here even
+// though the slicing side now materializes filament_map_2 and the per-filament volume map
+// (an extruder_id*2+mode style offset would need filament_map_2 in the processor-side config
+// plus a re-audit of every get_option_value(..., mode) call). This only affects
+// time-estimation fidelity: limits are mode-indexed for ALL multi-extruder printers alike, so
+// a Hybrid extruder degrades no further than existing dual-extruder machines. Follow-up.
 float GCodeProcessor::get_axis_max_feedrate(PrintEstimatedStatistics::ETimeMode mode, Axis axis) const
 {
     switch (axis)

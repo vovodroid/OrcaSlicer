@@ -2093,15 +2093,8 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
             std::vector<int> base_volume_map = print_config->filament_volume_map.values;
             if (base_volume_map.size() != derived_maps.size())
                 base_volume_map.assign(derived_maps.size(), (int)nvtStandard);
-            // Orca: the engine's concrete per-filament volume assignment (get_volume_map()) is
-            // deliberately NOT merged into the write-back yet. The write-back re-expands the
-            // per-filament filament_* arrays from these maps, and those arrays are already
-            // consumed by filament id, so materializing a High Flow assignment here would alter
-            // motion g-code before the layer-aware g-code resolvers consume the assignment.
-            // Until those consumers land, the config keeps its own (GUI-injected or project)
-            // volume map, size-corrected above.
             m_print->update_filament_maps_to_config(FilamentGroupUtils::update_used_filament_values(base_filament_map, derived_maps, used_filaments),
-                                                    base_volume_map,
+                                                    FilamentGroupUtils::update_used_filament_values(base_volume_map, grouping_result.get_volume_map(), used_filaments),
                                                     grouping_result.get_nozzle_map());
         }
         std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) { return value - 1; });

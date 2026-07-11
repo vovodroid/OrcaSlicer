@@ -231,12 +231,12 @@ void BackgroundSlicingProcess::process_fff()
         if (m_current_plate->get_real_filament_map_mode(preset_bundle.project_config) < FilamentMapMode::fmmManual) {
             std::vector<int> f_maps = m_fff_print->get_filament_maps();
             m_current_plate->set_filament_maps(f_maps);
-            // Orca: the volume map is not read back to the plate yet. The engine's concrete
-            // volume assignment is not written into the print config until the layer-aware
-            // g-code resolvers consume it (see the ToolOrdering write-back), so the print-side
-            // value here is just the injected plate-or-default map echoed back; persisting it
-            // would freeze the per-extruder defaults (including the transient Hybrid seed) into
-            // the plate and the saved project. Restore together with the write-back merge.
+            // The engine's concrete per-filament volume assignment is merged into the print
+            // config by the ToolOrdering write-back; reading it back keeps the plate config the
+            // next apply overlays equal to the written-back state (no diff, no re-invalidation)
+            // and persists the auto result (always concrete Std/HF, never the Hybrid seed).
+            std::vector<int> f_volume_maps = m_fff_print->get_filament_volume_maps();
+            m_current_plate->set_filament_volume_maps(f_volume_maps);
 		}
         if (m_current_plate->get_real_filament_map_mode(preset_bundle.project_config) != FilamentMapMode::fmmNozzleManual) {
             // The engine-resolved nozzle map is read back for every non-nozzle-manual mode so the
