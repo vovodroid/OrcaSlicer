@@ -26,7 +26,7 @@ bool has_attr(const py::handle& object, const char* name)
 
 } // namespace
 
-TEST_CASE("Plugin host API exposes host-owned bundle and preset surface to Python", "[PluginHostApi][Python]")
+TEST_CASE("Plugin host API exposes host-owned bundle and preset surface to Python", "[PluginHost][Python]")
 {
     py::module_ orca = import_orca_module();
     REQUIRE(has_attr(orca, "host"));
@@ -111,7 +111,7 @@ TEST_CASE("Plugin host API exposes host-owned bundle and preset surface to Pytho
     CHECK(printers.attr("find_preset")(printer_preset.name).attr("name").cast<std::string>() == printer_preset.name);
 }
 
-TEST_CASE("Plugin host API reports unavailable GUI objects before Orca app initialization", "[PluginHostApi][Python]")
+TEST_CASE("Plugin host API reports unavailable GUI objects before Orca app initialization", "[PluginHost][Python]")
 {
     py::object host = import_orca_module().attr("host");
 
@@ -127,7 +127,7 @@ TEST_CASE("Plugin host API reports unavailable GUI objects before Orca app initi
     }
 }
 
-TEST_CASE("Plugin host API exposes the UI module and guards it before Orca app initialization", "[PluginHostApi][Python]")
+TEST_CASE("Plugin host API exposes the UI module and guards it before Orca app initialization", "[PluginHost][Python]")
 {
     py::object host = import_orca_module().attr("host");
     REQUIRE(has_attr(host, "ui"));
@@ -149,7 +149,7 @@ TEST_CASE("Plugin host API exposes the UI module and guards it before Orca app i
     }
 }
 
-TEST_CASE("Plugin host API exposes model geometry and structure to Python", "[PluginHostApi][Python]")
+TEST_CASE("Plugin host API exposes model geometry and structure to Python", "[PluginHost][Python]")
 {
     using Catch::Matchers::WithinAbs;
     using Catch::Matchers::WithinRel;
@@ -228,7 +228,7 @@ TEST_CASE("Plugin host API exposes model geometry and structure to Python", "[Pl
     CHECK(py_modifier.attr("type")().cast<Slic3r::ModelVolumeType>() == Slic3r::ModelVolumeType::PARAMETER_MODIFIER);
 }
 
-TEST_CASE("Plugin host API exposes TriangleMesh geometry to Python", "[PluginHostApi][Python]")
+TEST_CASE("Plugin host API exposes TriangleMesh geometry to Python", "[PluginHost][Python]")
 {
     using Catch::Matchers::WithinAbs;
     using Catch::Matchers::WithinRel;

@@ -79,7 +79,7 @@
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Color.hpp"
 #include "slic3r/plugin/PluginManager.hpp"
-#include "slic3r/plugin/PluginHostUi.hpp"
+#include "slic3r/plugin/host/PluginHostUi.hpp"
 #include "slic3r/plugin/PythonInterpreter.hpp"
 #include "slic3r/plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.hpp"
 

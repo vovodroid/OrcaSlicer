@@ -12,7 +12,7 @@ namespace Slic3r {
 // pipeline mutates. The data-model bindings and the mandatory lifetime rule
 // (valid only during execute(ctx); mutators invalidate references into replaced
 // containers, like std::vector iterators) live in
-// src/slic3r/plugin/PluginHostSlicing.cpp.
+// src/slic3r/plugin/host/PluginHostSlicing.cpp.
 struct SlicingPipelineContext {
     std::string          orca_version;
     SlicingPipelineStepPlugin  step { SlicingPipelineStepPlugin::posSlice };

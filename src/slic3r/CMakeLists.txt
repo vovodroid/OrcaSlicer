@@ -597,12 +597,18 @@ set(SLIC3R_GUI_SOURCES
     plugin/PythonPluginInterface.hpp
     plugin/PyPluginPackage.hpp
     plugin/PluginBindingUtils.hpp
-    plugin/PluginHostApi.cpp
-    plugin/PluginHostApi.hpp
-    plugin/PluginHostUi.cpp
-    plugin/PluginHostUi.hpp
-    plugin/PluginHostSlicing.cpp
-    plugin/PluginHostSlicing.hpp
+    plugin/host/PluginHost.cpp
+    plugin/host/PluginHost.hpp
+    plugin/host/PluginHostBindings.hpp
+    plugin/host/PluginHostApp.cpp
+    plugin/host/PluginHostGeometry.cpp
+    plugin/host/PluginHostMesh.cpp
+    plugin/host/PluginHostMesh.hpp
+    plugin/host/PluginHostModel.cpp
+    plugin/host/PluginHostPresets.cpp
+    plugin/host/PluginHostSlicing.cpp
+    plugin/host/PluginHostUi.cpp
+    plugin/host/PluginHostUi.hpp
     plugin/CloudPluginService.cpp
     plugin/CloudPluginService.hpp
     plugin/PluginFsUtils.cpp

@@ -10,7 +10,7 @@
 #include <pybind11/stl.h>
 
 #include "PythonInterpreter.hpp"
-#include "PluginHostApi.hpp"
+#include "host/PluginHost.hpp"
 #include "PyPluginPackage.hpp"
 #include "PyPluginTrampoline.hpp"
 #include "pluginTypes/printerAgent/PrinterAgentPluginCapability.hpp"
@@ -337,7 +337,7 @@ void bind_python_api(pybind11::module_& m)
     PrinterAgentPluginCapability::RegisterBindings(m, pluginTypes);
     ScriptPluginCapability::RegisterBindings(m, pluginTypes);
     SlicingPipelinePluginCapability::RegisterBindings(m, pluginTypes);
-    PluginHostApi::RegisterBindings(m);
+    PluginHost::RegisterBindings(m);
     BOOST_LOG_TRIVIAL(debug) << "Registered ScriptPluginCapability Python bindings";
 
     m.def(
