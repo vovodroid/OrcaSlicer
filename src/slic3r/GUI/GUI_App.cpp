@@ -81,7 +81,6 @@
 #include "slic3r/plugin/PluginManager.hpp"
 #include "slic3r/plugin/host/PluginHostUi.hpp"
 #include "slic3r/plugin/PythonInterpreter.hpp"
-#include "slic3r/plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.hpp"
 
 #include "GUI.hpp"
 #include "GUI_Utils.hpp"
@@ -2701,6 +2700,54 @@ std::string get_system_info()
     return out.str();
 }
 
+// wx/app-level plugin wiring, kept in one place: subscriptions to plugin
+// loader events that drive GUI policy (plugins dialog refresh, network-agent
+// registration, plate revalidation). The libslic3r dispatch hooks are NOT
+// wired here -- PluginManager::initialize() installs those via
+// plugin_hooks::install().
+void GUI_App::init_plugin_gui_wiring()
+{
+    PluginManager& plugin_mgr = PluginManager::instance();
+
+    auto refresh_plugins_dialog = [] {
+        if (!wxTheApp)
+            return;
+
+        GUI_App* app = &GUI::wxGetApp();
+        if (app->is_closing())
+            return;
+
+        app->CallAfter([app] {
+            if (!app->is_closing() && app->m_plugins_dlg)
+                app->m_plugins_dlg->update_plugin_dialog_ui();
+        });
+    };
+
+    plugin_mgr.get_loader().subscribe_on_load_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
+    plugin_mgr.get_loader().subscribe_on_unload_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
+    plugin_mgr.get_loader().subscribe_on_load_callback(NetworkAgentFactory::register_python_plugin);
+    plugin_mgr.get_loader().subscribe_on_unload_callback(NetworkAgentFactory::deregister_python_plugin);
+    plugin_mgr.get_loader().subscribe_on_capability_load_callback(
+        [refresh_plugins_dialog](const PluginCapabilityIdentifier& capability) {
+            if (capability.type == PluginCapabilityType::PrinterConnection)
+                NetworkAgentFactory::register_python_printer_agent(capability.plugin_key, capability.name);
+            refresh_plugins_dialog();
+            // A newly loaded capability may satisfy a missing-plugin notification; re-validate the
+            // current plate (on the UI thread) so the notification clears once its plugin is available.
+            if (wxTheApp && !wxGetApp().is_closing())
+                wxGetApp().CallAfter([]() {
+                    if (Plater* plater = wxGetApp().plater())
+                        plater->revalidate_current_plate_if_plugins_missing();
+                });
+        });
+    plugin_mgr.get_loader().subscribe_on_capability_unload_callback(
+        [refresh_plugins_dialog](const PluginCapabilityIdentifier& capability) {
+            if (capability.type == PluginCapabilityType::PrinterConnection)
+                NetworkAgentFactory::deregister_python_printer_agent(capability.plugin_key, capability.name);
+            refresh_plugins_dialog();
+        });
+}
+
 bool GUI_App::on_init_inner()
 {
     wxLog::SetActiveTarget(new wxBoostLog());
@@ -3104,93 +3151,11 @@ bool GUI_App::on_init_inner()
     on_init_network();
 
     // Initialize plugins after network then register on_load callbacks so once the plugin loads finish, it gets registered automatically.
+    // initialize() also installs the libslic3r hooks (capability resolver,
+    // slicing-pipeline dispatcher) via plugin_hooks::install() -- no
+    // per-capability wiring belongs here.
     PluginManager& plugin_mgr = PluginManager::instance();
     plugin_mgr.initialize();
-
-    ConfigBase::set_resolve_capability_fn([&plugin_mgr](const std::string& cap_name, const std::string& cap_type) {
-        auto plugin_cap = plugin_mgr.get_loader().try_get_plugin_capability_by_name_and_type(cap_name, plugin_capability_type_from_string(cap_type));
-        if (!plugin_cap)
-            return std::string();
-
-        PluginDescriptor descriptor;
-        if (!plugin_mgr.get_catalog().try_get_plugin_descriptor(plugin_cap->plugin_key, descriptor))
-            return std::string();
-
-        // Cloud plugins are resolved at runtime via the UUID in the middle field, so the first
-        // field keeps the friendly display name. Local plugins are looked up by plugin_key (the
-        // first field, with an empty UUID), so emit the plugin_key to keep them resolvable.
-        const std::string identity = descriptor.is_cloud_plugin() ? descriptor.name : descriptor.plugin_key;
-        return identity + ';' + descriptor.cloud_uuid() + ';' + cap_name;
-    });
-
-    // Orca: register the slicing-pipeline plugin dispatcher (mirrors set_resolve_capability_fn: the
-    // GUI/plugin layer supplies the Python bridge so libslic3r stays free of any plugin dependency).
-    // Print::process() fires this hook at each pipeline seam on the slicing worker thread; here we run
-    // the picker-selected SlicingPipeline capabilities. Per capability we acquire the GIL, honor
-    // cancellation, and convert a plugin failure into a (non-critical) SlicingError so it surfaces as a
-    // slicing-error notification rather than the fatal-crash dialog.
-    Slic3r::Print::set_slicing_pipeline_hook_fn(
-        [](Slic3r::Print& print, const Slic3r::PrintObject* object, Slic3r::SlicingPipelineStepPlugin step) {
-            const auto* caps  = print.config().option<ConfigOptionStrings>("slicing_pipeline_plugin");
-            // `plugins` is a dynamic-only manifest key (not a static PrintConfig member), so it
-            // must be read from the full/dynamic config -- reading it off print.config() (the
-            // static PrintConfig) always yields nullptr and skips every capability. Mirrors the
-            // post-process path (PostProcessor.cpp, via BackgroundSlicingProcess::full_print_config()).
-            const auto* plugs = print.full_print_config().option<ConfigOptionStrings>("plugins");
-            if (caps == nullptr || caps->values.empty())
-                return;
-
-            Slic3r::execute_capabilities_from_refs<Slic3r::SlicingPipelinePluginCapability>(
-                *caps, plugs, Slic3r::PluginCapabilityType::SlicingPipeline,
-                [&](std::shared_ptr<Slic3r::SlicingPipelinePluginCapability> cap, const Slic3r::PluginCapabilityRef& ref) {
-                    Slic3r::ExecutionResult r;
-                    try {
-                        // GIL is acquired per capability (not once for the whole dispatch) so it
-                        // is released between capabilities.
-                        PythonGILState gil;
-                        // throw_if_canceled() is protected on PrintBase; canceled() is the public
-                        // equivalent check (same cancel flag), so honor cancellation via it.
-                        if (print.canceled())
-                            throw Slic3r::CanceledException();
-                        Slic3r::SlicingPipelineContext ctx;
-                        ctx.orca_version = SoftFever_VERSION;
-                        ctx.step   = step;
-                        ctx.print  = &print;
-                        ctx.object = object;
-                        // hand the plugin its own [tool.orcaslicer.plugin.settings] as ctx.params
-                        // (same plugin_key the capability was resolved by, so it always matches).
-                        const std::string plugin_key = ref.uuid.empty() ? ref.name : ref.uuid;
-                        ctx.params = Slic3r::PluginManager::instance().get_loader().get_plugin_settings(plugin_key);
-                        r = cap->execute(ctx);
-                    } catch (const Slic3r::CanceledException&) {
-                        throw; // cancellation must reach process(), never become a slicing error
-                    } catch (const std::exception& ex) {
-                        // A Python raise reaches here as pybind11::error_already_set; surface it as a
-                        // (non-critical) slicing error instead of a crash.
-                        throw Slic3r::SlicingError(std::string("Slicing pipeline plugin '") +
-                                                   ref.capability_name + "' error: " + ex.what());
-                    }
-                    if (r.status == Slic3r::PluginResult::FatalError)
-                        throw Slic3r::SlicingError(std::string("Slicing pipeline plugin '") +
-                                                   ref.capability_name + "' error: " + r.message);
-                    // log a non-empty success/skipped message instead of dropping it. This is
-                    // log-only by design: every pipeline hook fires AFTER set_done() (see Print.cpp),
-                    // so the Print-level m_step_active is -1 here. Calling active_step_add_warning()
-                    // would then index m_state[-1] (out-of-bounds; the guarding assert is compiled
-                    // out in Release), so it must NOT be called from a pipeline hook.
-                    if (!r.message.empty()) {
-                        static const char* const kStepNames[] = {
-                            "posSlice", "posPerimeters", "posEstimateCurledExtrusions", "posPrepareInfill", "posInfill",
-                            "posIroning", "posContouring", "posSupportMaterial", "posDetectOverhangsForLift",
-                            "posSimplifyPath", "psWipeTower", "psSkirtBrim", "psGCodePostProcess"
-                        }; // order must match Slic3r::SlicingPipelineStepPlugin
-                        const char* step_name = static_cast<size_t>(step) < sizeof(kStepNames) / sizeof(kStepNames[0])
-                                                    ? kStepNames[static_cast<int>(step)] : "Unknown";
-                        BOOST_LOG_TRIVIAL(info) << "Slicing pipeline plugin '" << ref.capability_name
-                                                << "' [" << step_name << "]: " << r.message;
-                    }
-                });
-        });
 
     // Set cloud plugin directory from previous session so cloud-installed
     // plugins are discovered even before the network agent is ready.
@@ -3202,43 +3167,7 @@ bool GUI_App::on_init_inner()
 
     plugin_mgr.discover_plugins(false, true);
 
-    auto refresh_plugins_dialog = [] {
-        if (!wxTheApp)
-            return;
-
-        GUI_App* app = &GUI::wxGetApp();
-        if (app->is_closing())
-            return;
-
-        app->CallAfter([app] {
-            if (!app->is_closing() && app->m_plugins_dlg)
-                app->m_plugins_dlg->update_plugin_dialog_ui();
-        });
-    };
-
-    plugin_mgr.get_loader().subscribe_on_load_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
-    plugin_mgr.get_loader().subscribe_on_unload_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
-    plugin_mgr.get_loader().subscribe_on_load_callback(NetworkAgentFactory::register_python_plugin);
-    plugin_mgr.get_loader().subscribe_on_unload_callback(NetworkAgentFactory::deregister_python_plugin);
-    plugin_mgr.get_loader().subscribe_on_capability_load_callback(
-        [refresh_plugins_dialog](const PluginCapabilityIdentifier& capability) {
-            if (capability.type == PluginCapabilityType::PrinterConnection)
-                NetworkAgentFactory::register_python_printer_agent(capability.plugin_key, capability.name);
-            refresh_plugins_dialog();
-            // A newly loaded capability may satisfy a missing-plugin notification; re-validate the
-            // current plate (on the UI thread) so the notification clears once its plugin is available.
-            if (wxTheApp && !wxGetApp().is_closing())
-                wxGetApp().CallAfter([]() {
-                    if (Plater* plater = wxGetApp().plater())
-                        plater->revalidate_current_plate_if_plugins_missing();
-                });
-        });
-    plugin_mgr.get_loader().subscribe_on_capability_unload_callback(
-        [refresh_plugins_dialog](const PluginCapabilityIdentifier& capability) {
-            if (capability.type == PluginCapabilityType::PrinterConnection)
-                NetworkAgentFactory::deregister_python_printer_agent(capability.plugin_key, capability.name);
-            refresh_plugins_dialog();
-        });
+    init_plugin_gui_wiring();
 
     for (const std::string& plugin_key : plugin_mgr.get_catalog().get_enabled_plugin_keys()) {
         if (!plugin_mgr.get_loader().is_plugin_loaded(plugin_key)) {
