@@ -484,7 +484,10 @@ public:
         sizer->Add(m_brace_right, 0, wxALIGN_CENTER_VERTICAL);
         sizer->Add(m_hover_btn, 0, wxLEFT | wxALIGN_CENTER_VERTICAL, FromDIP(5));
 
-        SetSizerAndFit(sizer);
+        // No SetSizerAndFit: that would record the count-hidden width as an explicit min size,
+        // which outranks best size in sizer allocation, so once the count is shown any ancestor
+        // Layout() would shrink the row back and clip the trailing edit button.
+        SetSizer(sizer);
         Layout();
     }
 
@@ -508,20 +511,29 @@ public:
             m_brace_left->Show();
             m_brace_right->Show();
         }
-        Layout();
-        Fit();
+        UpdateSizing();
     }
 
     void SetTitle(const wxString &title)
     {
         m_label->SetLabel(title);
-        Layout();
-        Fit();
+        UpdateSizing();
     }
 
     void Rescale() { m_hover_btn->msw_rescale(); }
 
 private:
+    // Content changed: the cached best size (ours and, transitively, our ancestors') is stale,
+    // and the parent must re-lay this row or the sizer keeps allocating the old width.
+    void UpdateSizing()
+    {
+        InvalidateBestSize();
+        Layout();
+        Fit();
+        if (GetParent())
+            GetParent()->Layout();
+    }
+
     wxStaticText   *m_label;
     wxStaticText   *m_brace_left;
     wxStaticText   *m_count;
