@@ -8473,8 +8473,8 @@ std::string GCode::retract(bool toolchange, bool is_last_retraction, LiftType li
 
 void GCode::update_layer_related_config(int layer_id){
     auto group_result = m_print->get_layered_nozzle_group_result();
-    // Orca: sequential (by-object) prints never publish a Print-level layered group result on
-    // this branch; the statically applied config maps stay authoritative there.
+    // Orca: defensive — with no published group result the statically applied config maps stay
+    // authoritative.
     if(!group_result)
         return;
 

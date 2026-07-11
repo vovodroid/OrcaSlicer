@@ -2116,7 +2116,8 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
     {
         // Orca: the ToolOrdering member is stored unconditionally, but the Print-level store is gated
         // behind a not-sequential check. There is no is_sequential_print() here, so it is mirrored
-        // with the same predicate the branch above uses.
+        // with the same predicate the branch above uses. Sequential prints publish their result
+        // from the by-object branch in Print::process instead.
         const bool not_sequential = print_config->print_sequence != PrintSequence::ByObject ||
                                     (m_print && m_print->objects().size() == 1);
         if (m_print != nullptr && not_sequential)

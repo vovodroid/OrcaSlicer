@@ -2511,15 +2511,19 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             auto filament_unprintable_volumes = this->get_filament_unprintable_flow(used_filaments);
             std::vector<int>filament_maps = this->get_filament_maps();
             auto map_mode = get_filament_map_mode();
-            // get recommended filament map
+            // Grouping returns a nozzle-aware result; the 1-based extruder map for the by-object
+            // path is derived from it. It is computed in every static map mode (in manual modes it
+            // mirrors the user's assignment) and published print-wide: GCode's per-nozzle
+            // placeholder and config-index lookups read it via get_layered_nozzle_group_result(),
+            // and without it sequential exports on multi-nozzle printers see an empty nozzle table
+            // (e.g. nozzle_diameter_at_nozzle_id[]) and custom g-code fails to resolve.
+            auto grouping_result = ToolOrdering::get_recommended_filament_maps(all_filaments, this, map_mode, physical_unprintables, geometric_unprintables, filament_unprintable_volumes);
+            this->set_nozzle_group_result(std::make_shared<MultiNozzleUtils::LayeredNozzleGroupResult>(grouping_result));
             // Orca: the sequential write-back stays gated to auto modes. In manual modes the
             // config maps already carry the user's assignment (the per-object ToolOrdering below
             // consumes them directly), so a write-back would only re-store the pre-slice values;
             // keeping the gate avoids churning the config on every sequential manual slice.
             if (map_mode < FilamentMapMode::fmmManual) {
-                // Grouping returns a nozzle-aware result; the 1-based extruder map
-                // for the by-object path is derived from it.
-                auto grouping_result = ToolOrdering::get_recommended_filament_maps(all_filaments, this, map_mode, physical_unprintables, geometric_unprintables, filament_unprintable_volumes);
                 auto derived_maps = grouping_result.get_extruder_map(false);
                 if (!derived_maps.empty()) {
                     filament_maps = derived_maps;
@@ -3532,8 +3536,8 @@ int Print::get_nozzle_config_index(int filament_id, int layer_id)
 int Print::get_config_index(int filament_id, int layer_id, const std::vector<std::string> &variant_list, const std::vector<int>& self_index_list, FilamentIndexMap &index_map)
 {
     auto group_result = get_layered_nozzle_group_result();
-    // Orca: sequential (by-object) prints never publish a Print-level layered group result on this
-    // branch, so fall back to the static identity: one filament-variant column per filament.
+    // Orca: defensive — when no grouping producer has published a result yet, fall back to the
+    // static identity: one filament-variant column per filament.
     if (!group_result)
         return filament_id;
     auto nozzle_info  = group_result->get_nozzle_for_filament(filament_id, layer_id);
