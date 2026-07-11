@@ -52,6 +52,54 @@ std::vector<NozzleInfo> build_nozzle_list(double diameter, const std::vector<int
     return ret;
 }
 
+void normalize_nozzle_map_per_layer(std::vector<std::vector<int>>                &layer_filament_nozzle_maps,
+                                    const std::vector<std::vector<unsigned int>> &layer_filaments)
+{
+    if (layer_filament_nozzle_maps.empty())
+        return;
+
+    const int total_layers = static_cast<int>(layer_filament_nozzle_maps.size());
+    int filament_count = 0;
+    for (const auto &layer_map : layer_filament_nozzle_maps)
+        filament_count = std::max(filament_count, static_cast<int>(layer_map.size()));
+
+    auto layer_uses_filament = [](const std::vector<unsigned int> &filaments, int filament_id) {
+        return std::find(filaments.begin(), filaments.end(), static_cast<unsigned int>(filament_id)) != filaments.end();
+    };
+
+    std::vector<int>             last_used_nozzle(filament_count, -1);
+    std::unordered_map<int, int> first_used_nozzle;
+    std::unordered_map<int, int> first_used_layer;
+
+    // Forward pass: layers that extrude a filament define its nozzle; layers that don't inherit
+    // the nozzle it last used (carry-forward), remembering the first-ever nozzle for the back-fill.
+    for (int layer_id = 0; layer_id < total_layers; ++layer_id) {
+        auto &layer_map = layer_filament_nozzle_maps[layer_id];
+        const auto &used = layer_id < static_cast<int>(layer_filaments.size()) ? layer_filaments[layer_id] : std::vector<unsigned int>();
+
+        for (int filament_id = 0; filament_id < static_cast<int>(layer_map.size()); ++filament_id) {
+            if (layer_uses_filament(used, filament_id)) {
+                last_used_nozzle[filament_id] = layer_map[filament_id];
+                if (first_used_nozzle.count(filament_id) == 0) {
+                    first_used_nozzle[filament_id] = layer_map[filament_id];
+                    first_used_layer[filament_id]  = layer_id;
+                }
+            } else if (last_used_nozzle[filament_id] >= 0) {
+                layer_map[filament_id] = last_used_nozzle[filament_id];
+            }
+        }
+    }
+
+    // Back-fill pass: layers before a filament's first use inherit the first nozzle it ever uses.
+    for (int layer_id = 0; layer_id < total_layers; ++layer_id) {
+        auto &layer_map = layer_filament_nozzle_maps[layer_id];
+        for (int filament_id = 0; filament_id < static_cast<int>(layer_map.size()); ++filament_id) {
+            if (first_used_layer.count(filament_id) != 0 && layer_id < first_used_layer[filament_id])
+                layer_map[filament_id] = first_used_nozzle[filament_id];
+        }
+    }
+}
+
 // ==================== LayeredNozzleGroupResult ====================
 static bool has_filament_mapped_to_multiple_nozzles(const std::vector<std::vector<int>> &layer_filament_nozzle_maps,
                                                     const std::vector<unsigned int>     &used_filaments)

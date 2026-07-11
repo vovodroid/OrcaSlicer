@@ -269,6 +269,14 @@ FilamentChangeSimResult simulate_filament_change_time(
     bool                              calc_sliced_time = false);
 
 // ==================== tool functions ====================
+// Make each filament's per-layer nozzle assignment gap-free: layers where a filament is not
+// extruded inherit the nozzle it last used (forward carry); layers before its first use inherit
+// the first nozzle it ever uses (back-fill). Entries on layers where the filament is actually
+// used stay untouched. Needed for stitched sequential maps, where consumers indexing with an
+// object-local layer id must resolve the same nozzle as global-id consumers except across a
+// genuine mid-print reassignment.
+void normalize_nozzle_map_per_layer(std::vector<std::vector<int>>&                layer_filament_nozzle_maps,
+                                    const std::vector<std::vector<unsigned int>>& layer_filaments);
 std::vector<NozzleInfo> build_nozzle_list(std::vector<NozzleGroupInfo> info);
 std::vector<NozzleInfo> build_nozzle_list(double diameter, const std::vector<int>& filament_nozzle_map,
                                           const std::vector<int>& filament_volume_map, const std::vector<int>& filament_map);

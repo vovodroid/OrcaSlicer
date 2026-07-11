@@ -1028,12 +1028,19 @@ public:
     std::shared_ptr<MultiNozzleUtils::NozzleGroupResultBase> get_nozzle_group_result() const { return m_nozzle_group_result; }
     std::shared_ptr<MultiNozzleUtils::LayeredNozzleGroupResult> get_layered_nozzle_group_result() const;
 
-    // True only when the printer opts into the per-layer filament selector
+    // True only when the project opts into the per-layer filament selector
     // (enable_filament_dynamic_map) in auto-for-flush mode on a multi-extruder machine. Gates the
-    // dynamic (per-layer) regroup branch in ToolOrdering::reorder_extruders_for_minimum_flush_volume.
-    // Closed for every current profile, so the static grouping path (byte-identical output) is the
-    // only one taken by the shipping fleet.
+    // dynamic (per-layer) regroup branch in ToolOrdering::reorder_extruders_for_minimum_flush_volume,
+    // the sequential (by-object) plan stitching in Print::process, and GCode's use of the cached
+    // sequential plans. No profile sets the flag, so the static grouping path (byte-identical
+    // output) is the only one taken unless the user enables the selector.
     bool is_dynamic_group_reorder() const;
+
+    // Per-object tool orderings planned by the sequential (by-object) selector regroup with
+    // cross-object nozzle-status threading. GCode export must consume these exact plans: a fresh
+    // per-object construction would re-plan from a different seed and diverge from the published
+    // stitched result. Empty on the static path.
+    const std::map<const PrintObject*, ToolOrdering>& sequential_dynamic_orderings() const { return m_sequential_dynamic_orderings; }
 
     const std::vector<std::vector<DynamicPrintConfig>>& get_extruder_filament_info() const { return m_extruder_filament_info; }
     void set_extruder_filament_info(const std::vector<std::vector<DynamicPrintConfig>>& filament_info) { m_extruder_filament_info = filament_info; }
@@ -1270,6 +1277,10 @@ private:
 
     // Logical (extruder, nozzle) grouping result, set by ToolOrdering during reorder.
     std::shared_ptr<MultiNozzleUtils::NozzleGroupResultBase> m_nozzle_group_result;
+
+    // Sequential (by-object) selector plans, keyed by object; see sequential_dynamic_orderings().
+    // Rebuilt (or cleared) on every process().
+    std::map<const PrintObject*, ToolOrdering> m_sequential_dynamic_orderings;
 
     // Used to cache filament parameter information
     FilamentIndexMap m_filament_index_map;

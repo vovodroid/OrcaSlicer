@@ -2954,6 +2954,12 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     first_non_support_filaments.resize(print.config().nozzle_diameter.size(), -1);
     first_filaments.resize(print.config().nozzle_diameter.size(), -1);
     float max_additional_fan = 0.f;
+    // Sequential selector prints consume the per-object plans cached by Print::process — they were
+    // planned with cross-object nozzle-status threading and match the published stitched result; a
+    // fresh construction here would re-plan from a different seed. Static sequential prints keep
+    // the fresh per-object construction (byte-identical output).
+    const auto &seq_dynamic_orderings   = print.sequential_dynamic_orderings();
+    const bool  use_seq_dynamic_cache   = print.is_dynamic_group_reorder() && !seq_dynamic_orderings.empty();
     if (print.config().print_sequence == PrintSequence::ByObject) {
         // Order object instances for sequential print.
         print_object_instances_ordering = sort_object_instances_by_model_order(print);
@@ -2963,9 +2969,13 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
         first_has_extrude_print_object          = print_object_instance_sequential_active;
         bool find_fist_non_support_filament = false;
         for (; print_object_instance_sequential_active != print_object_instances_ordering.end(); ++ print_object_instance_sequential_active) {
-            tool_ordering = ToolOrdering(*(*print_object_instance_sequential_active)->print_object, initial_extruder_id);
-
-            tool_ordering.sort_and_build_data(*(*print_object_instance_sequential_active)->print_object,initial_extruder_id);
+            auto cached_ordering = use_seq_dynamic_cache ? seq_dynamic_orderings.find((*print_object_instance_sequential_active)->print_object) : seq_dynamic_orderings.end();
+            if (cached_ordering != seq_dynamic_orderings.end()) {
+                tool_ordering = cached_ordering->second;
+            } else {
+                tool_ordering = ToolOrdering(*(*print_object_instance_sequential_active)->print_object, initial_extruder_id);
+                tool_ordering.sort_and_build_data(*(*print_object_instance_sequential_active)->print_object,initial_extruder_id);
+            }
             float temp_max_additional_fan = tool_ordering.cal_max_additional_fan(print.config());
             if(temp_max_additional_fan > max_additional_fan )
                         max_additional_fan = temp_max_additional_fan;
@@ -3568,8 +3578,15 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
             for (; print_object_instance_sequential_active != print_object_instances_ordering.end(); ++ print_object_instance_sequential_active) {
                 const PrintObject &object = *(*print_object_instance_sequential_active)->print_object;
                 if (&object != prev_object || tool_ordering.first_extruder() != final_extruder_id) {
-                    tool_ordering = ToolOrdering(object, final_extruder_id);
-                    tool_ordering.sort_and_build_data(object, final_extruder_id);
+                    auto cached_ordering = use_seq_dynamic_cache ? seq_dynamic_orderings.find(&object) : seq_dynamic_orderings.end();
+                    if (cached_ordering != seq_dynamic_orderings.end()) {
+                        // Never re-plan a selector object mid-export: the cached plan is what the
+                        // published stitched result was built from.
+                        tool_ordering = cached_ordering->second;
+                    } else {
+                        tool_ordering = ToolOrdering(object, final_extruder_id);
+                        tool_ordering.sort_and_build_data(object, final_extruder_id);
+                    }
                     unsigned int new_extruder_id = tool_ordering.first_extruder();
                     if (new_extruder_id == (unsigned int)-1)
                         // Skip this object.

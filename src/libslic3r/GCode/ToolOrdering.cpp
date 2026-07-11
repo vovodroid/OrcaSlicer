@@ -1914,6 +1914,24 @@ static std::vector<FilamentPlanRes> plan_filament_mapping_and_order_by_combo_ran
     return results;
 }
 
+MultiNozzleUtils::LayeredNozzleGroupResult ToolOrdering::build_sequential_group_result(
+    Print*                                            print,
+    std::vector<std::vector<int>>                     nozzle_map_per_layer,
+    const std::vector<std::vector<unsigned int>>&     layer_filaments,
+    const std::vector<std::vector<unsigned int>>&     layer_sequences,
+    const std::vector<unsigned int>&                  used_filaments,
+    const std::vector<std::set<int>>&                 physical_unprintables,
+    const std::vector<std::set<int>>&                 geometric_unprintables,
+    const std::map<int, std::set<NozzleVolumeType>>&  unprintable_volumes)
+{
+    MultiNozzleUtils::normalize_nozzle_map_per_layer(nozzle_map_per_layer, layer_filaments);
+    auto context = build_filament_group_context(print, layer_filaments, physical_unprintables, geometric_unprintables,
+                                                unprintable_volumes, FilamentMapMode::fmmAutoForFlush, {});
+    auto result = MultiNozzleUtils::LayeredNozzleGroupResult::create(nozzle_map_per_layer, context.nozzle_info.nozzle_list,
+                                                                     used_filaments, layer_sequences);
+    return result ? *result : MultiNozzleUtils::LayeredNozzleGroupResult();
+}
+
 void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first_layer)
 {
     const PrintConfig* print_config = m_print_config_ptr;
@@ -2031,6 +2049,12 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
     // whole shipping fleet AND H2C static mode — the static branch below is the only one they take, so
     // their g-code is byte-identical. Only an H2C profile that enables the selector opens this branch.
     const bool dynamic_reorder = m_print && m_print->is_dynamic_group_reorder();
+    // Orca: there is no is_sequential_print() helper, so the not-sequential check is mirrored with
+    // the same predicate the static by-object gate below uses. Sequential prints (with more than
+    // one object) publish and write back from the by-object branch in Print::process instead of
+    // from each per-object ordering.
+    const bool not_sequential = print_config->print_sequence != PrintSequence::ByObject ||
+                                (m_print && m_print->objects().size() == 1);
 
     if (dynamic_reorder) {
         // Build the grouping context, plan per-combo-range nozzle maps + filament orders, then wrap the
@@ -2063,7 +2087,10 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
         std::vector<int> derived_maps = grouping_result.get_extruder_map(false); // 1-based
         if (!derived_maps.empty()) {
             filament_maps = derived_maps;
-            m_print->update_filament_maps_to_config(filament_maps);
+            // A sequential per-object plan must not write its own map: the objects' plans are
+            // stitched print-wide afterwards and written back once from there.
+            if (not_sequential)
+                m_print->update_filament_maps_to_config(filament_maps);
         }
         std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) { return value - 1; });
     }
@@ -2113,16 +2140,10 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
     // placeholders are unchanged; H2C/A2L resolve to a nozzle-granular result (dynamic mode
     // resolves per-layer). GCode consumes this via Print::get_layered_nozzle_group_result().
     m_nozzle_group_result = grouping_result;
-    {
-        // Orca: the ToolOrdering member is stored unconditionally, but the Print-level store is gated
-        // behind a not-sequential check. There is no is_sequential_print() here, so it is mirrored
-        // with the same predicate the branch above uses. Sequential prints publish their result
-        // from the by-object branch in Print::process instead.
-        const bool not_sequential = print_config->print_sequence != PrintSequence::ByObject ||
-                                    (m_print && m_print->objects().size() == 1);
-        if (m_print != nullptr && not_sequential)
-            m_print->set_nozzle_group_result(std::make_shared<MultiNozzleUtils::LayeredNozzleGroupResult>(m_nozzle_group_result));
-    }
+    // Orca: the ToolOrdering member is stored unconditionally, but the Print-level store is gated
+    // behind the not-sequential check hoisted above.
+    if (m_print != nullptr && not_sequential)
+        m_print->set_nozzle_group_result(std::make_shared<MultiNozzleUtils::LayeredNozzleGroupResult>(m_nozzle_group_result));
 
     auto maps_without_group = filament_maps;
     for (auto& item : maps_without_group)

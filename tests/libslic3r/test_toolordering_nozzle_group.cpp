@@ -13,6 +13,8 @@
 #include <set>
 #include <vector>
 
+#include <boost/filesystem.hpp>
+
 // H2C/A2L multi-nozzle filament grouping core.
 //
 // These tests pin the behaviour of the grouping result type
@@ -495,4 +497,168 @@ TEST_CASE("Re-applying an unchanged config after slicing keeps the result valid"
     auto status = print.apply(model, config);
     REQUIRE(status != PrintBase::APPLY_STATUS_INVALIDATED);
     REQUIRE(print.is_step_done(psSlicingFinished));
+}
+
+TEST_CASE("normalize_nozzle_map_per_layer makes per-filament assignments gap-free", "[MultiNozzle][H2C][Dynamic]")
+{
+    SECTION("gaps inherit the last used nozzle, entries on used layers stay untouched") {
+        // Filament 1 extrudes on layers 0 (nozzle 1) and 3 (nozzle 2); the planner leaves stale
+        // entries on the layers in between.
+        std::vector<std::vector<int>> maps = {
+            {0, 1},
+            {0, -1}, // filament 1 idle
+            {0, -1}, // filament 1 idle
+            {0, 2},
+        };
+        std::vector<std::vector<unsigned int>> filaments = {{0, 1}, {0}, {0}, {0, 1}};
+
+        normalize_nozzle_map_per_layer(maps, filaments);
+
+        REQUIRE(maps[0] == std::vector<int>({0, 1}));
+        REQUIRE(maps[1] == std::vector<int>({0, 1})); // carried forward
+        REQUIRE(maps[2] == std::vector<int>({0, 1})); // carried forward
+        REQUIRE(maps[3] == std::vector<int>({0, 2})); // used layer untouched
+    }
+
+    SECTION("layers before a filament's first use inherit its first nozzle") {
+        std::vector<std::vector<int>> maps = {
+            {0, -1},
+            {0, -1},
+            {0, 3}, // filament 1 first extrudes here
+        };
+        std::vector<std::vector<unsigned int>> filaments = {{0}, {0}, {0, 1}};
+
+        normalize_nozzle_map_per_layer(maps, filaments);
+
+        REQUIRE(maps[0] == std::vector<int>({0, 3})); // back-filled
+        REQUIRE(maps[1] == std::vector<int>({0, 3})); // back-filled
+        REQUIRE(maps[2] == std::vector<int>({0, 3}));
+    }
+
+    SECTION("empty and ragged inputs are safe no-ops") {
+        std::vector<std::vector<int>> empty_maps;
+        std::vector<std::vector<unsigned int>> no_filaments;
+        REQUIRE_NOTHROW(normalize_nozzle_map_per_layer(empty_maps, no_filaments));
+        REQUIRE(empty_maps.empty());
+
+        // Rows of different widths and a filament list shorter than the map list.
+        std::vector<std::vector<int>> ragged = {{0}, {0, 1, 2}};
+        std::vector<std::vector<unsigned int>> short_filaments = {{0}};
+        REQUIRE_NOTHROW(normalize_nozzle_map_per_layer(ragged, short_filaments));
+        REQUIRE(ragged[0] == std::vector<int>({0}));
+    }
+
+    SECTION("a single layer is left unchanged") {
+        std::vector<std::vector<int>> maps = {{2, 1, 0}};
+        std::vector<std::vector<unsigned int>> filaments = {{0, 1, 2}};
+        normalize_nozzle_map_per_layer(maps, filaments);
+        REQUIRE(maps[0] == std::vector<int>({2, 1, 0}));
+    }
+}
+
+TEST_CASE("Stitched sequential blocks resolve per-layer after normalization", "[MultiNozzle][H2C][Dynamic]")
+{
+    // Shape of the sequential (by-object) stitch: two per-object plan blocks concatenated on one
+    // global layer axis, where the second object's plan moves filament 1 to another physical
+    // nozzle. After normalization the 4-arg create() must detect the migration (selector result)
+    // and resolve stable ids inside each object's layer range.
+    std::vector<NozzleInfo> nozzle_list;
+    for (int g = 0; g < 3; ++g) {
+        NozzleInfo n;
+        n.diameter    = "0.4";
+        n.volume_type = nvtStandard;
+        n.extruder_id = (g == 0) ? 0 : 1;
+        n.group_id    = g;
+        nozzle_list.push_back(n);
+    }
+
+    // Object A (layers 0-1): filament 1 on nozzle 1, filament 0 idle until layer 1.
+    // Object B (layers 2-3): filament 1 moved to nozzle 2.
+    std::vector<std::vector<int>> stitched_maps = {
+        {-1, 1},
+        {0, 1},
+        {0, 2},
+        {0, 2},
+    };
+    std::vector<std::vector<unsigned int>> stitched_filaments = {{1}, {0, 1}, {0, 1}, {0, 1}};
+    std::vector<unsigned int>              used_filaments     = {0, 1};
+
+    normalize_nozzle_map_per_layer(stitched_maps, stitched_filaments);
+    REQUIRE(stitched_maps[0] == std::vector<int>({0, 1})); // filament 0 back-filled to its first nozzle
+
+    auto group_opt = LayeredNozzleGroupResult::create(stitched_maps, nozzle_list, used_filaments, stitched_filaments);
+    REQUIRE(group_opt.has_value());
+    auto &group = *group_opt;
+
+    // A filament on two physical nozzles across the objects => selector result.
+    REQUIRE(group.is_support_dynamic_nozzle_map());
+    REQUIRE(group.get_nozzle_id(1, 0) == 1);
+    REQUIRE(group.get_nozzle_id(1, 1) == 1);
+    REQUIRE(group.get_nozzle_id(1, 2) == 2); // second object's range
+    REQUIRE(group.get_nozzle_id(1, 3) == 2);
+    // The default (out-of-range) map is the first layer's normalized row.
+    REQUIRE(group.get_nozzle_id(0, 999) == 0);
+    REQUIRE(group.get_nozzle_id(1, 999) == 1);
+}
+
+TEST_CASE("Sequential selector prints publish a stitched result and cache the plans", "[Print][H2C][Dynamic]")
+{
+    // By-object + smart filament assign: the by-object branch of Print::process must plan each
+    // object with nozzle-status threading, cache the plans for the g-code export, stitch them
+    // into the published print-wide result, and write the derived extruder map back once
+    // (per-object orderings must not churn the config).
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.option<ConfigOptionFloats>("nozzle_diameter", true)->values = {0.4, 0.4};
+    config.option<ConfigOptionStrings>("extruder_nozzle_stats", true)->values = {"Standard#1", "Standard#1|High Flow#2"};
+    config.option<ConfigOptionEnumsGeneric>("extruder_type", true)->values = {etDirectDrive, etDirectDrive};
+    config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type", true)->values = {nvtStandard, nvtStandard};
+    config.option<ConfigOptionStrings>("extruder_variant_list", true)->values = {"Direct Drive Standard,Direct Drive High Flow",
+                                                                                 "Direct Drive Standard,Direct Drive High Flow"};
+    config.option<ConfigOptionInts>("print_extruder_id", true)->values = {1, 1, 2, 2};
+    config.option<ConfigOptionStrings>("print_extruder_variant", true)->values = {"Direct Drive Standard", "Direct Drive High Flow",
+                                                                                  "Direct Drive Standard", "Direct Drive High Flow"};
+    config.option<ConfigOptionFloats>("filament_diameter", true)->values = {1.75, 1.75};
+    config.option<ConfigOptionStrings>("filament_colour", true)->values = {"#FF0000", "#00FF00"};
+    config.option<ConfigOptionInts>("filament_map", true)->values = {1, 2};
+    config.option<ConfigOptionInts>("filament_volume_map", true)->values = {(int) nvtStandard, (int) nvtStandard};
+    config.set_key_value("enable_filament_dynamic_map", new ConfigOptionBool(true));
+    config.option<ConfigOptionEnum<FilamentMapMode>>("filament_map_mode", true)->value = FilamentMapMode::fmmAutoForFlush;
+    config.option<ConfigOptionEnum<PrintSequence>>("print_sequence", true)->value = PrintSequence::ByObject;
+    // Export validates flush_volumes_matrix as filaments^2 values per head.
+    config.option<ConfigOptionFloats>("flush_volumes_matrix", true)->values = std::vector<double>(8, 140.);
+    config.option<ConfigOptionFloats>("flush_multiplier", true)->values = {1., 1.};
+
+    Model model;
+    ModelObject *object_a = model.add_object("cube_a", "", make_cube(20, 20, 20));
+    ModelInstance *instance_a = object_a->add_instance();
+    instance_a->set_offset(Vec3d(70., 100., 0.));
+    ModelObject *object_b = model.add_object("cube_b", "", make_cube(20, 20, 20));
+    object_b->config.set_key_value("extruder", new ConfigOptionInt(2));
+    ModelInstance *instance_b = object_b->add_instance();
+    instance_b->set_offset(Vec3d(150., 100., 0.));
+    // The sequential instance ordering keys on arrange_order, which validate() assigns before
+    // process() in the real pipeline (instances tying at 0 get dropped from the ordering);
+    // initialize it here since the test drives process() directly.
+    instance_a->arrange_order = 1;
+    instance_b->arrange_order = 2;
+
+    Print print;
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 2);
+    print.process();
+    REQUIRE(print.is_step_done(psSlicingFinished));
+
+    auto result = print.get_layered_nozzle_group_result();
+    REQUIRE(result != nullptr);
+    // One cached plan per unique object, and a stitched layer axis spanning both objects.
+    REQUIRE(print.sequential_dynamic_orderings().size() == 2);
+    REQUIRE(result->get_layer_count() > 0);
+    // The write-back mirrors the stitched result's extruder map.
+    REQUIRE(print.config().filament_map.values == result->get_extruder_map(false));
+
+    // Export must consume the cached plans and produce g-code without throwing.
+    boost::filesystem::path gcode_path = boost::filesystem::temp_directory_path() / "orca_seq_dynamic_publish_test.gcode";
+    REQUIRE_NOTHROW(print.export_gcode(gcode_path.string(), nullptr, nullptr));
+    REQUIRE(boost::filesystem::exists(gcode_path));
+    boost::filesystem::remove(gcode_path);
 }

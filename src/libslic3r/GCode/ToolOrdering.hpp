@@ -246,6 +246,13 @@ public:
     // For single-nozzle printers this is one logical nozzle per extruder (nozzle id == extruder id).
     // Consumed by GCode (get_nozzle_id / get_first_nozzle_for_filament).
     const MultiNozzleUtils::LayeredNozzleGroupResult &get_layered_nozzle_group_result() const { return m_nozzle_group_result; }
+
+    // Physical nozzle occupancy threading for the sequential (by-object) selector regroup: the
+    // setter seeds both the initial recorder (the state the per-layer plan starts from) and the
+    // running recorder (read back after sort_and_build_data via get_nozzle_status()), so each
+    // object's plan continues from the nozzle state the previous object ended with.
+    const MultiNozzleUtils::NozzleStatusRecorder &get_nozzle_status() const { return m_nozzle_status; }
+    void set_nozzle_status(const MultiNozzleUtils::NozzleStatusRecorder &status) { m_initial_nozzle_status = status; m_nozzle_status = status; }
     /*
     * called in single extruder mode, the value in map are all 0
     * called in dual extruder mode, the value in map will be 0 or 1
@@ -256,6 +263,22 @@ public:
     // result.get_extruder_map(). unprintable_volumes / nozzle_status default empty for the static
     // path; the per-layer engine supplies non-empty values.
     static MultiNozzleUtils::LayeredNozzleGroupResult get_recommended_filament_maps(const std::vector<std::vector<unsigned int>>& layer_filaments, const Print* print,const FilamentMapMode mode, const std::vector<std::set<int>>& physical_unprintables, const std::vector<std::set<int>>& geometric_unprintables, const std::map<int, std::set<NozzleVolumeType>>& unprintable_volumes = {}, const std::unordered_map<int, int>& nozzle_status = {});
+
+    // Wrap stitched per-layer filament->nozzle maps from a sequential (by-object) selector regroup
+    // into one print-wide result. nozzle_map_per_layer / layer_filaments / layer_sequences are the
+    // per-object planned layers concatenated in print order; nozzle_map_per_layer is taken by value
+    // and normalized in place. The nozzle list is rebuilt from the print's grouping context. Returns
+    // an empty result when the wrap fails. Lives here (not in Print) to reach the file-local
+    // grouping-context builder.
+    static MultiNozzleUtils::LayeredNozzleGroupResult build_sequential_group_result(
+        Print*                                            print,
+        std::vector<std::vector<int>>                     nozzle_map_per_layer,
+        const std::vector<std::vector<unsigned int>>&     layer_filaments,
+        const std::vector<std::vector<unsigned int>>&     layer_sequences,
+        const std::vector<unsigned int>&                  used_filaments,
+        const std::vector<std::set<int>>&                 physical_unprintables,
+        const std::vector<std::set<int>>&                 geometric_unprintables,
+        const std::map<int, std::set<NozzleVolumeType>>&  unprintable_volumes);
 
     // should be called after doing reorder
     FilamentChangeStats get_filament_change_stats(FilamentChangeMode mode);

@@ -2488,6 +2488,9 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
         std::vector<const PrintInstance*>::const_iterator 	print_object_instance_sequential_active;
         std::vector<std::pair<coordf_t, std::vector<GCode::LayerToPrint>>> layers_to_print = GCode::collect_layers_to_print(*this);
         std::vector<unsigned int> printExtruders;
+        // Cleared on every process so a print-sequence or selector-mode change can never leave
+        // stale object pointers behind; repopulated below only by the sequential selector path.
+        m_sequential_dynamic_orderings.clear();
         if (this->config().print_sequence == PrintSequence::ByObject) {
             // Order object instances for sequential print.
             print_object_instances_ordering = sort_object_instances_by_model_order(*this);
@@ -2509,52 +2512,103 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             auto physical_unprintables = this->get_physical_unprintable_filaments(used_filaments);
             auto geometric_unprintables = this->get_geometric_unprintable_filaments();
             auto filament_unprintable_volumes = this->get_filament_unprintable_flow(used_filaments);
-            std::vector<int>filament_maps = this->get_filament_maps();
-            auto map_mode = get_filament_map_mode();
-            // Grouping returns a nozzle-aware result; the 1-based extruder map for the by-object
-            // path is derived from it. It is computed in every static map mode (in manual modes it
-            // mirrors the user's assignment) and published print-wide: GCode's per-nozzle
-            // placeholder and config-index lookups read it via get_layered_nozzle_group_result(),
-            // and without it sequential exports on multi-nozzle printers see an empty nozzle table
-            // (e.g. nozzle_diameter_at_nozzle_id[]) and custom g-code fails to resolve.
-            auto grouping_result = ToolOrdering::get_recommended_filament_maps(all_filaments, this, map_mode, physical_unprintables, geometric_unprintables, filament_unprintable_volumes);
-            this->set_nozzle_group_result(std::make_shared<MultiNozzleUtils::LayeredNozzleGroupResult>(grouping_result));
-            // Orca: the sequential write-back stays gated to auto modes. In manual modes the
-            // config maps already carry the user's assignment (the per-object ToolOrdering below
-            // consumes them directly), so a write-back would only re-store the pre-slice values;
-            // keeping the gate avoids churning the config on every sequential manual slice.
-            if (map_mode < FilamentMapMode::fmmManual) {
-                auto derived_maps = grouping_result.get_extruder_map(false);
-                if (!derived_maps.empty()) {
-                    filament_maps = derived_maps;
-                    // Write the maps back: used filaments adopt the engine's extruder/nozzle
-                    // choice, unused ones keep their config assignment.
-                    // Orca: the config maps are the merge base; fall back to a synthesized base
-                    // when no producer sized them to the filament count (CLI runs until the
-                    // per-filament synthesis lands there), where indexing per filament would
-                    // run out of bounds.
-                    std::vector<int> base_filament_map = m_config.filament_map.values;
-                    if (base_filament_map.size() != derived_maps.size())
-                        base_filament_map.assign(derived_maps.size(), 1);
-                    std::vector<int> base_volume_map = m_config.filament_volume_map.values;
-                    if (base_volume_map.size() != derived_maps.size())
-                        base_volume_map.assign(derived_maps.size(), (int)nvtStandard);
-                    update_filament_maps_to_config(FilamentGroupUtils::update_used_filament_values(base_filament_map, derived_maps, used_filaments),
-                                                   FilamentGroupUtils::update_used_filament_values(base_volume_map, grouping_result.get_volume_map(), used_filaments),
-                                                   grouping_result.get_nozzle_map());
+            // Selector (per-layer regroup) prints skip the static grouping: their print-wide result
+            // is stitched from the per-object plans after the ordering loop below.
+            const bool dynamic_reorder = this->is_dynamic_group_reorder();
+            if (!dynamic_reorder) {
+                std::vector<int>filament_maps = this->get_filament_maps();
+                auto map_mode = get_filament_map_mode();
+                // Grouping returns a nozzle-aware result; the 1-based extruder map for the by-object
+                // path is derived from it. It is computed in every static map mode (in manual modes it
+                // mirrors the user's assignment) and published print-wide: GCode's per-nozzle
+                // placeholder and config-index lookups read it via get_layered_nozzle_group_result(),
+                // and without it sequential exports on multi-nozzle printers see an empty nozzle table
+                // (e.g. nozzle_diameter_at_nozzle_id[]) and custom g-code fails to resolve.
+                auto grouping_result = ToolOrdering::get_recommended_filament_maps(all_filaments, this, map_mode, physical_unprintables, geometric_unprintables, filament_unprintable_volumes);
+                this->set_nozzle_group_result(std::make_shared<MultiNozzleUtils::LayeredNozzleGroupResult>(grouping_result));
+                // Orca: the sequential write-back stays gated to auto modes. In manual modes the
+                // config maps already carry the user's assignment (the per-object ToolOrdering below
+                // consumes them directly), so a write-back would only re-store the pre-slice values;
+                // keeping the gate avoids churning the config on every sequential manual slice.
+                if (map_mode < FilamentMapMode::fmmManual) {
+                    auto derived_maps = grouping_result.get_extruder_map(false);
+                    if (!derived_maps.empty()) {
+                        filament_maps = derived_maps;
+                        // Write the maps back: used filaments adopt the engine's extruder/nozzle
+                        // choice, unused ones keep their config assignment.
+                        // Orca: the config maps are the merge base; fall back to a synthesized base
+                        // when no producer sized them to the filament count (CLI runs until the
+                        // per-filament synthesis lands there), where indexing per filament would
+                        // run out of bounds.
+                        std::vector<int> base_filament_map = m_config.filament_map.values;
+                        if (base_filament_map.size() != derived_maps.size())
+                            base_filament_map.assign(derived_maps.size(), 1);
+                        std::vector<int> base_volume_map = m_config.filament_volume_map.values;
+                        if (base_volume_map.size() != derived_maps.size())
+                            base_volume_map.assign(derived_maps.size(), (int)nvtStandard);
+                        update_filament_maps_to_config(FilamentGroupUtils::update_used_filament_values(base_filament_map, derived_maps, used_filaments),
+                                                       FilamentGroupUtils::update_used_filament_values(base_volume_map, grouping_result.get_volume_map(), used_filaments),
+                                                       grouping_result.get_nozzle_map());
+                    }
                 }
+                // check map valid both in auto and mannual mode
+                std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) {return value - 1; });
             }
-            // check map valid both in auto and mannual mode
-            std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) {return value - 1; });
 
             //        print_object_instances_ordering = sort_object_instances_by_max_z(print);
+            const PrintObject                     *prev_planned_object = nullptr;
+            unsigned int                           seq_last_extruder   = (unsigned int)-1;
+            MultiNozzleUtils::NozzleStatusRecorder nozzle_status;
+            std::vector<std::vector<int>>          nozzle_map_per_layer;
+            std::vector<std::vector<unsigned int>> stitched_layer_filaments;
             print_object_instance_sequential_active = print_object_instances_ordering.begin();
             for (; print_object_instance_sequential_active != print_object_instances_ordering.end(); ++print_object_instance_sequential_active) {
-                tool_ordering = ToolOrdering(*(*print_object_instance_sequential_active)->print_object, initial_extruder_id);
-                tool_ordering.sort_and_build_data(*(*print_object_instance_sequential_active)->print_object, initial_extruder_id);
+                const PrintObject *print_object = (*print_object_instance_sequential_active)->print_object;
+                if (dynamic_reorder) {
+                    if (print_object != prev_planned_object) {
+                        // Plan each unique object once, threading the physical nozzle occupancy and
+                        // the previous object's last filament into the next plan; repeated instances
+                        // of an object reuse the plan, mirroring the export loop's reuse.
+                        ToolOrdering ordering(*print_object, seq_last_extruder);
+                        ordering.set_nozzle_status(nozzle_status);
+                        ordering.sort_and_build_data(*print_object, seq_last_extruder);
+                        nozzle_status = ordering.get_nozzle_status();
+                        if (ordering.last_extruder() != static_cast<unsigned int>(-1))
+                            seq_last_extruder = ordering.last_extruder();
+                        const auto &object_maps = ordering.get_layered_nozzle_group_result().get_layer_filament_nozzle_maps();
+                        nozzle_map_per_layer.insert(nozzle_map_per_layer.end(), object_maps.begin(), object_maps.end());
+                        // Orca: the stitch input comes from the same orderings that produced the
+                        // per-layer maps — the collection loop above is per-instance and seeded -1,
+                        // so its layers are misaligned with these plans. layer_tools() of a sorted
+                        // ordering already carries the planned per-layer filament order.
+                        for (const auto &layer_tool : ordering.layer_tools())
+                            stitched_layer_filaments.emplace_back(layer_tool.extruders);
+                        m_sequential_dynamic_orderings[print_object] = std::move(ordering);
+                        prev_planned_object = print_object;
+                    }
+                    tool_ordering = m_sequential_dynamic_orderings.at(print_object);
+                } else {
+                    tool_ordering = ToolOrdering(*print_object, initial_extruder_id);
+                    tool_ordering.sort_and_build_data(*print_object, initial_extruder_id);
+                }
                 if ((initial_extruder_id = tool_ordering.first_extruder()) != static_cast<unsigned int>(-1)) {
                     append(printExtruders, tool_ordering.tools_for_layer(layers_to_print.front().first).extruders);
                 }
+            }
+            if (dynamic_reorder && m_objects.size() > 1) {
+                // Stitch the per-object plans into one print-wide selector result. A single-object
+                // sequential print publishes (and writes back) from its own ordering instead: the
+                // per-object publish gate treats one object as not sequential.
+                auto stitched = ToolOrdering::build_sequential_group_result(this, std::move(nozzle_map_per_layer), stitched_layer_filaments,
+                                                                            stitched_layer_filaments, used_filaments, physical_unprintables,
+                                                                            geometric_unprintables, filament_unprintable_volumes);
+                this->set_nozzle_group_result(std::make_shared<MultiNozzleUtils::LayeredNozzleGroupResult>(stitched));
+                // Orca: the dynamic (per-layer) result carries no single volume/nozzle map, so only
+                // the extruder map is written back (matching the by-layer selector branch); the full
+                // per-nozzle config write-back is a follow-up behind the dev flag.
+                std::vector<int> derived_maps = stitched.get_extruder_map(false); // 1-based
+                if (!derived_maps.empty())
+                    update_filament_maps_to_config(derived_maps);
             }
         }
         else {
@@ -3475,12 +3529,13 @@ std::shared_ptr<MultiNozzleUtils::LayeredNozzleGroupResult> Print::get_layered_n
 }
 
 // Dynamic (per-layer selector) regroup predicate.
-// Orca: enable_filament_dynamic_map is a develop-only config key registered in the ConfigDef but NOT
-// a static PrintConfig member, so it is read from the applied full config; it is absent for every
-// shipping printer/profile -> nullptr -> false, which keeps the static grouping path (identical
-// output) the only one the current fleet takes. There is no mixed-colour-filament guard (mixed-colour
-// filaments are not supported). The remaining gates (auto-for-flush mode, multi-extruder machine)
-// read the static PrintConfig members.
+// Orca: enable_filament_dynamic_map is a project flag registered in the ConfigDef but NOT a static
+// PrintConfig member, so it is read from the applied full config. No profile sets it; it is turned
+// on per project by the "smart filament assign" checkbox (shown when a filament track switch is
+// ready), so absent-key -> nullptr -> false keeps the static grouping path (identical output) for
+// everything else. There is no mixed-colour-filament guard (mixed-colour filaments are not
+// supported). The remaining gates (auto-for-flush mode, multi-extruder machine) read the static
+// PrintConfig members.
 bool Print::is_dynamic_group_reorder() const
 {
     const auto *opt     = m_full_print_config.option<ConfigOptionBool>("enable_filament_dynamic_map");
