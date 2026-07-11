@@ -470,3 +470,90 @@ TEST_CASE("refreshing lslices after a slice mutation makes islands track the geo
     CHECK_THAT(stale, WithinRel((double) scale_(20.0), 0.05)); // stale islands = original outline
     CHECK_THAT(fresh, WithinRel((double) scale_(18.0), 0.05)); // refreshed islands = inset outline
 }
+
+#include <random>   // deterministic RNG for the fuzzy-skin analogue below
+
+// Fuzzy skin applied to the slice contours at the Slice boundary, matching what the Fuzzy
+// Slices sample (sandboxes/orca_fuzzy_slices_plugin_any.py) does: resample every ring at
+// 3/4..5/4 * point_distance and displace each new vertex +/-thickness along the segment
+// normal (libslic3r's fuzzy_polyline with uniform noise). Unlike the count-preserving rotate
+// test above, this is a count-CHANGING rebuild -- each ring is replaced by one with a
+// different vertex count. Three end-to-end invariants after process() confirm the cascade:
+//   (1) the jitter is zero-mean, so total fill area is preserved within a few %,
+//   (2) the fuzz genuinely cascaded into make_perimeters' fill_surfaces -- their contours
+//       carry far more vertices than the crisp baseline square's,
+//   (3) displacement is bounded: the sliced footprint grows by at most ~2*thickness.
+TEST_CASE("Fuzzing slice contours at the Slice boundary cascades with bounded displacement", "[slicing_pipeline]") {
+    using Catch::Matchers::WithinRel;
+    static constexpr double kThickness = 0.3, kPointDist = 0.8; // mm; the built-in fuzzy-skin defaults
+    struct Measure { double area; size_t verts; double width; };
+    auto measure = [](bool fuzz) -> Measure {
+        Slic3r::Print print; Slic3r::Model model;
+        auto config = Slic3r::DynamicPrintConfig::full_print_config();
+        config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"})); // active in both runs
+        if (fuzz) Slic3r::Print::set_slicing_pipeline_hook_fn(
+            [](Slic3r::Print&, const Slic3r::PrintObject* o, Slic3r::SlicingPipelineStepPlugin s){
+                if (s != Slic3r::SlicingPipelineStepPlugin::posSlice || !o) return;
+                const double thickness  = scale_(kThickness);
+                const double min_dist   = scale_(kPointDist) * 0.75;
+                const double rand_range = scale_(kPointDist) * 0.5;
+                std::mt19937 rng(0x5EED); // fixed seed: the run is deterministic
+                std::uniform_real_distribution<double> uni(0.0, 1.0);
+                auto fuzz_ring = [&](Slic3r::Points& pts) {
+                    if (pts.size() < 3) return;
+                    Slic3r::Points out;
+                    double dist_left_over = uni(rng) * (min_dist / 2.0);
+                    const Slic3r::Point* p0 = &pts.back();
+                    for (const Slic3r::Point& p1 : pts) {
+                        const Slic3r::Vec2d v   = (p1 - *p0).cast<double>();
+                        const double        seg = v.norm();
+                        if (seg > 0.0) {
+                            double d = dist_left_over;
+                            for (; d < seg; d += min_dist + uni(rng) * rand_range) {
+                                const double        r  = (uni(rng) * 2.0 - 1.0) * thickness;
+                                const Slic3r::Vec2d pa = p0->cast<double>() + v * (d / seg);
+                                const Slic3r::Vec2d n  = Slic3r::Vec2d(-v.y(), v.x()) / seg;
+                                out.emplace_back((coord_t) std::llround(pa.x() + n.x() * r),
+                                                 (coord_t) std::llround(pa.y() + n.y() * r));
+                            }
+                            dist_left_over = d - seg;
+                        }
+                        p0 = &p1;
+                    }
+                    if (out.size() >= 3) pts = std::move(out); // else: ring too short, keep it crisp
+                };
+                for (Slic3r::Layer* l : const_cast<Slic3r::PrintObject*>(o)->layers())
+                    for (Slic3r::LayerRegion* r : l->regions()) {
+                        Slic3r::Surfaces in = r->slices.surfaces;
+                        for (auto& sf : in) {
+                            fuzz_ring(sf.expolygon.contour.points);
+                            for (auto& h : sf.expolygon.holes) fuzz_ring(h.points);
+                        }
+                        r->slices.set(std::move(in));
+                    }
+            });
+        else Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        print.process();
+        Measure m { 0.0, 0, outer_slices_width(print) };
+        for (auto* l : print.objects().front()->layers())
+            for (auto* r : l->regions())
+                for (auto& sf : r->fill_surfaces.surfaces) {
+                    m.area  += sf.expolygon.area();
+                    m.verts += sf.expolygon.contour.points.size();
+                }
+        Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
+        return m;
+    };
+    const Measure base = measure(false);
+    const Measure fz   = measure(true);
+    // (1) Zero-mean jitter: the fills add up to (nearly) the same area.
+    CHECK_THAT(fz.area, WithinRel(base.area, 0.05));
+    // (2) The resample cascaded downstream: fill boundaries derived from the fuzzed slices
+    //     carry far more vertices than the baseline square's.
+    CHECK(fz.verts > 4 * base.verts);
+    // (3) Displacement is bounded by the +/-thickness jitter: the footprint widened, but by
+    //     no more than ~2*thickness (one thickness per side, plus rounding slack).
+    CHECK(fz.width > base.width);
+    CHECK(fz.width < base.width + 2.5 * scale_(kThickness));
+}
