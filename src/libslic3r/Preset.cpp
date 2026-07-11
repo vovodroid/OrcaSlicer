@@ -1192,7 +1192,7 @@ static std::vector<std::string> s_Preset_print_options{
     "min_feature_size",
     "min_bead_width",
     "post_process",
-    "post_process_plugin",
+    "slicing_pipeline_plugin",
     "plugins",
     "process_change_extrusion_role_gcode",
     "min_length_factor",

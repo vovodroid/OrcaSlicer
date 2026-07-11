@@ -996,9 +996,9 @@ void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::
     // ModelObject*/ModelVolume*/ModelInstance* aliases into host data and can mint ObjectIDs,
     // which libslic3r requires on the main thread (ObjectID.hpp's non-atomic s_last_id). Running
     // here makes those reads/instantiations legal and means nothing mutates the model underneath
-    // a run. The trade-off is that a slow execute() freezes the UI: the contract (see
-    // plugin_development.md) is to keep execute() quick and offload heavy work to the plugin's own
-    // threading.Thread. orca.host.ui calls already no-op their main-thread marshaling here.
+    // a run. The trade-off is that a slow execute() freezes the UI, so the contract is to keep
+    // execute() quick and offload heavy work to the plugin's own threading.Thread. orca.host.ui
+    // calls already no-op their main-thread marshaling here.
     {
         wxBusyCursor busy;
         try {

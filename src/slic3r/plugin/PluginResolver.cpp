@@ -35,9 +35,9 @@ std::string find_option_for_capability(Preset::Type type, const Preset& preset, 
     if (type != Preset::TYPE_PRINT && type != Preset::TYPE_PRINTER && type != Preset::TYPE_FILAMENT)
         return {};
 
-    // Plugin-bearing options opt in via ConfigOptionDef::support_plugin, so scan the preset's
-    // definition rather than maintaining a hardcoded per-type field list. A typed preset's config
-    // only contains keys for its own type, so this naturally stays scoped to `type`.
+    // Plugin-bearing options opt in via ConfigOptionDef::is_plugin_backed (a non-empty plugin_type),
+    // so scan the preset's definition rather than maintaining a hardcoded per-type field list. A typed
+    // preset's config only contains keys for its own type, so this naturally stays scoped to `type`.
     const ConfigDef* def = preset.config.def();
     if (def == nullptr)
         return {};
@@ -48,7 +48,7 @@ std::string find_option_for_capability(Preset::Type type, const Preset& preset, 
 
     for (const std::string& field : preset.config.keys()) {
         const ConfigOptionDef* opt_def = def->get(field);
-        if (opt_def == nullptr || !opt_def->support_plugin)
+        if (opt_def == nullptr || !opt_def->is_plugin_backed())
             continue;
 
         const ConfigOption* option = preset.config.option(field);

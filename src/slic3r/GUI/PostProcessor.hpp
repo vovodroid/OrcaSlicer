@@ -9,9 +9,10 @@
 
 namespace Slic3r {
 
-// Run post-processing scripts (the "post_process" option) and/or post-processing plugins (the
-// "post_process_plugin" option) if defined. Lives in the GUI layer because plugins are executed
-// through the embedded-Python PluginManager, which libslic3r must not depend on.
+// Run post-processing scripts (the "post_process" option) and/or the slicing-pipeline plugins'
+// Step.psGCodePostProcess seam (the "slicing_pipeline_plugin" option) if defined. Lives in the GUI
+// layer because plugins are executed through the embedded-Python PluginManager, which libslic3r must
+// not depend on.
 // Returns true if a script or plugin was executed.
 // Returns false if neither a post-processing script nor plugin was defined.
 // Throws an exception on error.

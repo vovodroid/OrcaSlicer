@@ -1,7 +1,7 @@
 #include "PluginHostUi.hpp"
 
-#include "PluginAuditManager.hpp"
-#include "PythonInterpreter.hpp" // PythonGILState
+#include "slic3r/plugin/PluginAuditManager.hpp"
+#include "slic3r/plugin/PythonInterpreter.hpp" // PythonGILState
 
 #include <slic3r/GUI/GUI_App.hpp>
 #include <slic3r/GUI/MainFrame.hpp>

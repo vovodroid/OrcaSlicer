@@ -10,12 +10,12 @@
 #include <pybind11/stl.h>
 
 #include "PythonInterpreter.hpp"
-#include "PluginHostApi.hpp"
+#include "host/PluginHost.hpp"
 #include "PyPluginPackage.hpp"
 #include "PyPluginTrampoline.hpp"
-#include "pluginTypes/gcode/GCodePluginCapability.hpp"
 #include "pluginTypes/printerAgent/PrinterAgentPluginCapability.hpp"
 #include "pluginTypes/script/ScriptPluginCapability.hpp"
+#include "pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.hpp"
 
 namespace py = pybind11;
 
@@ -286,7 +286,6 @@ void bind_python_api(pybind11::module_& m)
     m.doc() = "OrcaSlicer plugin API";
 
     auto pluginTypes = py::enum_<PluginCapabilityType>(m, "PluginType", "Available plugin capability groups")
-                           .value("PostProcessing", PluginCapabilityType::PostProcessing)
                            .value("PrinterConnection", PluginCapabilityType::PrinterConnection)
                            .value("Automation", PluginCapabilityType::Automation)
                            .value("Analysis", PluginCapabilityType::Analysis)
@@ -294,6 +293,7 @@ void bind_python_api(pybind11::module_& m)
                            .value("Exporter", PluginCapabilityType::Exporter)
                            .value("Visualization", PluginCapabilityType::Visualization)
                            .value("Script", PluginCapabilityType::Script)
+                           .value("SlicingPipeline", PluginCapabilityType::SlicingPipeline)
                            .value("Unknown", PluginCapabilityType::Unknown)
                            .export_values();
 
@@ -334,10 +334,10 @@ void bind_python_api(pybind11::module_& m)
     BOOST_LOG_TRIVIAL(debug) << "Registering embedded Python plugin type bindings";
 
     // Make sure you register your bindings here
-    GCodePluginCapability::RegisterBindings(m, pluginTypes);
     PrinterAgentPluginCapability::RegisterBindings(m, pluginTypes);
     ScriptPluginCapability::RegisterBindings(m, pluginTypes);
-    PluginHostApi::RegisterBindings(m);
+    SlicingPipelinePluginCapability::RegisterBindings(m, pluginTypes);
+    PluginHost::RegisterBindings(m);
     BOOST_LOG_TRIVIAL(debug) << "Registered ScriptPluginCapability Python bindings";
 
     m.def(
