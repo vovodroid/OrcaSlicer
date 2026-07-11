@@ -35,7 +35,7 @@ static const int RightExtruderIdx = 1;
 // config key (ConfigOptionStrings, one encoded map per extruder) via get_extruder_nozzle_stats /
 // save_extruder_nozzle_stats_to_string. These helpers read and write that config.
 
-static int extruder_nozzle_count(PresetBundle *preset_bundle, int extruder_id, NozzleVolumeType volume_type)
+int getExtruderNozzleCount(PresetBundle *preset_bundle, int extruder_id, NozzleVolumeType volume_type)
 {
     if (!preset_bundle)
         return 0;
@@ -49,7 +49,7 @@ static int extruder_nozzle_count(PresetBundle *preset_bundle, int extruder_id, N
     return it == stats[extruder_id].end() ? 0 : it->second;
 }
 
-static int extruder_nozzle_count_total(PresetBundle *preset_bundle, int extruder_id)
+int getExtruderNozzleCountTotal(PresetBundle *preset_bundle, int extruder_id)
 {
     if (!preset_bundle)
         return 0;
@@ -230,8 +230,8 @@ void updateNozzleCountDisplay(PresetBundle *preset_bundle, int extruder_id, Nozz
 
     int display_count = -1; // hides the badge
     if (support_multi_nozzle)
-        display_count = volume_type == nvtHybrid ? extruder_nozzle_count_total(preset_bundle, extruder_id)
-                                                 : extruder_nozzle_count(preset_bundle, extruder_id, volume_type);
+        display_count = volume_type == nvtHybrid ? getExtruderNozzleCountTotal(preset_bundle, extruder_id)
+                                                 : getExtruderNozzleCount(preset_bundle, extruder_id, volume_type);
     plater->sidebar().set_extruder_nozzle_count(extruder_id, display_count);
 }
 
@@ -269,7 +269,7 @@ void onNozzleVolumeTypeSwitch(PresetBundle *preset_bundle, int extruder_id, Nozz
     // Hybrid is a mix, not a type every nozzle shares, so there is nothing to carry over.
     if (type == nvtHybrid)
         return;
-    const int total = extruder_nozzle_count_total(preset_bundle, extruder_id);
+    const int total = getExtruderNozzleCountTotal(preset_bundle, extruder_id);
     setExtruderNozzleCount(preset_bundle, extruder_id, type, total, true);
 }
 
@@ -294,14 +294,14 @@ void manuallySetNozzleCount(int extruder_id)
         return;
 
     const NozzleVolumeType volume_type    = NozzleVolumeType(nozzle_volume_type_opt->values[extruder_id]);
-    const int              standard_count = extruder_nozzle_count(preset_bundle, extruder_id, nvtStandard);
-    const int              highflow_count = extruder_nozzle_count(preset_bundle, extruder_id, nvtHighFlow);
+    const int              standard_count = getExtruderNozzleCount(preset_bundle, extruder_id, nvtStandard);
+    const int              highflow_count = getExtruderNozzleCount(preset_bundle, extruder_id, nvtHighFlow);
 
     // Require at least one nozzle for a Hybrid extruder (an empty mix is meaningless) and when the other
     // extruder currently has none.
     bool force_no_zero = volume_type == nvtHybrid;
     if (nozzle_volume_type_opt->values.size() > 1)
-        force_no_zero |= extruder_nozzle_count_total(preset_bundle, 1 - extruder_id) == 0;
+        force_no_zero |= getExtruderNozzleCountTotal(preset_bundle, 1 - extruder_id) == 0;
 
     ManualNozzleCountDialog dialog(wxGetApp().plater(), volume_type, standard_count, highflow_count, max_nozzle_count->values[extruder_id], force_no_zero);
     if (dialog.ShowModal() == wxID_OK) {

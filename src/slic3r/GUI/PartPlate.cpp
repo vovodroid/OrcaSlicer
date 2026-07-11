@@ -3894,6 +3894,16 @@ void PartPlate::set_filament_count(int filament_count)
         std::vector<int>& filament_maps = m_config.option<ConfigOptionInts>("filament_map")->values;
         filament_maps.resize(filament_count, 1);
     }
+
+    if (m_config.has("filament_nozzle_map")) {
+        std::vector<int>& filament_nozzle_map = m_config.option<ConfigOptionInts>("filament_nozzle_map")->values;
+        filament_nozzle_map.resize(filament_count, 0);
+    }
+
+    if (m_config.has("filament_volume_map")) {
+        std::vector<int>& filament_volume_map = m_config.option<ConfigOptionInts>("filament_volume_map")->values;
+        filament_volume_map.resize(filament_count, static_cast<int>(NozzleVolumeType::nvtStandard));
+    }
 }
 
 void PartPlate::on_filament_added()
@@ -3901,6 +3911,27 @@ void PartPlate::on_filament_added()
     if (m_config.has("filament_map")) {
         std::vector<int>& filament_maps = m_config.option<ConfigOptionInts>("filament_map")->values;
         filament_maps.push_back(1);
+    }
+
+    if (m_config.has("filament_nozzle_map")) {
+        std::vector<int>& filament_nozzle_map = m_config.option<ConfigOptionInts>("filament_nozzle_map")->values;
+        filament_nozzle_map.push_back(0);
+    }
+
+    if (m_config.has("filament_volume_map")) {
+        std::vector<int>& filament_volume_map = m_config.option<ConfigOptionInts>("filament_volume_map")->values;
+        // A new filament defaults onto the first extruder, so seed its volume value from
+        // that extruder's flow type.
+        int volume_type = static_cast<int>(NozzleVolumeType::nvtStandard);
+        auto nozzle_volumes = wxGetApp().preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
+        if (nozzle_volumes && !nozzle_volumes->values.empty())
+            volume_type = nozzle_volumes->values[0];
+        // Orca: never store the Hybrid marker as a per-filament value; on a Hybrid extruder
+        // each filament still prints with a concrete flow, defaulting to Standard.
+        if (volume_type == static_cast<int>(NozzleVolumeType::nvtHybrid))
+            volume_type = static_cast<int>(NozzleVolumeType::nvtStandard);
+
+        filament_volume_map.push_back(volume_type);
     }
 }
 
@@ -3914,6 +3945,19 @@ void PartPlate::on_filament_deleted(int filament_count, int filament_id)
         if (filament_id >= 0 && filament_id < (int) filament_maps.size())
             filament_maps.erase(filament_maps.begin() + filament_id);
     }
+
+    if (m_config.has("filament_nozzle_map")) {
+        std::vector<int>& filament_nozzle_map = m_config.option<ConfigOptionInts>("filament_nozzle_map")->values;
+        if (filament_id >= 0 && filament_id < (int) filament_nozzle_map.size())
+            filament_nozzle_map.erase(filament_nozzle_map.begin() + filament_id);
+    }
+
+    if (m_config.has("filament_volume_map")) {
+        std::vector<int>& filament_volume_map = m_config.option<ConfigOptionInts>("filament_volume_map")->values;
+        if (filament_id >= 0 && filament_id < (int) filament_volume_map.size())
+            filament_volume_map.erase(filament_volume_map.begin() + filament_id);
+    }
+
     update_first_layer_print_sequence_when_delete_filament(filament_id);
 }
 

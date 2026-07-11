@@ -219,6 +219,11 @@ std::optional<NozzleOption> tryPopUpMultiNozzleDialog(MachineObject* obj);
 // counts are reset first.
 void setExtruderNozzleCount(PresetBundle *preset_bundle, int extruder_id, NozzleVolumeType type, int nozzle_count, bool clear_all);
 
+// Read one extruder's nozzle count for a volume type (or its total) from the edited printer preset's
+// `extruder_nozzle_stats` config key. Returns 0 when the stats are absent or the extruder is unknown.
+int getExtruderNozzleCount(PresetBundle *preset_bundle, int extruder_id, NozzleVolumeType volume_type);
+int getExtruderNozzleCountTotal(PresetBundle *preset_bundle, int extruder_id);
+
 // Refresh the sidebar nozzle-count badge for one extruder: shows the extruder's physical nozzle count on
 // multi-nozzle printers, hides it (count -1) everywhere else.
 void updateNozzleCountDisplay(PresetBundle *preset_bundle, int extruder_id, NozzleVolumeType volume_type);

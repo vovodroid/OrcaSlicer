@@ -586,7 +586,9 @@ public:
 
     void set_global_filament_map_mode(FilamentMapMode mode);
     void set_global_filament_map(const std::vector<int>& filament_map);
+    void set_global_filament_volume_map(const std::vector<int>& filament_volume_map);
     std::vector<int> get_global_filament_map() const;
+    std::vector<int> get_global_filament_volume_map() const;
     FilamentMapMode get_global_filament_map_mode() const;
 
     void update_menus();
@@ -747,6 +749,11 @@ public:
     bool get_machine_sync_status();
 
     void update_machine_sync_status();
+
+    // Rewrite every plate's per-filament volume choice for the filaments grouped onto this
+    // extruder after its Flow type changed (Hybrid resets them to Standard so the user
+    // re-assigns concrete volumes in the grouping dialog).
+    void update_filament_volume_map(int extruder_id, int volume_type);
 
 #if ENABLE_ENVIRONMENT_MAP
     void init_environment_texture();
