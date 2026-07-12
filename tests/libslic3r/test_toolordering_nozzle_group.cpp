@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 #include <boost/filesystem.hpp>
@@ -605,8 +606,8 @@ TEST_CASE("Sequential selector prints publish a stitched result and cache the pl
 {
     // By-object + smart filament assign: the by-object branch of Print::process must plan each
     // object with nozzle-status threading, cache the plans for the g-code export, stitch them
-    // into the published print-wide result, and write the derived extruder map back once
-    // (per-object orderings must not churn the config).
+    // into the published print-wide result, and write the grouping result back to the config
+    // once (per-object orderings must not churn the config).
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
     config.option<ConfigOptionFloats>("nozzle_diameter", true)->values = {0.4, 0.4};
     config.option<ConfigOptionStrings>("extruder_nozzle_stats", true)->values = {"Standard#1", "Standard#1|High Flow#2"};
@@ -655,10 +656,209 @@ TEST_CASE("Sequential selector prints publish a stitched result and cache the pl
     REQUIRE(result->get_layer_count() > 0);
     // The write-back mirrors the stitched result's extruder map.
     REQUIRE(print.config().filament_map.values == result->get_extruder_map(false));
+    // The per-slot filament arrays stay label-consistent whether or not the stitched plan
+    // actually migrated a filament (one slot per filament, plus one per extra variant).
+    REQUIRE(print.config().filament_extruder_variant.values.size() == print.config().filament_self_index.values.size());
+    REQUIRE(print.config().filament_self_index.values.size() >= print.config().filament_map.values.size());
 
     // Export must consume the cached plans and produce g-code without throwing.
     boost::filesystem::path gcode_path = boost::filesystem::temp_directory_path() / "orca_seq_dynamic_publish_test.gcode";
     REQUIRE_NOTHROW(print.export_gcode(gcode_path.string(), nullptr, nullptr));
     REQUIRE(boost::filesystem::exists(gcode_path));
     boost::filesystem::remove(gcode_path);
+}
+
+TEST_CASE("Per-variant expansion gives migrating filaments one slot per variant", "[PrintConfig][H2C][Dynamic]")
+{
+    // The selector write-back rebuilds the filament arrays from the grouping result: a filament
+    // that prints through several (extruder x volume type) variants keeps one slot per variant,
+    // and every key grows in lockstep with the self-index / variant labels.
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    // Extruder 1 Standard, extruder 2 Hybrid (Standard + High Flow): 3 nozzle slots, 2 extruders.
+    config.option<ConfigOptionEnumsGeneric>("extruder_type", true)->values = {etDirectDrive, etDirectDrive};
+    config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type", true)->values = {nvtStandard, nvtHybrid};
+    config.option<ConfigOptionStrings>("extruder_variant_list", true)->values = {"Direct Drive Standard,Direct Drive High Flow",
+                                                                                 "Direct Drive Standard,Direct Drive High Flow"};
+    config.option<ConfigOptionInts>("print_extruder_id", true)->values = {1, 1, 2, 2};
+    config.option<ConfigOptionStrings>("print_extruder_variant", true)->values = {"Direct Drive Standard", "Direct Drive High Flow",
+                                                                                  "Direct Drive Standard", "Direct Drive High Flow"};
+    // Two filaments with superset arrays: one column per (filament x variant).
+    config.option<ConfigOptionInts>("filament_map", true)->values = {1, 2};
+    config.option<ConfigOptionInts>("filament_volume_map", true)->values = {(int) nvtStandard, (int) nvtHighFlow};
+    config.option<ConfigOptionInts>("filament_self_index", true)->values = {1, 1, 2, 2};
+    config.option<ConfigOptionStrings>("filament_extruder_variant", true)->values = {"Direct Drive Standard", "Direct Drive High Flow",
+                                                                                     "Direct Drive Standard", "Direct Drive High Flow"};
+    config.option<ConfigOptionInts>("nozzle_temperature", true)->values = {220, 230, 240, 250};
+
+    std::set<std::string> key_set = {"filament_self_index", "filament_extruder_variant", "nozzle_temperature"};
+
+    auto make_use = [](ExtruderType et, NozzleVolumeType nvt, int extruder_id) {
+        FilamentVariantUse use;
+        use.extruder_type      = et;
+        use.nozzle_volume_type = nvt;
+        use.extruder_id        = extruder_id;
+        return use;
+    };
+
+    SECTION("a migrating filament expands, machine slots track each output slot") {
+        std::unordered_map<int, std::vector<FilamentVariantUse>> uses;
+        uses[0] = {make_use(etDirectDrive, nvtStandard, 0), make_use(etDirectDrive, nvtHighFlow, 1)};
+        uses[1] = {make_use(etDirectDrive, nvtHighFlow, 1)};
+        std::vector<int> slot_machine_indices;
+        config.update_filament_config_values_for_multiple_extruders(config, uses, 2, 3, key_set,
+                                                                    "filament_self_index", "filament_extruder_variant",
+                                                                    &slot_machine_indices);
+        REQUIRE(config.option<ConfigOptionInts>("filament_self_index")->values == std::vector<int>{1, 1, 2});
+        REQUIRE(config.option<ConfigOptionStrings>("filament_extruder_variant")->values ==
+                std::vector<std::string>({"Direct Drive Standard", "Direct Drive High Flow", "Direct Drive High Flow"}));
+        REQUIRE(config.option<ConfigOptionInts>("nozzle_temperature")->values == std::vector<int>{220, 230, 250});
+        // Slot 0 backs onto extruder 1 Standard; slots 1-2 onto extruder 2 High Flow.
+        REQUIRE(slot_machine_indices == std::vector<int>{0, 3, 3});
+    }
+
+    SECTION("filaments absent from the uses fall back to their static assignment") {
+        std::unordered_map<int, std::vector<FilamentVariantUse>> uses;
+        uses[0] = {make_use(etDirectDrive, nvtStandard, 0)};
+        // Filament 1 unrouted: filament_map -> extruder 2 (Hybrid) -> volume map -> High Flow.
+        config.update_filament_config_values_for_multiple_extruders(config, uses, 2, 3, key_set,
+                                                                    "filament_self_index", "filament_extruder_variant");
+        REQUIRE(config.option<ConfigOptionInts>("filament_self_index")->values == std::vector<int>{1, 2});
+        REQUIRE(config.option<ConfigOptionInts>("nozzle_temperature")->values == std::vector<int>{220, 250});
+    }
+
+    SECTION("a mis-sized filament_volume_map is ignored") {
+        config.option<ConfigOptionInts>("filament_volume_map", true)->values = {(int) nvtHighFlow};
+        std::unordered_map<int, std::vector<FilamentVariantUse>> uses;
+        uses[0] = {make_use(etDirectDrive, nvtStandard, 0)};
+        // Unrouted filament 1 keeps the extruder's own typing (Hybrid folds to Standard).
+        config.update_filament_config_values_for_multiple_extruders(config, uses, 2, 3, key_set,
+                                                                    "filament_self_index", "filament_extruder_variant");
+        REQUIRE(config.option<ConfigOptionInts>("nozzle_temperature")->values == std::vector<int>{220, 240});
+    }
+}
+
+TEST_CASE("Selector write-back expands migrating filaments and survives re-apply", "[Print][H2C][Dynamic]")
+{
+    // A filament the per-layer plan moves between nozzle variants must end up with one config
+    // slot per variant (so per-layer temperatures/retractions resolve correctly), the extruder
+    // retract overrides must key each slot to its own variant's machine value, and an unchanged
+    // re-apply must reproduce the expansion instead of trimming it back to one slot per
+    // filament — a trim-back would diff the freshly written values and invalidate the result.
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.option<ConfigOptionFloats>("nozzle_diameter", true)->values = {0.4, 0.4};
+    config.option<ConfigOptionStrings>("extruder_nozzle_stats", true)->values = {"Standard#1", "Standard#1|High Flow#2"};
+    config.option<ConfigOptionEnumsGeneric>("extruder_type", true)->values = {etDirectDrive, etDirectDrive};
+    config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type", true)->values = {nvtStandard, nvtHybrid};
+    config.option<ConfigOptionStrings>("extruder_variant_list", true)->values = {"Direct Drive Standard,Direct Drive High Flow",
+                                                                                 "Direct Drive Standard,Direct Drive High Flow"};
+    config.option<ConfigOptionInts>("print_extruder_id", true)->values = {1, 1, 2, 2};
+    config.option<ConfigOptionStrings>("print_extruder_variant", true)->values = {"Direct Drive Standard", "Direct Drive High Flow",
+                                                                                  "Direct Drive Standard", "Direct Drive High Flow"};
+    // Three filaments: 0 -> extruder 1 (Std), 1 -> extruder 2 (Std), 2 -> extruder 2, migrating
+    // Standard -> High Flow between layers. Superset arrays: one column per (filament x variant).
+    // filament_type must be sized to the filament count: the variant-use collection (like the
+    // full-config producers) keys the per-filament loop on it.
+    config.option<ConfigOptionStrings>("filament_type", true)->values = {"PLA", "PLA", "PLA"};
+    config.option<ConfigOptionFloats>("filament_diameter", true)->values = {1.75, 1.75, 1.75};
+    config.option<ConfigOptionStrings>("filament_colour", true)->values = {"#FF0000", "#00FF00", "#0000FF"};
+    config.option<ConfigOptionInts>("filament_map", true)->values = {1, 2, 2};
+    config.option<ConfigOptionInts>("filament_volume_map", true)->values = {(int) nvtStandard, (int) nvtStandard, (int) nvtStandard};
+    config.option<ConfigOptionInts>("filament_self_index", true)->values = {1, 1, 2, 2, 3, 3};
+    config.option<ConfigOptionStrings>("filament_extruder_variant", true)->values = {"Direct Drive Standard", "Direct Drive High Flow",
+                                                                                     "Direct Drive Standard", "Direct Drive High Flow",
+                                                                                     "Direct Drive Standard", "Direct Drive High Flow"};
+    config.option<ConfigOptionInts>("nozzle_temperature", true)->values = {200, 210, 220, 230, 240, 250};
+    // The migrating filament's Standard column is nil, so the override merge must fall back to
+    // the machine value of the Standard slot (not the High Flow one).
+    config.option<ConfigOptionFloatsNullable>("filament_retraction_length", true)->values =
+        {0.5, 0.5, 0.6, 0.6, ConfigOptionFloatsNullable::nil_value(), 1.2};
+    config.option<ConfigOptionFloats>("retraction_length", true)->values = {0.8, 0.9, 1.0, 1.1};
+
+    Model model;
+    model.add_object("cube", "", make_cube(20, 20, 20))->add_instance();
+
+    Print print;
+    print.apply(model, config);
+
+    // Stub grouping result: nozzles as in the resolver test; filament 2 prints on the Standard
+    // nozzle at layer 0 and on the High Flow nozzle at layer 1.
+    std::vector<NozzleInfo> nozzle_list;
+    {
+        NozzleInfo n;
+        n.diameter = "0.4";
+        n.volume_type = nvtStandard; n.extruder_id = 0; n.group_id = 0; nozzle_list.push_back(n);
+        n.volume_type = nvtStandard; n.extruder_id = 1; n.group_id = 1; nozzle_list.push_back(n);
+        n.volume_type = nvtHighFlow; n.extruder_id = 1; n.group_id = 2; nozzle_list.push_back(n);
+    }
+    std::vector<std::vector<int>>          layer_maps = {{0, 1, 1}, {0, 1, 2}};
+    std::vector<std::vector<unsigned int>> layer_seqs = {{0, 1, 2}, {0, 1, 2}};
+    auto group = LayeredNozzleGroupResult::create(layer_maps, nozzle_list, {0, 1, 2}, layer_seqs);
+    REQUIRE(group.has_value());
+    REQUIRE(group->is_support_dynamic_nozzle_map());
+    print.set_nozzle_group_result(std::make_shared<LayeredNozzleGroupResult>(*group));
+
+    print.update_to_config_by_nozzle_group_result(*group);
+
+    // Filament 2 holds two slots (Standard + High Flow), everything in lockstep.
+    REQUIRE(print.config().filament_map.values == group->get_extruder_map(false));
+    REQUIRE(print.config().filament_self_index.values == std::vector<int>{1, 2, 3, 3});
+    REQUIRE(print.config().nozzle_temperature.values == std::vector<int>{200, 220, 240, 250});
+    // The layer-aware resolver picks the slot matching each layer's variant.
+    REQUIRE(print.get_filament_config_indx(2, 0) == 2);
+    REQUIRE(print.get_filament_config_indx(2, 1) == 3);
+    // Retract overrides: non-nil slots take the filament value; the nil Standard slot of the
+    // migrating filament falls back to its own variant's machine value.
+    const auto &machine_retract = print.full_print_config().option<ConfigOptionFloats>("retraction_length")->values;
+    int f2_std_machine_slot = print.full_print_config().get_index_for_extruder(2, "print_extruder_id", etDirectDrive, nvtStandard,
+                                                                               "print_extruder_variant");
+    REQUIRE(f2_std_machine_slot >= 0);
+    const std::vector<double> merged_retract = print.config().retraction_length.values;
+    REQUIRE(merged_retract.size() == 4);
+    REQUIRE_THAT(merged_retract[0], Catch::Matchers::WithinAbs(0.5, 1e-9));
+    REQUIRE_THAT(merged_retract[1], Catch::Matchers::WithinAbs(0.6, 1e-9));
+    REQUIRE_THAT(merged_retract[2], Catch::Matchers::WithinAbs(machine_retract[f2_std_machine_slot], 1e-9));
+    REQUIRE_THAT(merged_retract[3], Catch::Matchers::WithinAbs(1.2, 1e-9));
+
+    // Re-apply the unchanged config: the persisted result must reproduce the exact expansion.
+    auto status = print.apply(model, config);
+    REQUIRE(status != PrintBase::APPLY_STATUS_INVALIDATED);
+    REQUIRE(print.config().filament_self_index.values == std::vector<int>{1, 2, 3, 3});
+    REQUIRE(print.config().nozzle_temperature.values == std::vector<int>{200, 220, 240, 250});
+    REQUIRE(print.config().retraction_length.values == merged_retract);
+}
+
+TEST_CASE("Selector slicing keeps the result valid across re-apply", "[Print][H2C][Dynamic]")
+{
+    // The dynamic counterpart of the static re-apply test above: a full process() run through
+    // the selector branch (whatever grouping it settles on) must leave the config in a state
+    // the next apply reproduces without invalidating the freshly sliced result.
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.option<ConfigOptionFloats>("nozzle_diameter", true)->values = {0.4, 0.4};
+    config.option<ConfigOptionStrings>("extruder_nozzle_stats", true)->values = {"Standard#1", "Standard#1|High Flow#2"};
+    config.option<ConfigOptionEnumsGeneric>("extruder_type", true)->values = {etDirectDrive, etDirectDrive};
+    config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type", true)->values = {nvtStandard, nvtHybrid};
+    config.option<ConfigOptionStrings>("extruder_variant_list", true)->values = {"Direct Drive Standard,Direct Drive High Flow",
+                                                                                 "Direct Drive Standard,Direct Drive High Flow"};
+    config.option<ConfigOptionInts>("print_extruder_id", true)->values = {1, 1, 2, 2};
+    config.option<ConfigOptionStrings>("print_extruder_variant", true)->values = {"Direct Drive Standard", "Direct Drive High Flow",
+                                                                                  "Direct Drive Standard", "Direct Drive High Flow"};
+    config.option<ConfigOptionFloats>("filament_diameter", true)->values = {1.75, 1.75, 1.75};
+    config.option<ConfigOptionStrings>("filament_colour", true)->values = {"#FF0000", "#00FF00", "#0000FF"};
+    config.option<ConfigOptionInts>("filament_map", true)->values = {1, 2, 2};
+    config.option<ConfigOptionInts>("filament_volume_map", true)->values = {(int) nvtStandard, (int) nvtStandard, (int) nvtHighFlow};
+    config.set_key_value("enable_filament_dynamic_map", new ConfigOptionBool(true));
+    config.option<ConfigOptionEnum<FilamentMapMode>>("filament_map_mode", true)->value = FilamentMapMode::fmmAutoForFlush;
+
+    Model model;
+    ModelObject *object = model.add_object("cube", "", make_cube(20, 20, 20));
+    object->add_instance()->set_offset(Vec3d(100., 100., 0.));
+
+    Print print;
+    print.apply(model, config);
+    print.process();
+    REQUIRE(print.is_step_done(psSlicingFinished));
+
+    auto status = print.apply(model, config);
+    REQUIRE(status != PrintBase::APPLY_STATUS_INVALIDATED);
+    REQUIRE(print.is_step_done(psSlicingFinished));
 }

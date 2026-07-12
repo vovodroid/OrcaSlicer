@@ -683,6 +683,23 @@ class StaticPrintConfig;
 // Minimum object distance for arrangement, based on printer technology.
 double min_object_distance(const ConfigBase &cfg);
 
+// One (extruder type x nozzle volume type) parameter variant a filament prints through, plus a
+// representative physical extruder observed using it. Ordering (and set-dedup identity) covers
+// the variant pair only, so the same variant reached through two extruders keeps one config slot.
+struct FilamentVariantUse
+{
+    ExtruderType     extruder_type{etDirectDrive};
+    NozzleVolumeType nozzle_volume_type{nvtStandard};
+    int              extruder_id{0}; // 0-based, first extruder seen using this variant
+
+    bool operator<(const FilamentVariantUse &other) const
+    {
+        if (extruder_type != other.extruder_type)
+            return extruder_type < other.extruder_type;
+        return nozzle_volume_type < other.nozzle_volume_type;
+    }
+};
+
 // Slic3r dynamic configuration, used to override the configuration
 // per object, per modification volume or per printing material.
 // The dynamic configuration is also used to store user modifications of the print global parameters,
@@ -748,6 +765,18 @@ public:
     std::vector<int> update_values_to_printer_extruders(DynamicPrintConfig& printer_config, int extruder_count, int extruder_nozzle_volume_count, std::vector<std::vector<NozzleVolumeType>>& nv_types,
         std::set<std::string>& key_set, std::string id_name, std::string variant_name, unsigned int stride = 1, unsigned int extruder_id = 0, NozzleVolumeType filament_nvt = nvtStandard);
     void update_values_to_printer_extruders_for_multiple_filaments(DynamicPrintConfig& printer_config, int extruder_count, int extruder_nozzle_volume_count, std::set<std::string>& key_set, std::string id_name, std::string variant_name);
+    // Rebuilds the per-slot filament arrays from a per-layer grouping outcome: a filament that
+    // prints through several (extruder x nozzle volume type) variants keeps one slot per variant
+    // (unlike the single-slot rebuild above), so layer-aware consumers can resolve the slot the
+    // current layer actually prints with. Filaments absent from filament_variant_uses keep a
+    // single slot resolved from filament_map / filament_volume_map. When slot_machine_indices is
+    // non-null it receives one machine-variant slot index per output slot (the nil-value fallback
+    // keying for the extruder retract overrides; a per-filament map cannot index expanded arrays).
+    void update_filament_config_values_for_multiple_extruders(DynamicPrintConfig& printer_config,
+        const std::unordered_map<int, std::vector<FilamentVariantUse>>& filament_variant_uses,
+        int extruder_count, int extruder_nozzle_volume_count,
+        std::set<std::string>& key_set, std::string id_name, std::string variant_name,
+        std::vector<int>* slot_machine_indices = nullptr);
 
     void update_non_diff_values_to_base_config(DynamicPrintConfig& new_config, const t_config_option_keys& keys, const std::set<std::string>& different_keys, std::string extruder_id_name, std::string extruder_variant_name,
         std::set<std::string>& key_set1, std::set<std::string>& key_set2);

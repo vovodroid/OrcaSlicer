@@ -1063,12 +1063,24 @@ bool ToolOrdering::cal_non_support_filaments(const PrintConfig &config,
     int find_count = 0;
     int find_first_filaments_count = 0;
     bool has_non_support = has_non_support_filament(config);
-    for (const LayerTools &layer_tool : m_layer_tools) {
-        for (const unsigned int &filament : layer_tool.extruders) {
+    // The selector can move a filament between extruders per layer; resolve the extruder from
+    // the published result then, so the first filament attributed to an extruder is one it
+    // actually prints there. Static results keep the cross-layer filament_map arithmetic.
+    const bool use_dynamic_map = m_nozzle_group_result.is_support_dynamic_nozzle_map() && m_nozzle_group_result.get_layer_count() > 0;
+    auto extruder_for_filament = [&](unsigned int filament, size_t layer_idx) -> int {
+        if (use_dynamic_map)
+            return m_nozzle_group_result.get_extruder_id(static_cast<int>(filament), static_cast<int>(layer_idx));
+        return config.filament_map.values[filament] - 1;
+    };
+    for (size_t layer_idx = 0; layer_idx < m_layer_tools.size(); ++layer_idx) {
+        for (const unsigned int &filament : m_layer_tools[layer_idx].extruders) {
             //check first filament
-            if (!config.filament_map.values.empty() && initial_filaments[config.filament_map.values[filament] - 1] == -1) {
-                initial_filaments[config.filament_map.values[filament] - 1] = filament;
-                find_first_filaments_count++;
+            if (!config.filament_map.values.empty()) {
+                const int extruder_id = extruder_for_filament(filament, layer_idx);
+                if (extruder_id >= 0 && extruder_id < static_cast<int>(initial_filaments.size()) && initial_filaments[extruder_id] == -1) {
+                    initial_filaments[extruder_id] = filament;
+                    find_first_filaments_count++;
+                }
             }
 
             if (has_non_support) {
@@ -1083,8 +1095,9 @@ bool ToolOrdering::cal_non_support_filaments(const PrintConfig &config,
                 if (config.filament_map.values.empty())
                     return true;
 
-                if (initial_non_support_filaments[config.filament_map.values[filament] - 1] == -1) {
-                    initial_non_support_filaments[config.filament_map.values[filament] - 1] = filament;
+                const int extruder_id = extruder_for_filament(filament, layer_idx);
+                if (extruder_id >= 0 && extruder_id < static_cast<int>(initial_non_support_filaments.size()) && initial_non_support_filaments[extruder_id] == -1) {
+                    initial_non_support_filaments[extruder_id] = filament;
                     find_count++;
                 }
 
@@ -2080,17 +2093,15 @@ void ToolOrdering::reorder_extruders_for_minimum_flush_volume(bool reorder_first
         auto result   = MultiNozzleUtils::LayeredNozzleGroupResult::create(nozzle_map_per_layer, grouping_context.nozzle_info.nozzle_list, used_filaments, filament_sequences);
         grouping_result = result ? *result : MultiNozzleUtils::LayeredNozzleGroupResult();
 
-        // Derive the extruder-level map for the stats path + config write-back.
-        // Orca: the dynamic (per-layer) result carries no single volume/nozzle map, so only the
-        // extruder map is written back here; the full per-nozzle config write-back
-        // (a dedicated dynamic-map path) is a follow-up behind the dev flag.
+        // Derive the extruder-level map for the stats path; the write-back resolves the
+        // per-variant slots from the full grouping result itself.
         std::vector<int> derived_maps = grouping_result.get_extruder_map(false); // 1-based
         if (!derived_maps.empty()) {
             filament_maps = derived_maps;
             // A sequential per-object plan must not write its own map: the objects' plans are
             // stitched print-wide afterwards and written back once from there.
             if (not_sequential)
-                m_print->update_filament_maps_to_config(filament_maps);
+                m_print->update_to_config_by_nozzle_group_result(grouping_result);
         }
         std::transform(filament_maps.begin(), filament_maps.end(), filament_maps.begin(), [](int value) { return value - 1; });
     }

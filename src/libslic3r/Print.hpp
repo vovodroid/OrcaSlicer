@@ -1006,6 +1006,13 @@ public:
     const ToolOrdering& 		tool_ordering() const { return m_tool_ordering; }
 
     void update_filament_maps_to_config(std::vector<int> f_maps, std::vector<int> f_volume_maps = std::vector<int>{}, std::vector<int> f_nozzle_maps = std::vector<int>{});
+    // Write-back for a selector (per-layer planned) grouping result. When a filament actually
+    // migrates between nozzle variants, rebuilds the per-slot filament arrays so it holds one
+    // slot per variant and recomputes the extruder retract overrides against the expanded
+    // slots — update_filament_maps_to_config's single-slot rebuild cannot represent a
+    // migration. A result without migration reduces to a single grouping and takes the
+    // three-map write-back like the static paths.
+    void update_to_config_by_nozzle_group_result(const MultiNozzleUtils::LayeredNozzleGroupResult& group_result);
     void apply_config_for_render(const DynamicConfig &config);
 
     // 1 based group ids
@@ -1242,6 +1249,15 @@ private:
     void                _make_wipe_tower();
     void                finalize_first_layer_convex_hull();
     void                update_filament_self_index_cache();
+    // Deduplicates, per filament, the (extruder type x volume type) variants the grouping
+    // result routes it through; filaments the plan never routes get their default-map
+    // assignment so the slot resolution never depends on the (mutable) filament_map. config
+    // must carry extruder_type; returns false when it does not. Both the slice-time write-back
+    // and the apply-time reproduction call this with m_ori_full_print_config so the two
+    // expansions resolve identical slots.
+    bool                collect_filament_variant_uses(const MultiNozzleUtils::LayeredNozzleGroupResult& group_result,
+                                                      const DynamicPrintConfig& config,
+                                                      std::unordered_map<int, std::vector<FilamentVariantUse>>& uses) const;
 
     // Islands of objects and their supports extruded at the 1st layer.
     Polygons            first_layer_islands() const;

@@ -2603,12 +2603,7 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
                                                                             stitched_layer_filaments, used_filaments, physical_unprintables,
                                                                             geometric_unprintables, filament_unprintable_volumes);
                 this->set_nozzle_group_result(std::make_shared<MultiNozzleUtils::LayeredNozzleGroupResult>(stitched));
-                // Orca: the dynamic (per-layer) result carries no single volume/nozzle map, so only
-                // the extruder map is written back (matching the by-layer selector branch); the full
-                // per-nozzle config write-back is a follow-up behind the dev flag.
-                std::vector<int> derived_maps = stitched.get_extruder_map(false); // 1-based
-                if (!derived_maps.empty())
-                    update_filament_maps_to_config(derived_maps);
+                update_to_config_by_nozzle_group_result(stitched);
             }
         }
         else {
@@ -3366,6 +3361,133 @@ void Print::update_filament_maps_to_config(std::vector<int> f_maps, std::vector<
             m_config.apply(filament_overrides);
         }
     }
+    update_filament_self_index_cache();
+    m_has_auto_filament_map_result = true;
+}
+
+bool Print::collect_filament_variant_uses(const MultiNozzleUtils::LayeredNozzleGroupResult& group_result,
+                                          const DynamicPrintConfig& config,
+                                          std::unordered_map<int, std::vector<FilamentVariantUse>>& uses) const
+{
+    auto opt_filament_type = config.option<ConfigOptionStrings>("filament_type");
+    auto opt_extruder_type = dynamic_cast<const ConfigOptionEnumsGeneric*>(config.option("extruder_type"));
+    if (!opt_filament_type || !opt_extruder_type)
+        return false;
+
+    const size_t filament_count = opt_filament_type->values.size();
+    const size_t extruder_count = opt_extruder_type->values.size();
+    auto add_use = [&](std::set<FilamentVariantUse> &variant_set, const MultiNozzleUtils::NozzleInfo &nozzle) {
+        // Orca: a persisted result can outlive a printer swap; never index the extruder
+        // arrays with a stale nozzle record.
+        if (nozzle.extruder_id < 0 || static_cast<size_t>(nozzle.extruder_id) >= extruder_count)
+            return;
+        FilamentVariantUse use;
+        use.extruder_type      = static_cast<ExtruderType>(opt_extruder_type->get_at(nozzle.extruder_id));
+        use.nozzle_volume_type = nozzle.volume_type;
+        use.extruder_id        = nozzle.extruder_id;
+        variant_set.insert(use);
+    };
+    for (size_t f_index = 0; f_index < filament_count; ++f_index) {
+        std::set<FilamentVariantUse> variant_set;
+        for (const MultiNozzleUtils::NozzleInfo &nozzle : group_result.get_nozzles_for_filament(static_cast<int>(f_index)))
+            add_use(variant_set, nozzle);
+        // A filament the plan never routes (not printed) still needs a deterministic slot: take
+        // its default-map assignment from the result itself, so both the slice-time write-back
+        // and the apply-time reproduction resolve the same slot even when the surrounding
+        // filament_map has not round-tripped through the plate config in between.
+        if (variant_set.empty()) {
+            if (auto default_nozzle = group_result.get_nozzle_for_filament(static_cast<int>(f_index), -1); default_nozzle.has_value())
+                add_use(variant_set, *default_nozzle);
+        }
+        // Filaments still without a variant stay absent from the map: the slot rebuild then
+        // resolves them from their static filament_map / filament_volume_map assignment.
+        if (!variant_set.empty())
+            uses[static_cast<int>(f_index)] = std::vector<FilamentVariantUse>(variant_set.begin(), variant_set.end());
+    }
+    return true;
+}
+
+void Print::update_to_config_by_nozzle_group_result(const MultiNozzleUtils::LayeredNozzleGroupResult& group_result)
+{
+    std::vector<int> derived_maps = group_result.get_extruder_map(false); // 1-based
+    if (derived_maps.empty())
+        return;
+
+    if (!group_result.is_support_dynamic_nozzle_map()) {
+        // No filament actually migrated between nozzles, so the plan reduces to a single
+        // grouping: write all maps like the static paths do, and the next apply re-derives
+        // identical slots from the written maps.
+        std::vector<int> base_filament_map = m_config.filament_map.values;
+        if (base_filament_map.size() != derived_maps.size())
+            base_filament_map.assign(derived_maps.size(), 1);
+        std::vector<int> base_volume_map = m_config.filament_volume_map.values;
+        if (base_volume_map.size() != derived_maps.size())
+            base_volume_map.assign(derived_maps.size(), (int)nvtStandard);
+        const std::vector<unsigned int> used_filaments = group_result.get_used_filaments();
+        update_filament_maps_to_config(FilamentGroupUtils::update_used_filament_values(base_filament_map, derived_maps, used_filaments),
+                                       FilamentGroupUtils::update_used_filament_values(base_volume_map, group_result.get_volume_map(), used_filaments),
+                                       group_result.get_nozzle_map());
+        return;
+    }
+
+    // Orca: keep the coarse per-filament extruder map published even though the per-layer truth
+    // lives in the grouping result: the pre-export consumers, the plate read-back after slicing
+    // and the preview panel all key on filament_map. The write is direct — the full map
+    // write-back's single-slot rebuild would undo the per-variant expansion below.
+    m_ori_full_print_config.option<ConfigOptionInts>("filament_map", true)->values = derived_maps;
+    m_config.filament_map.values = derived_maps;
+
+    std::unordered_map<int, std::vector<FilamentVariantUse>> filament_variant_uses;
+    if (!collect_filament_variant_uses(group_result, m_ori_full_print_config, filament_variant_uses)) {
+        // Degenerate config (no filament/extruder typing): fall back to the single-slot
+        // write-back so the maps and overrides stay coherent.
+        update_filament_maps_to_config(derived_maps);
+        return;
+    }
+
+    int extruder_count = 1, extruder_volume_type_count = 1;
+    m_ori_full_print_config.support_different_extruders(extruder_count);
+    std::vector<std::vector<NozzleVolumeType>> nozzle_volume_types;
+    extruder_volume_type_count = m_ori_full_print_config.get_extruder_nozzle_volume_count(extruder_count, nozzle_volume_types);
+
+    // Note: filament_map_2 keeps its apply-time (static) derivation here; the per-slot machine
+    // indices below key the override merge instead, so nothing on this path reads it. Its other
+    // consumers are the three-map write-back (which recomputes it) and the diagnostic copy in
+    // the g-code header; per-(extruder x volume-type) machine limits in the g-code processor
+    // remain a follow-up (see GCodeProcessor::get_axis_max_feedrate).
+    m_full_print_config = m_ori_full_print_config;
+    std::set<std::string> filament_keys = filament_options_with_variant;
+    filament_keys.insert("filament_self_index");
+    std::vector<int> slot_machine_indices;
+    m_full_print_config.update_filament_config_values_for_multiple_extruders(m_full_print_config, filament_variant_uses,
+                                                                             extruder_count, extruder_volume_type_count,
+                                                                             filament_keys, "filament_self_index", "filament_extruder_variant",
+                                                                             &slot_machine_indices);
+
+    const std::vector<std::string> &extruder_retract_keys = print_config_def.extruder_retract_keys();
+    const std::string               filament_prefix       = "filament_";
+    t_config_option_keys            print_diff;
+    DynamicPrintConfig              filament_overrides;
+    for (auto& opt_key: extruder_retract_keys)
+    {
+        const ConfigOption *opt_new_filament = m_full_print_config.option(filament_prefix + opt_key);
+        const ConfigOption *opt_new_machine = m_full_print_config.option(opt_key);
+        const ConfigOption *opt_old_machine = m_config.option(opt_key);
+
+        if (opt_new_filament)
+            compute_filament_override_value(opt_key, opt_old_machine, opt_new_machine, opt_new_filament, m_full_print_config, print_diff, filament_overrides, slot_machine_indices);
+    }
+
+    {
+        t_config_option_keys keys(filament_options_with_variant.begin(), filament_options_with_variant.end());
+        keys.push_back("filament_self_index");
+        m_config.apply_only(m_full_print_config, keys, true);
+    }
+    if (!print_diff.empty()) {
+        m_placeholder_parser.apply_config(filament_overrides);
+        m_config.apply(filament_overrides);
+    }
+
     update_filament_self_index_cache();
     m_has_auto_filament_map_result = true;
 }
