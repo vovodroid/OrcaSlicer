@@ -18763,8 +18763,26 @@ msgstr ""
 msgid "Both"
 msgstr ""
 
-msgid ""
-"The printer has no nozzle matching the slicing file (%s). Please install a "
-"matching nozzle on the printer, or set the corresponding printer preset "
-"while slicing."
+#, possible-c-format, possible-boost-format
+msgid "The printer has no nozzle matching the slicing file (%s)."
+msgstr ""
+
+msgid "Please complete the hotend rack setup and try again."
+msgstr ""
+
+msgid "Please refresh the nozzle information and try again."
+msgstr ""
+
+msgid "Please install a matching nozzle in the hotend rack, or set the corresponding printer preset while slicing."
+msgstr ""
+
+msgid "The toolhead and hotend rack are full. Please remove at least one hotend before printing."
+msgstr ""
+
+#, possible-c-format, possible-boost-format
+msgid "Refreshing information of hotends(%d/%d)."
+msgstr ""
+
+#, possible-c-format, possible-boost-format
+msgid "The hardness of current material (%s) exceeds the hardness of %s(%s). It may cause nozzle wear, leading to material leakage and unstable flow. Please exercise caution when using it."
 msgstr ""

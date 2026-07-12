@@ -15,9 +15,9 @@
 // change_filament_gcode TPU-kit branch can activate. nvtHybrid is a slicer-only sentinel with no
 // device representation, so it stays out of these device flow-type conversions.
 //
-// GetExtruderNozzleInfo (and its ExtruderNozzleInfos / NozzleDef type pair) is intentionally
-// omitted here; it belongs with the SelectMachine slicing-vs-installed nozzle-info comparison
-// that is its only consumer.
+// GetExtruderNozzleInfo (and its ExtruderNozzleInfos aggregate) is intentionally omitted here;
+// the SelectMachine slicing-vs-installed nozzle comparison collects its per-extruder NozzleDef
+// entries itself (s_get_slicing_extuder_nozzles).
 
 namespace Slic3r
 {

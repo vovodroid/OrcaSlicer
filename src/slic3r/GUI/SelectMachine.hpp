@@ -508,7 +508,6 @@ public:
     bool build_nozzles_info(std::string& nozzles_info);
     bool can_hybrid_mapping(DevExtderSystem data);
     void auto_supply_with_ext(std::vector<DevAmsTray> slots);
-    bool is_nozzle_type_match(DevExtderSystem data, wxString& error_message) const;
     int  convert_filament_map_nozzle_id_to_task_nozzle_id(int nozzle_id) const;
 
     // Physical nozzle(s) a mapped filament (by filament index / FilamentInfo::id) prints on.
@@ -519,6 +518,12 @@ public:
     // rack slots ("R1", "R2 R3") for a nozzle-rack printer, or "L"/"R"/"L R" for a filament-switcher
     // printer. Empty for printers with neither (the card then shows no nozzle row).
     wxString get_mapped_nozzle_str(int fila_id) const;
+
+    // Block Send while a rack printer is still reading its hotend information.
+    bool CheckErrorRackStatus(MachineObject* obj_);
+    // Compare the slicing file's nozzle requirements (validity, flow, diameter) against the
+    // printer; the rack extruder is checked against its whole inventory (mounted + rack).
+    bool CheckErrorExtruderNozzleWithSlicing(MachineObject* obj_);//return true if no errors
 
     // Rack print-dispatch nozzle mapping (H2C): request the printer's auto-mapping and consume the
     // result, gating the Send button while the printer computes. Both are no-ops for non-rack printers.

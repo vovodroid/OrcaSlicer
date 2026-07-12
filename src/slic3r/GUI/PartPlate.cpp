@@ -1919,6 +1919,17 @@ int PartPlate::get_physical_extruder_by_filament_id(const DynamicConfig& g_confi
 	return the_map->values[zero_base_logical_idx];
 }
 
+int PartPlate::get_logical_extruder_by_filament_id(const DynamicConfig& g_config, int idx) const
+{
+	const std::vector<int>& filament_map = get_real_filament_maps(g_config);
+	if (idx <= 0 || idx > (int)filament_map.size())
+	{
+		return -1;
+	}
+
+	return filament_map[idx - 1] - 1;
+}
+
 std::vector<int> PartPlate::get_used_filaments()
 {
 	std::vector<int> used_filaments;

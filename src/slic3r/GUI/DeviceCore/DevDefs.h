@@ -158,3 +158,26 @@ enum PrintFromType
 }
 
 };// namespace Slic3r
+
+// A nozzle requirement of the sliced plate (or an installed nozzle's identity), compared in the
+// pre-print slicing-vs-installed nozzle checks.
+struct NozzleDef
+{
+    float                  nozzle_diameter;
+    Slic3r::NozzleFlowType nozzle_flow_type;
+
+    bool operator==(const NozzleDef& other) const
+    {
+        return nozzle_diameter == other.nozzle_diameter && nozzle_flow_type == other.nozzle_flow_type;
+    }
+};
+
+template<> struct std::hash<NozzleDef>
+{
+    std::size_t operator()(const NozzleDef& v) const noexcept
+    {
+        size_t h1 = std::hash<int>{}(v.nozzle_diameter * 1000);
+        size_t h2 = std::hash<int>{}(v.nozzle_flow_type);
+        return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
+    };
+};
