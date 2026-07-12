@@ -103,8 +103,18 @@ public:
 
     // Optional APIs
     virtual PluginCapabilityType get_type() const { return PluginCapabilityType::Unknown; }
-    virtual bool has_config() const { return false; }
-    virtual std::string embed_config_ui() const { return ""; }
+
+    // Every capability is configurable: it always appears in the Plugins dialog's Config
+    // sidebar and always has the host's default JSON editor over its stored config. The only
+    // question a capability answers is whether it supplies its own UI to edit that config
+    // *instead of* the JSON editor.
+    //
+    // True when the capability ships a custom configuration UI. get_config_ui() is called
+    // only when this returns true.
+    virtual bool has_config_ui() const { return false; }
+    // An HTML snippet for the custom configuration UI. An empty or throwing result is
+    // treated as "no custom UI" and falls back to the default JSON editor.
+    virtual std::string get_config_ui() const { return ""; }
 
     virtual void on_load() {}
     virtual void on_unload() {}

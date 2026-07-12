@@ -1,13 +1,11 @@
 #include "PluginConfig.hpp"
 
-#include <pybind11/pybind11.h>
-
 #include <boost/format.hpp>
 #include <boost/log/trivial.hpp>
 #include <boost/nowide/fstream.hpp>
 
-#include <slic3r/plugin/PluginAuditManager.hpp>
 #include <slic3r/plugin/PluginManager.hpp>
+#include <slic3r/plugin/PythonPluginInterface.hpp>
 #include <stdexcept>
 #include <utility>
 
@@ -65,17 +63,15 @@ std::string running_plugin_version(const std::string& plugin_key)
     return descriptor.installed_version.empty() ? descriptor.version : descriptor.installed_version;
 }
 
-// Identifies the capability whose Python method is currently on the stack. Both halves are
-// published by ScopedPluginAuditContext, which every C++ -> Python trampoline call opens.
-// A call arriving without them did not come through a capability, so it has no config to
-// address and we refuse it rather than reading or clobbering some other capability's entry.
-std::pair<std::string, std::string> calling_capability(const char* api_name)
+// The identity a capability is allowed to address: its own. PluginLoader stamps both halves
+// onto the instance when it materializes the capability, so the caller never supplies them
+// and cannot name another capability's entry. Empty means the instance was never materialized
+// (so it has no config to address) and we refuse rather than read or clobber a wrong entry.
+std::pair<std::string, std::string> capability_identity(const PluginCapabilityInterface& capability, const char* api_name)
 {
-    const PluginAuditManager& audit = PluginAuditManager::instance();
-
-    std::pair<std::string, std::string> id{audit.current_plugin(), audit.current_capability()};
+    std::pair<std::string, std::string> id{capability.audit_plugin_key(), capability.audit_capability_name()};
     if (id.first.empty() || id.second.empty())
-        throw std::runtime_error(std::string(api_name) + "() must be called from a plugin capability method");
+        throw std::runtime_error(std::string(api_name) + "() is only available on a capability loaded by the plugin host");
 
     return id;
 }
@@ -119,7 +115,7 @@ void PluginConfig::load()
     }
 }
 
-void PluginConfig::save()
+bool PluginConfig::save()
 {
     const std::string path = plugin_config_file();
 
@@ -134,7 +130,7 @@ void PluginConfig::save()
     boost::filesystem::create_directories(boost::filesystem::path(path).parent_path(), ec);
     if (ec) {
         BOOST_LOG_TRIVIAL(error) << "PluginConfig: cannot create the plugin directory: " << ec.message();
-        return;
+        return false;
     }
 
     // Write to a PID-suffixed file and rename it into place, so a crash mid-write cannot
@@ -147,15 +143,16 @@ void PluginConfig::save()
     file.close();
     if (file.fail()) {
         BOOST_LOG_TRIVIAL(error) << "PluginConfig: failed to write " << path_pid << "; keeping the existing config";
-        return;
+        return false;
     }
 
     if (const std::error_code rename_ec = rename_file(path_pid, path)) {
         BOOST_LOG_TRIVIAL(error) << "PluginConfig: failed to move " << path_pid << " onto " << path << ": " << rename_ec.message();
-        return;
+        return false;
     }
 
     m_dirty = false;
+    return true;
 }
 
 void PluginConfig::save_config(const std::string& plugin_key,
@@ -164,20 +161,12 @@ void PluginConfig::save_config(const std::string& plugin_key,
                                const nlohmann::json& config)
 { save_config({plugin_key, capability_name, version, config}); }
 
-bool PluginConfig::save_config_text(const std::string& plugin_key,
-                                    const std::string& capability_name,
-                                    const std::string& version,
-                                    const std::string& config)
+bool PluginConfig::store_capability_config(const std::string& plugin_key,
+                                           const std::string& capability_name,
+                                           const nlohmann::json& config)
 {
-    nlohmann::json parsed = nlohmann::json::parse(config, nullptr, /* allow_exceptions */ false);
-    if (parsed.is_discarded()) {
-        BOOST_LOG_TRIVIAL(error) << "PluginConfig: capability '" << capability_name << "' of plugin '" << plugin_key
-                                 << "' supplied malformed JSON; config not saved";
-        return false;
-    }
-
-    save_config({plugin_key, capability_name, version, std::move(parsed)});
-    return true;
+    save_config({plugin_key, capability_name, running_plugin_version(plugin_key), config});
+    return save();
 }
 
 void PluginConfig::save_config(const BaseConfig& config)
@@ -211,45 +200,27 @@ bool PluginConfig::dirty() const
     return m_dirty;
 }
 
-void PluginConfig::RegisterBindings(pybind11::module_& m)
+nlohmann::json capability_get_config(const PluginCapabilityInterface& capability)
 {
-    namespace py = pybind11;
+    const auto [plugin_key, capability_name] = capability_identity(capability, "get_config");
 
-    auto config_submodule = m.def_submodule("config", "Per-capability configuration storage");
+    const BaseConfig config = PluginManager::instance().get_config().get_config(plugin_key, capability_name);
+    // Never saved: hand back an empty object so a plugin can index the result unconditionally.
+    return config.empty() ? nlohmann::json::object() : config.config;
+}
 
-    // Config crosses this boundary as a JSON string, not a dict: the host does not care about
-    // the shape of cap_config, so it never builds Python objects out of it. Plugins hand the
-    // string to json.loads/json.dumps themselves.
-    config_submodule.def(
-        "get_config",
-        []() -> py::object {
-            const auto [plugin_key, capability] = calling_capability("get_config");
+std::string capability_get_config_version(const PluginCapabilityInterface& capability)
+{
+    const auto [plugin_key, capability_name] = capability_identity(capability, "get_config_version");
 
-            const BaseConfig config = PluginManager::instance().get_config().get_config(plugin_key, capability);
-            if (config.empty())
-                return py::none();
+    return PluginManager::instance().get_config().get_config(plugin_key, capability_name).plugin_version;
+}
 
-            return py::str(config_to_entry(config).dump());
-        },
-        R"pbdoc(Return this capability's stored config as a JSON string, or None if it has never been saved.
+bool capability_save_config(const PluginCapabilityInterface& capability, const nlohmann::json& config)
+{
+    const auto [plugin_key, capability_name] = capability_identity(capability, "save_config");
 
-The object mirrors the on-disk entry: "plugin_key", "capability", "plugin_version" and
-"cap_config". "plugin_version" is the version that last wrote the entry, so a plugin can
-compare it against its own and migrate "cap_config" before use.)pbdoc");
-
-    config_submodule.def(
-        "save_config",
-        [](const std::string& cap_config) {
-            const auto [plugin_key, capability] = calling_capability("save_config");
-
-            return PluginManager::instance().get_config().save_config_text(plugin_key, capability, running_plugin_version(plugin_key),
-                                                                           cap_config);
-        },
-        py::arg("cap_config"),
-        R"pbdoc(Store this capability's config, given as a JSON string.
-
-The plugin key, capability name and plugin version are supplied by the host. Returns False
-without storing anything if `cap_config` is not valid JSON.)pbdoc");
+    return PluginManager::instance().get_config().store_capability_config(plugin_key, capability_name, config);
 }
 
 } // namespace Slic3r

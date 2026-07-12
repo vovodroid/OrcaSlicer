@@ -64,6 +64,32 @@ public:
             get_name);
     }
 
+    // Config UI hooks. Available on every capability type, so they live here rather than in
+    // PyPluginInterfaceTrampoline. Audited like any other C++ -> Python call; a Python
+    // exception is logged with its traceback and rethrown, and the caller (PluginLoader at
+    // load time, PluginsDialog when opening the Config tab) decides the fallback.
+    bool has_config_ui() const override
+    {
+        ORCA_PY_OVERRIDE_AUDITED(
+            ::Slic3r::PluginAuditManager::AuditMode::Loading,
+            [] {},
+            PYBIND11_OVERRIDE,
+            bool,
+            Base,
+            has_config_ui);
+    }
+
+    std::string get_config_ui() const override
+    {
+        ORCA_PY_OVERRIDE_AUDITED(
+            ::Slic3r::PluginAuditManager::AuditMode::Loading,
+            [] {},
+            PYBIND11_OVERRIDE,
+            std::string,
+            Base,
+            get_config_ui);
+    }
+
     // All plugins may define their own on_load/unload functions.
     void on_load() override
     {

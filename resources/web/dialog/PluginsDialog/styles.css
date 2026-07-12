@@ -1084,6 +1084,158 @@ body {
   display: none;
 }
 
+/* Config tab: fixed-width capability sidebar + the capability's configuration view. */
+.config-layout {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 6px;
+  box-sizing: border-box;
+}
+
+.config-layout[hidden] {
+  display: none;
+}
+
+.config-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  border-right: 1px solid var(--border-soft);
+}
+
+.config-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.config-cap:hover {
+  background: var(--row-hover);
+}
+
+.config-cap.selected {
+  background: var(--row-selected);
+  border-color: var(--row-selected-outline);
+}
+
+.config-cap-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-cap-type {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.config-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.config-error {
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--plugin-status-warn-bg);
+  color: var(--plugin-status-warn);
+  font-size: 12px;
+}
+
+.config-error[hidden] {
+  display: none;
+}
+
+.config-editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.config-editor[hidden] {
+  display: none;
+}
+
+.config-textarea {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  box-sizing: border-box;
+  /* common.css applies `user-select: none` to *, which in WebKit also stops a textarea taking a
+     caret — the editor would be focusable but impossible to type into. Editable surfaces have to
+     opt back in (same as include/xterm/xterm.css does for the terminal). */
+  -webkit-user-select: text;
+  user-select: text;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: none;
+  white-space: pre;
+  overflow: auto;
+}
+
+.config-textarea:focus {
+  outline: none;
+  border-color: var(--main-color);
+}
+
+.config-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.config-validation {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-validation.invalid {
+  color: var(--plugin-status-danger);
+}
+
+.config-custom {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.config-custom[hidden] {
+  display: none;
+}
+
 .detail-table {
   width: 100%;
   border-collapse: collapse;

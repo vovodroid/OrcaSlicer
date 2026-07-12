@@ -11,11 +11,9 @@
 
 #define PLUGIN_CONFIG_DIR "config.json"
 
-namespace pybind11 {
-    class module_;
-}
-
 namespace Slic3r {
+
+class PluginCapabilityInterface;
 
 /*
 Example config.json shape
@@ -86,16 +84,17 @@ public:
     void load();
 
     // Rewrites config.json atomically. Clears the dirty flag only once the file is in place.
-    void save();
+    // False means the config on disk is unchanged.
+    bool save();
 
     void save_config(const std::string& plugin_key, const std::string& capability_name, const std::string& version, const nlohmann::json& config);
     void save_config(const BaseConfig& config);
 
-    // Parses `config` as a JSON document, storing nothing and returning false if it is
-    // malformed. Spelled differently from save_config() on purpose: nlohmann::json converts
-    // implicitly from const char*, so a `save_config(..., "{}")` overload pair would be
-    // ambiguous, and a raw string would silently store as a JSON string rather than an object.
-    bool save_config_text(const std::string& plugin_key, const std::string& capability_name, const std::string& version, const std::string& config);
+    // Replaces one capability's cap_config and writes config.json straight away, stamping the
+    // entry with the plugin version currently running. Every other entry is round-tripped
+    // untouched, so saving one capability cannot disturb another's config.
+    // The single mutation entry point for both the Plugins dialog and the Python binding.
+    bool store_capability_config(const std::string& plugin_key, const std::string& capability_name, const nlohmann::json& config);
 
     // Returns a default-constructed BaseConfig (see BaseConfig::empty) when the capability has
     // no stored config.
@@ -103,8 +102,6 @@ public:
     bool has_config(const std::string& plugin_key, const std::string& capability_name) const;
 
     bool dirty() const;
-
-    static void RegisterBindings(pybind11::module_& module);
 
 private:
     // (plugin_key, capability_name) -> entry. Ordered, so config.json serializes stably.
@@ -114,4 +111,19 @@ private:
     std::map<CapabilityId, BaseConfig> m_storage;
     bool m_dirty = false;
 };
+
+// Host implementations behind the capability-level Python config API (bound onto every
+// capability class in PythonPluginBridge). The capability addresses only itself: the
+// (plugin_key, capability_name) pair is read off the instance the call arrived on, never
+// passed in from Python, so a capability cannot reach another capability's config.
+// Throw std::runtime_error (surfacing to Python as RuntimeError) on an unmaterialized instance.
+
+// Only the user-editable cap_config. An empty object when nothing has been saved yet.
+nlohmann::json capability_get_config(const PluginCapabilityInterface& capability);
+// The plugin version that last wrote the entry, so a plugin can migrate a stale cap_config.
+// Empty when the capability has no stored config.
+std::string capability_get_config_version(const PluginCapabilityInterface& capability);
+// Replaces cap_config and persists. Host-managed identity and version metadata are preserved.
+bool capability_save_config(const PluginCapabilityInterface& capability, const nlohmann::json& config);
+
 } // namespace Slic3r

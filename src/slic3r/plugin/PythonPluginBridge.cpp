@@ -11,6 +11,7 @@
 #include <pybind11/stl.h>
 
 #include "PythonInterpreter.hpp"
+#include "PythonJsonUtils.hpp"
 #include "PluginConfig.hpp"
 #include "PluginHostApi.hpp"
 #include "PyPluginPackage.hpp"
@@ -320,12 +321,45 @@ void bind_python_api(pybind11::module_& m)
         .def_static("skipped", &ExecutionResult::skipped, py::arg("message") = std::string())
         .def_static("failure", &ExecutionResult::failure, py::arg("status"), py::arg("message"), py::arg("data") = std::string());
 
+    // Config lives at the capability level, not as a global orca.* function: the host reads the
+    // owning (plugin_key, capability) straight off the instance the call arrived on, so a
+    // capability can only ever address its own config and never has to name itself.
+    // Registered on the base, so every capability type (script/gcode/printer-agent) inherits it.
     py::class_<PluginCapabilityInterface, PyPluginInterfaceTrampoline, std::shared_ptr<PluginCapabilityInterface>>(m, "PythonPluginBase")
         .def(py::init<>())
         .def("get_name", &PluginCapabilityInterface::get_name)
         .def("get_type", &PluginCapabilityInterface::get_type)
         .def("on_load", &PluginCapabilityInterface::on_load)
-        .def("on_unload", &PluginCapabilityInterface::on_unload);
+        .def("on_unload", &PluginCapabilityInterface::on_unload)
+        .def("has_config_ui", &PluginCapabilityInterface::has_config_ui,
+             "Override to return True to replace the host's default JSON editor with your own HTML\n"
+             "UI, returned by get_config_ui(). Every capability is configurable and appears in the\n"
+             "Plugins dialog's Config tab regardless; this only chooses how its config is edited.")
+        .def("get_config_ui", &PluginCapabilityInterface::get_config_ui,
+             "Override to return the custom configuration UI as an HTML string. Only called when\n"
+             "has_config_ui() is True; an empty result falls back to the default JSON editor.\n"
+             "Inside the page, use window.orca.getConfig()/saveConfig() to reach this same config.")
+        .def(
+            "get_config",
+            [](const PluginCapabilityInterface& self) {
+                nlohmann::json config = capability_get_config(self);
+                return json_to_py(config); // GIL held (binding body)
+            },
+            "Return this capability's stored config. An empty dict if it has never been saved.")
+        .def(
+            "get_config_version",
+            [](const PluginCapabilityInterface& self) { return capability_get_config_version(self); },
+            "Return the plugin version that last wrote this capability's config, so a newer\n"
+            "release can spot a stale config and migrate it. Empty string if never saved.")
+        .def(
+            "save_config",
+            [](const PluginCapabilityInterface& self, const py::object& config) {
+                return capability_save_config(self, py_to_json(config)); // GIL held (binding body)
+            },
+            py::arg("config"),
+            "Persist this capability's config, given as a JSON-compatible value (usually a dict).\n"
+            "The plugin key, capability name and version are supplied by the host. Returns False if\n"
+            "the config file could not be written.");
 
     // Expose the package marker base as orca.base. @orca.plugin later verifies that the
     // decorated class derives from this exact pybind-registered C++ type.
@@ -340,7 +374,6 @@ void bind_python_api(pybind11::module_& m)
     PrinterAgentPluginCapability::RegisterBindings(m, pluginTypes);
     ScriptPluginCapability::RegisterBindings(m, pluginTypes);
     PluginHostApi::RegisterBindings(m);
-    PluginConfig::RegisterBindings(m);
     BOOST_LOG_TRIVIAL(debug) << "Registered ScriptPluginCapability Python bindings";
 
     m.def(

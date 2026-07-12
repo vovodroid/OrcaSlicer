@@ -67,6 +67,14 @@ private:
     bool install_plugin_package(const std::string& package_path);
     bool install_cloud_plugin(const std::string& uuid, const std::string& version, const wxString& name);
     void run_script_plugin(const std::string& plugin_key, const std::string& capability_name);
+    // Config tab. Both are scoped to (plugin_key, type, capability_name): a request naming a
+    // capability that is gone or not configurable is refused rather than served from, or written
+    // to, some other entry.
+    void send_capability_config(const std::string& plugin_key, PluginCapabilityType type, const std::string& capability_name);
+    void save_capability_config(const std::string& plugin_key,
+                                PluginCapabilityType type,
+                                const std::string& capability_name,
+                                const nlohmann::json& config);
     // Pushes a one-line result into the web footer status bar (level: "success" | "warn" | "error" | "info"),
     // used for every plugin/capability operation instead of a modal box so the dialog stays non-disruptive.
     void show_status(const wxString& message, const char* level);

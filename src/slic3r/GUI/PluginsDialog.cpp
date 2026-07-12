@@ -68,6 +68,11 @@ struct PluginCapabilityView
     bool enabled    = false;
     bool can_toggle = false;
     bool can_run    = false;
+    // Whether the capability supplies its own config UI, cached on the loaded capability at load
+    // time. False for the descriptor-only rows shown for a plugin that is not loaded: its
+    // capabilities have not been materialized yet, so there is nothing to configure until it is
+    // activated. Every real capability is configurable; this only picks the editor.
+    bool has_config_ui = false;
 };
 
 struct PluginChangelogView
@@ -206,12 +211,13 @@ nlohmann::json build_plugin_payload_item(const PluginDialogItem& dialog_item)
     nlohmann::json caps = nlohmann::json::array();
     for (const PluginCapabilityView& capability : dialog_item.capabilities) {
         nlohmann::json c;
-        c["name"]       = capability.name;
-        c["type"]       = capability.type_label;
-        c["type_key"]   = capability.type_key;
-        c["enabled"]    = capability.enabled;
-        c["can_toggle"] = capability.can_toggle;
-        c["can_run"]    = capability.can_run;
+        c["name"]          = capability.name;
+        c["type"]          = capability.type_label;
+        c["type_key"]      = capability.type_key;
+        c["enabled"]       = capability.enabled;
+        c["can_toggle"]    = capability.can_toggle;
+        c["can_run"]       = capability.can_run;
+        c["has_config_ui"] = capability.has_config_ui;
         caps.push_back(std::move(c));
     }
     payload_item["capabilities"] = std::move(caps);
@@ -355,7 +361,8 @@ PluginDialogItem build_plugin_dialog_item(const PluginDescriptor& descriptor)
         for (const auto& cap : loader.get_loaded_plugin_capabilities(descriptor.plugin_key)) {
             if (cap) {
                 item.capabilities.push_back({cap->name, plugin_capability_type_display_name(cap->type),
-                                             plugin_capability_type_to_string(cap->type), cap->enabled, true, false});
+                                             plugin_capability_type_to_string(cap->type), cap->enabled, true, false,
+                                             cap->has_config_ui});
                 if (cap->type == PluginCapabilityType::Script)
                     item.has_script_capability = true;
             }
@@ -518,6 +525,17 @@ void PluginsDialog::on_script_message(const nlohmann::json& payload)
         open_plugin_hub();
     } else if (command == "set_plugin_sort") {
         set_plugin_sort(payload.value("sort_key", ""), payload.value("sort_order", ""));
+    } else if (command == "get_capability_config") {
+        send_capability_config(payload.value("plugin_key", ""),
+                               plugin_capability_type_from_string(payload.value("capability_type", "")),
+                               payload.value("capability_name", ""));
+    } else if (command == "save_capability_config") {
+        // `config` is a JSON string from the default editor's textarea, or an already-structured
+        // value from a capability's custom UI. Both land here; save_capability_config sorts it out.
+        save_capability_config(payload.value("plugin_key", ""),
+                               plugin_capability_type_from_string(payload.value("capability_type", "")),
+                               payload.value("capability_name", ""),
+                               payload.contains("config") ? payload.at("config") : nlohmann::json::object());
     } else if (command == "set_plugin_install_action") {
         const std::string action = payload.value("action", "");
         if (action == "explore" || action == "install-local")
@@ -894,6 +912,127 @@ wxString PluginsDialog::plugin_display_name(const std::string& plugin_key) const
     if (get_descriptor(plugin_key, descriptor) && !descriptor.name.empty())
         return from_u8(descriptor.name);
     return from_u8(plugin_key);
+}
+
+// Replies to the web page with one capability's stored config, plus the custom HTML UI when the
+// capability provides one. Config is sent as a JSON value, not text: the default editor
+// pretty-prints it into its textarea, and a custom UI receives it as-is through window.orca.
+void PluginsDialog::send_capability_config(const std::string& plugin_key,
+                                           PluginCapabilityType type,
+                                           const std::string& capability_name)
+{
+    nlohmann::json response;
+    response["command"]         = "capability_config";
+    response["plugin_key"]      = plugin_key;
+    response["capability_name"] = capability_name;
+    response["capability_type"] = plugin_capability_type_to_string(type);
+    response["config"]          = nlohmann::json::object();
+    response["custom_html"]     = "";
+    response["error"]           = "";
+
+    // Scoped to (plugin_key, type, capability_name), so a stale request from a page that has not
+    // caught up with a refresh cannot read a different plugin's config — it just misses.
+    auto cap = get_capability(plugin_key, type, capability_name);
+    if (!cap) {
+        BOOST_LOG_TRIVIAL(warning) << "Ignoring config request for a capability that is no longer loaded. plugin_key="
+                                   << plugin_key << " capability_name=" << capability_name;
+        response["error"] = into_u8(_L("This capability is no longer available."));
+        call_web_handler(response);
+        return;
+    }
+
+    response["config"] = PluginManager::instance().get_config().get_config(plugin_key, capability_name).config;
+
+    if (cap->has_config_ui) {
+        // Plugin-authored HTML. A raising or empty get_config_ui() costs the capability only its
+        // custom UI: we report the failure and let the page fall back to the default JSON editor,
+        // which edits the very same stored config.
+        std::string html;
+        std::string error;
+        {
+            wxBusyCursor busy;
+            try {
+                PythonGILState gil;
+                html = cap->instance->get_config_ui();
+            } catch (const std::exception& ex) {
+                error = ex.what();
+            } catch (...) {
+                error = "Unknown error";
+            }
+        }
+
+        if (!error.empty()) {
+            BOOST_LOG_TRIVIAL(error) << "Plugin capability get_config_ui() failed. plugin_key=" << plugin_key
+                                     << " capability_name=" << capability_name << " error=" << error;
+            response["error"] = into_u8(format_wxstr(_L("The plugin's configuration UI failed to load (%1%). Showing the default editor."),
+                                                     from_u8(error)));
+        } else if (html.empty()) {
+            BOOST_LOG_TRIVIAL(warning) << "Plugin capability reports a config UI but returned no HTML. plugin_key=" << plugin_key
+                                       << " capability_name=" << capability_name;
+            response["error"] = into_u8(_L("The plugin's configuration UI was empty. Showing the default editor."));
+        } else {
+            response["custom_html"] = html;
+        }
+    }
+
+    call_web_handler(response);
+}
+
+// Persists one capability's config. `config` arrives either as text straight from the default
+// editor (validated here, so invalid JSON can never reach the file) or as a structured value from
+// a custom UI. Only cap_config is written; identity and version metadata stay host-managed.
+void PluginsDialog::save_capability_config(const std::string& plugin_key,
+                                           PluginCapabilityType type,
+                                           const std::string& capability_name,
+                                           const nlohmann::json& config)
+{
+    nlohmann::json response;
+    response["command"]         = "capability_config_saved";
+    response["plugin_key"]      = plugin_key;
+    response["capability_name"] = capability_name;
+    response["capability_type"] = plugin_capability_type_to_string(type);
+    response["ok"]              = false;
+    response["error"]           = "";
+
+    auto cap = get_capability(plugin_key, type, capability_name);
+    if (!cap) {
+        BOOST_LOG_TRIVIAL(warning) << "Refusing to save config for a capability that is no longer loaded. plugin_key="
+                                   << plugin_key << " capability_name=" << capability_name;
+        response["error"] = into_u8(_L("This capability is no longer available. Your changes were not saved."));
+        call_web_handler(response);
+        return;
+    }
+
+    nlohmann::json parsed = config;
+    if (config.is_string()) {
+        // The page validates as the user types, but it is not the authority: re-parse here so a
+        // malformed document is rejected before it can reach config.json.
+        parsed = nlohmann::json::parse(config.get<std::string>(), nullptr, /* allow_exceptions */ false);
+        if (parsed.is_discarded()) {
+            response["error"] = into_u8(_L("The configuration is not valid JSON. Your changes were not saved."));
+            call_web_handler(response);
+            return;
+        }
+    }
+
+    if (!PluginManager::instance().get_config().store_capability_config(plugin_key, capability_name, parsed)) {
+        BOOST_LOG_TRIVIAL(error) << "Failed to write the plugin config file. plugin_key=" << plugin_key
+                                 << " capability_name=" << capability_name;
+        response["error"] = into_u8(_L("The configuration could not be written to disk. Your changes were not saved."));
+        call_web_handler(response);
+        return;
+    }
+
+    BOOST_LOG_TRIVIAL(info) << "Saved plugin capability config. plugin_key=" << plugin_key
+                            << " capability_name=" << capability_name;
+
+    // Echo the persisted value back so the editor reloads from what is actually stored rather
+    // than from what the user typed.
+    response["ok"]     = true;
+    response["config"] = PluginManager::instance().get_config().get_config(plugin_key, capability_name).config;
+    call_web_handler(response);
+
+    show_status(_L("Configuration saved."), "success");
 }
 
 void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::string& capability_name)

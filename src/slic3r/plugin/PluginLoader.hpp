@@ -32,6 +32,7 @@ struct LoadedPluginCapability
     std::string name;        // Cached from instance->get_name() at load time
     std::string plugin_key;  // Owning package
     PluginCapabilityType type = PluginCapabilityType::Unknown; // cached from instance->get_type() at load (GUI reads this without the GIL)
+    bool has_config_ui = false; // cached from instance->has_config_ui() at load (GUI reads this without the GIL)
     std::atomic<bool> enabled{true}; // logical enable/disable; disabled capabilities are skipped by consumers but stay loaded
 };
 

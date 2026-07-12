@@ -122,6 +122,12 @@ bool PluginManager::initialize()
 
     m_initialized = true;
 
+    // Bring every capability's stored config into memory. Deliberately unconditional and
+    // independent of which plugins are installed: an entry outlives uninstall/unsubscribe, so a
+    // plugin that comes back later finds its settings intact. A missing or malformed file just
+    // leaves the store empty (see PluginConfig::load), never blocking startup.
+    m_config.load();
+
     // Persist auto-load / capability state to each plugin's .install_state.json sidecar.
     // On load: write enabled=true plus current capability flags. On unload: flip enabled=false.
     // The on-unload callback is skipped during shutdown (run_on_unload_callbacks is gated by
@@ -168,6 +174,12 @@ void PluginManager::shutdown()
 
     m_loader.unload_all_plugins();
     PythonPluginBridge::instance().clear_pending_captures();
+
+    // Every config write already goes to disk as it happens (store_capability_config), so this
+    // only catches an in-memory-only mutation. Note we flush rather than clear: unloading the
+    // plugins above must never discard their stored config.
+    if (m_config.dirty())
+        m_config.save();
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);

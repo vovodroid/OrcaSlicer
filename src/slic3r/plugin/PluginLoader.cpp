@@ -974,6 +974,22 @@ void PluginLoader::load_plugin_impl(PluginCatalog& catalog, const std::string& p
 
                 loaded_cap->instance->set_audit_plugin_key(descriptor.plugin_key);
                 loaded_cap->instance->set_audit_capability_name(loaded_cap->name);
+
+                // Cache the config-UI hook once, here, so the Plugins dialog can build the Config
+                // tab without reaching into Python (and without the GIL). It is optional and
+                // plugin-authored: a raising or non-bool override only costs this capability its
+                // custom UI (it falls back to the host's JSON editor) — it must not fail the whole
+                // plugin load, so it is caught locally rather than falling through to the
+                // materialization handler below.
+                try {
+                    loaded_cap->has_config_ui = loaded_cap->instance->has_config_ui();
+                } catch (const std::exception& ex) {
+                    BOOST_LOG_TRIVIAL(warning)
+                        << "Plugin capability '" << loaded_cap->name << "' of plugin '" << loaded_cap->plugin_key
+                        << "': has_config_ui() failed (" << ex.what() << "); falling back to the default JSON editor";
+                    loaded_cap->has_config_ui = false;
+                }
+
                 capability_types.push_back(loaded_cap->type);
                 loaded.capabilities.push_back(capability_id);
                 capabilities.emplace_back(std::move(loaded_cap));

@@ -21,6 +21,14 @@ let selectedPluginId = "";
 let contextPluginId = "";
 let activeDetailTab = "plugin-info";
 let selectedInstallAction = "explore";
+// Config tab: the capability whose config is currently shown, scoped to selectedPluginId. Name and
+// type together address the capability on the native side. Cleared whenever the plugin changes.
+let selectedCapabilityName = "";
+let selectedCapabilityType = "";
+// The plugin the capability selection above belongs to. Capability names are only unique within a
+// plugin, so two plugins can each expose e.g. a "main" script capability; without remembering the
+// owner, selecting the second plugin would keep the selection and show the first plugin's config.
+let configPluginId = "";
 
 let pluginList = null;
 let ctxMenu = null;
@@ -59,6 +67,14 @@ function OnInit() {
   pluginList?.addEventListener("change", OnPluginListChange);
   pluginList?.addEventListener("contextmenu", OnPluginContextMenu);
   ctxMenu?.addEventListener("click", OnContextMenuClick);
+
+  document.getElementById("configSidebar")?.addEventListener("click", OnConfigSidebarClick);
+  document.getElementById("configSaveBtn")?.addEventListener("click", SaveCapabilityConfig);
+  document.getElementById("configText")?.addEventListener("input", ValidateConfigText);
+  // The custom capability UI is sandboxed into an opaque origin, so it reaches us only through
+  // postMessage. Match on the frame's own contentWindow rather than the origin (which is "null"
+  // for a sandboxed frame) and ignore anything else on the channel.
+  window.addEventListener("message", OnCustomConfigMessage);
 
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".ctx"))
@@ -227,6 +243,10 @@ function HandleStudio(value) {
     ApplyPlugins(payload.data || []);
   } else if (payload.command === "status_message") {
     ShowStatusMessage(String(payload.message || ""), String(payload.level || "info"));
+  } else if (payload.command === "capability_config") {
+    ApplyCapabilityConfig(payload);
+  } else if (payload.command === "capability_config_saved") {
+    ApplyCapabilityConfigSaved(payload);
   }
 }
 
@@ -785,6 +805,335 @@ function RenderDetails() {
     ApplyDetailUpdateBadge(detailUpdateBadge, plugin);
   if (detailUpdateBtn)
     ApplyDetailUpdateButton(detailUpdateBtn, plugin);
+
+  RenderConfig(plugin);
+}
+
+// ---------------------------------------------------------------------------
+// Config tab
+//
+// The sidebar lists the selected plugin's configurable capabilities; the right side shows either
+// the host's JSON editor or, when the capability ships one, its own HTML UI in a sandboxed frame.
+// Both edit the same stored config: the page holds no config state of its own, it renders what the
+// native side sends and sends back what the user saves.
+// ---------------------------------------------------------------------------
+
+// Every capability is configurable — it always gets at least the default JSON editor over its
+// stored config — so the sidebar lists them all. The only exception is the descriptor-only rows
+// shown for a plugin that is not activated: those carry no capability name, so there is nothing to
+// address on the native side and nothing to configure yet.
+function GetConfigurableCapabilities(plugin) {
+  return GetCapabilities(plugin).filter((capability) => String(capability?.name || ""));
+}
+
+function RenderConfig(plugin) {
+  const empty = document.getElementById("configEmpty");
+  const layout = document.getElementById("configLayout");
+  const sidebar = document.getElementById("configSidebar");
+  if (!empty || !layout || !sidebar)
+    return;
+
+  const capabilities = plugin ? GetConfigurableCapabilities(plugin) : [];
+  const pluginKey = String(plugin?.plugin_key || "");
+
+  // A different plugin than the one the current selection belongs to: drop the selection outright
+  // rather than trusting the name to mean the same thing here.
+  if (pluginKey !== configPluginId) {
+    configPluginId = pluginKey;
+    selectedCapabilityName = "";
+    selectedCapabilityType = "";
+    ClearCapabilityConfigView();
+  }
+
+  if (!plugin || capabilities.length === 0) {
+    // Capabilities are only materialized once the plugin is activated, so an inactive plugin has
+    // nothing to configure yet — say that, rather than claiming it has no capabilities.
+    empty.textContent = !plugin
+      ? "Select a plugin to configure its capabilities"
+      : (IsPluginLoading(plugin)
+        ? "Loading the plugin…"
+        : (GetStatus(plugin) === "Activated"
+          ? "This plugin exposes no capabilities"
+          : "Activate this plugin to configure its capabilities"));
+    empty.hidden = false;
+    layout.hidden = true;
+    sidebar.replaceChildren();
+    ClearCapabilityConfigView();
+    selectedCapabilityName = "";
+    selectedCapabilityType = "";
+    return;
+  }
+
+  empty.hidden = true;
+  layout.hidden = false;
+
+  // Keep the selection across a refresh when the capability is still there; otherwise fall back to
+  // the first one, which is also the initial selection for a newly selected plugin.
+  const stillPresent = capabilities.some((capability) =>
+    capability.name === selectedCapabilityName && String(capability.type_key || "") === selectedCapabilityType);
+  if (!stillPresent) {
+    selectedCapabilityName = String(capabilities[0].name || "");
+    selectedCapabilityType = String(capabilities[0].type_key || "");
+    ClearCapabilityConfigView();
+    RequestCapabilityConfig();
+  }
+
+  sidebar.replaceChildren();
+  for (const capability of capabilities) {
+    const name = String(capability.name || "");
+    const typeKey = String(capability.type_key || "");
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "config-cap";
+    item.dataset.capabilityName = name;
+    item.dataset.capabilityType = typeKey;
+    item.setAttribute("role", "option");
+
+    const isSelected = name === selectedCapabilityName && typeKey === selectedCapabilityType;
+    item.classList.toggle("selected", isSelected);
+    item.setAttribute("aria-selected", isSelected ? "true" : "false");
+
+    const label = document.createElement("span");
+    label.className = "config-cap-name";
+    label.textContent = name;
+    item.appendChild(label);
+
+    const type = document.createElement("span");
+    type.className = "config-cap-type";
+    type.textContent = String(capability.type || "");
+    item.appendChild(type);
+
+    sidebar.appendChild(item);
+  }
+}
+
+function OnConfigSidebarClick(event) {
+  const item = event.target.closest(".config-cap");
+  if (!item)
+    return;
+
+  const name = String(item.dataset.capabilityName || "");
+  const typeKey = String(item.dataset.capabilityType || "");
+  if (!name || (name === selectedCapabilityName && typeKey === selectedCapabilityType))
+    return;
+
+  selectedCapabilityName = name;
+  selectedCapabilityType = typeKey;
+
+  // Drop the outgoing capability's view immediately: the native reply is asynchronous and its
+  // content must never appear under the newly selected capability.
+  ClearCapabilityConfigView();
+  RequestCapabilityConfig();
+  RenderConfig(pluginsById.get(selectedPluginId));
+}
+
+function RequestCapabilityConfig() {
+  if (!selectedPluginId || !selectedCapabilityName)
+    return;
+
+  SendMessage("get_capability_config", {
+    plugin_key: selectedPluginId,
+    capability_name: selectedCapabilityName,
+    capability_type: selectedCapabilityType
+  });
+}
+
+// Empties both editors, so nothing from the previously selected capability can linger while the
+// next one is still in flight.
+function ClearCapabilityConfigView() {
+  const editor = document.getElementById("configEditor");
+  const custom = document.getElementById("configCustom");
+  const text = document.getElementById("configText");
+  const error = document.getElementById("configError");
+
+  if (editor)
+    editor.hidden = true;
+  if (custom) {
+    custom.hidden = true;
+    custom.removeAttribute("srcdoc");
+  }
+  if (text)
+    text.value = "";
+  if (error) {
+    error.hidden = true;
+    error.textContent = "";
+  }
+  SetConfigValidation("");
+}
+
+// True when a native reply still matches what the user has selected. A reply for a capability the
+// user has already navigated away from is dropped rather than rendered into the current view.
+function IsCurrentCapability(payload) {
+  return String(payload?.plugin_key || "") === selectedPluginId &&
+    String(payload?.capability_name || "") === selectedCapabilityName;
+}
+
+function ApplyCapabilityConfig(payload) {
+  if (!IsCurrentCapability(payload))
+    return;
+
+  const editor = document.getElementById("configEditor");
+  const custom = document.getElementById("configCustom");
+  const text = document.getElementById("configText");
+  const error = document.getElementById("configError");
+
+  const message = String(payload?.error || "");
+  if (error) {
+    error.textContent = message;
+    error.hidden = message === "";
+  }
+
+  const config = (payload && typeof payload.config === "object" && payload.config !== null) ? payload.config : {};
+  const html = String(payload?.custom_html || "");
+
+  if (html) {
+    // A capability with its own UI: hand it the config through the bridge, never the raw file.
+    if (custom) {
+      custom.hidden = false;
+      custom.srcdoc = BuildCustomConfigDocument(html, config);
+    }
+    if (editor)
+      editor.hidden = true;
+    return;
+  }
+
+  // Default editor. The native side already reported why a custom UI is unavailable (if it was
+  // meant to have one) in payload.error, and we fall back to editing the same config here.
+  if (custom) {
+    custom.hidden = true;
+    custom.removeAttribute("srcdoc");
+  }
+  if (editor)
+    editor.hidden = false;
+  if (text)
+    text.value = JSON.stringify(config, null, 2);
+  SetConfigValidation("");
+}
+
+function SetConfigValidation(message) {
+  const node = document.getElementById("configValidation");
+  const save = document.getElementById("configSaveBtn");
+  if (node) {
+    node.textContent = message;
+    node.classList.toggle("invalid", message !== "");
+  }
+  // Invalid JSON can never be saved: the button is the only way to persist, and it is disabled
+  // while the text does not parse. The native side re-validates regardless.
+  if (save)
+    save.disabled = message !== "";
+}
+
+function ValidateConfigText() {
+  const text = document.getElementById("configText");
+  if (!text)
+    return false;
+
+  try {
+    JSON.parse(text.value);
+    SetConfigValidation("");
+    return true;
+  } catch (err) {
+    SetConfigValidation(String(err?.message || "Invalid JSON"));
+    return false;
+  }
+}
+
+function SaveCapabilityConfig() {
+  const text = document.getElementById("configText");
+  if (!text || !selectedPluginId || !selectedCapabilityName)
+    return;
+  if (!ValidateConfigText())
+    return;
+
+  // Sent as text on purpose: the native side is the authority on validity and parses it itself.
+  SendMessage("save_capability_config", {
+    plugin_key: selectedPluginId,
+    capability_name: selectedCapabilityName,
+    capability_type: selectedCapabilityType,
+    config: text.value
+  });
+}
+
+function ApplyCapabilityConfigSaved(payload) {
+  if (!IsCurrentCapability(payload))
+    return;
+
+  const error = document.getElementById("configError");
+  const message = String(payload?.error || "");
+  if (error) {
+    error.textContent = message;
+    error.hidden = message === "";
+  }
+  if (payload?.ok !== true)
+    return;
+
+  // Reload from what was actually persisted, so both editors show the stored state rather than
+  // whatever was typed.
+  const config = (payload && typeof payload.config === "object" && payload.config !== null) ? payload.config : {};
+  const custom = document.getElementById("configCustom");
+  const text = document.getElementById("configText");
+
+  if (custom && !custom.hidden && custom.contentWindow)
+    custom.contentWindow.postMessage({ __orca: "config", config: config }, "*");
+  else if (text)
+    text.value = JSON.stringify(config, null, 2);
+
+  SetConfigValidation("");
+}
+
+// The whole host surface a custom config UI gets: read the config it was opened with, save a new
+// one, and be told when a save lands. Everything else about the dialog stays out of reach — the
+// frame is sandboxed into an opaque origin, so this bridge is its only way to talk to the host.
+function BuildCustomConfigDocument(html, config) {
+  // The config is inlined into a <script>, so a stored string containing "</script>" would
+  // otherwise close the tag early and inject the rest as markup. Escaping "<" keeps the literal
+  // valid JSON while making that impossible.
+  const seed = JSON.stringify(config).replace(/</g, "\\u003c");
+  const bridge = `<script>
+(function () {
+  var handlers = [];
+  var current = ${seed};
+  window.orca = {
+    getConfig: function () { return current; },
+    saveConfig: function (cfg) { parent.postMessage({ __orca: "save", config: cfg }, "*"); },
+    onConfig: function (cb) {
+      if (typeof cb !== "function") return;
+      handlers.push(cb);
+      try { cb(current); } catch (e) {}
+    }
+  };
+  window.addEventListener("message", function (event) {
+    if (!event.data || event.data.__orca !== "config") return;
+    current = event.data.config || {};
+    handlers.forEach(function (handler) {
+      try { handler(current); } catch (e) {}
+    });
+  });
+})();
+<\/script>`;
+  return bridge + html;
+}
+
+function OnCustomConfigMessage(event) {
+  const custom = document.getElementById("configCustom");
+  // Only the frame we created, and only while it is actually showing.
+  if (!custom || custom.hidden || !custom.contentWindow || event.source !== custom.contentWindow)
+    return;
+
+  const data = event.data;
+  if (!data || data.__orca !== "save")
+    return;
+  if (!selectedPluginId || !selectedCapabilityName)
+    return;
+
+  // The custom UI persists through the same native command as the JSON editor, so there is one
+  // stored config and one code path that writes it.
+  SendMessage("save_capability_config", {
+    plugin_key: selectedPluginId,
+    capability_name: selectedCapabilityName,
+    capability_type: selectedCapabilityType,
+    config: data.config === undefined ? {} : data.config
+  });
 }
 
 function RenderThumbnail(plugin) {
