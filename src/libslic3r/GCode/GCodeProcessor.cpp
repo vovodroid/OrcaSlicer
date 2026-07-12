@@ -2969,6 +2969,8 @@ void GCodeProcessor::apply_config(const PrintConfig& config)
     for (size_t i = 0; i < filament_count; ++ i) {
         m_extruder_offsets[i] = to_3d(config.extruder_offset.get_at(filament_map[i] - 1).cast<float>().eval(), 0.f);
         m_extruder_colors[i]            = static_cast<unsigned char>(i);
+        // Orca: pre-heat bookkeeping reads the filament's first per-variant column by design;
+        // it feeds estimation-side heat-up modelling only, never the emitted commands.
         m_filament_nozzle_temp_first_layer[i] = static_cast<int>(config.nozzle_temperature_initial_layer.get_at(i));
         m_filament_nozzle_temp[i]      = static_cast<int>(config.nozzle_temperature.get_at(i));
         if (m_filament_nozzle_temp[i] == 0) {

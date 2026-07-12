@@ -1559,6 +1559,10 @@ void WipeTower::set_extruder(size_t idx, const PrintConfig& config)
     //while (m_filpar.size() < idx+1)   // makes sure the required element is in the vector
     m_filpar.push_back(FilamentParameters());
 
+    // Orca: one row per filament, indexed by the raw filament id. Under a per-layer nozzle
+    // grouping the per-variant arrays may hold several columns per filament; the tower has no
+    // layer dimension here, so it keeps the filament's first column (tower x per-layer
+    // grouping is a documented follow-up).
     m_filpar[idx].material = config.filament_type.get_at(idx);
     m_filpar[idx].is_soluble = config.wipe_tower_filament == 0 ? config.filament_soluble.get_at(idx) : (idx != size_t(config.wipe_tower_filament - 1));
     // BBS

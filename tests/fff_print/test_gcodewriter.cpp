@@ -404,3 +404,55 @@ TEST_CASE("EXTRUDER_LIMIT per-extruder clamping and max fallback", "[GCodeWriter
         }
     }
 }
+
+SCENARIO("Extruder reads the injected config column", "[GCodeWriter][H2C]") {
+    GIVEN("A writer whose per-variant arrays hold three columns for two filaments") {
+        GCodeWriter writer;
+        // Column layout after a migrating regroup: filament 0 -> column 0, filament 1 ->
+        // columns 1 (its first variant) and 2 (its second variant).
+        writer.config.retraction_length.values   = {0.8, 0.5, 1.2};
+        writer.config.z_hop.values               = {0.4, 0.6, 0.9};
+        writer.config.retraction_speed.values    = {30., 40., 50.};
+        writer.config.filament_flow_ratio.values = {0.98, 1.0, 1.02};
+        // Filament-indexed arrays keep one entry per filament.
+        writer.config.filament_diameter.values   = {1.75, 1.75};
+        writer.set_extruders({0, 1});
+        writer.toolchange(1);
+        Extruder *fil = writer.filament();
+        REQUIRE(fil != nullptr);
+        REQUIRE(fil->id() == 1);
+        const double crossection = 1.75 * 1.75 * 0.25 * PI;
+
+        WHEN("no column has been injected") {
+            THEN("the getters read the filament id's column") {
+                REQUIRE(fil->config_index() == 1);
+                REQUIRE_THAT(fil->retraction_length(), Catch::Matchers::WithinAbs(0.5, 1e-9));
+                REQUIRE_THAT(fil->retract_lift(), Catch::Matchers::WithinAbs(0.6, 1e-9));
+                REQUIRE(fil->retract_speed() == 40);
+                REQUIRE_THAT(fil->e_per_mm3(), Catch::Matchers::WithinRel(1.0 / crossection, 1e-9));
+            }
+        }
+        WHEN("the second variant column is injected") {
+            fil->set_config_index(2);
+            THEN("the getters follow the column and the flow cache is rescaled") {
+                REQUIRE(fil->config_index() == 2);
+                REQUIRE_THAT(fil->retraction_length(), Catch::Matchers::WithinAbs(1.2, 1e-9));
+                REQUIRE_THAT(fil->retract_lift(), Catch::Matchers::WithinAbs(0.9, 1e-9));
+                REQUIRE(fil->retract_speed() == 50);
+                REQUIRE_THAT(fil->e_per_mm3(), Catch::Matchers::WithinRel(1.02 / crossection, 1e-9));
+            }
+            THEN("filament-indexed reads keep using the filament id") {
+                REQUIRE_THAT(fil->filament_diameter(), Catch::Matchers::WithinAbs(1.75, 1e-9));
+            }
+        }
+        WHEN("a negative index is injected") {
+            fil->set_config_index(2);
+            fil->set_config_index(-1);
+            THEN("resolution resets to the filament id") {
+                REQUIRE(fil->config_index() == 1);
+                REQUIRE_THAT(fil->retraction_length(), Catch::Matchers::WithinAbs(0.5, 1e-9));
+                REQUIRE_THAT(fil->e_per_mm3(), Catch::Matchers::WithinRel(1.0 / crossection, 1e-9));
+            }
+        }
+    }
+}

@@ -264,6 +264,12 @@ public:
     // append full config to the given string
     static void append_full_config(const Print& print, std::string& str);
 
+    // Per-filament config-slot resolvers for the current layer (m_cur_layer_idx): the filament
+    // resolver keys filament-indexed arrays, the nozzle resolver keys (extruder x volume-type)
+    // slot arrays. Both degenerate to filament_id / extruder index on single-volume printers.
+    size_t get_filament_config_index(int filament_id) const;
+    size_t get_nozzle_config_index(int filament_id) const;
+
     // Object and support extrusions of the same PrintObject at the same print_z.
     // public, so that it could be accessed by free helper functions from GCode.cpp
     struct LayerToPrint
@@ -395,11 +401,6 @@ private:
     void check_placeholder_parser_failed();
     size_t cur_extruder_index() const;
     size_t get_extruder_id(unsigned int filament_id) const;
-    // Per-filament config-slot resolvers for the current layer (m_cur_layer_idx): the filament
-    // resolver keys filament-indexed arrays, the nozzle resolver keys (extruder x volume-type)
-    // slot arrays. Both degenerate to filament_id / extruder index on single-volume printers.
-    size_t get_filament_config_index(int filament_id) const;
-    size_t get_nozzle_config_index(int filament_id) const;
     void   update_placeholder_parser_with_variant_params();
 
     void            set_last_pos(const Point &pos) { m_last_pos = Point3(pos, 0); m_last_pos_defined = true; }
