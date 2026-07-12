@@ -2008,6 +2008,11 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
         // Rack hotend info is being read: block Send until it finishes.
         Enable_Refresh_Button(true);
         Enable_Send_Button(false);
+    } else if (status == PrintDialogStatus::PrintStatusRackNozzleNumUnmeetWarning ||
+               status == PrintDialogStatus::PrintStatusHasUnreliableNozzleWarning) {
+        // Advisory rack inventory shortfalls: allow Send.
+        Enable_Refresh_Button(true);
+        Enable_Send_Button(true);
     }
 
     /*enter perpare mode*/
@@ -3571,6 +3576,81 @@ bool SelectMachineDialog::CheckErrorRackStatus(MachineObject* obj_)
     return true;
 }
 
+void SelectMachineDialog::CheckWarningRackStatus(MachineObject* obj_)
+{
+    if (!obj_) {
+        return;
+    }
+
+    const auto& nozzle_sys = obj_->GetNozzleSystem();
+    const auto& rack = nozzle_sys->GetNozzleRack();
+    if (!rack->IsSupported()) {
+        return;
+    }
+
+    auto nozzle_group_res = DevUtilBackend::GetNozzleGroupResult(m_plater);
+    if (!nozzle_group_res) {
+        return;
+    }
+
+    if (m_print_type != FROM_NORMAL) {
+        return;// there are no slicing data when print from sdcard
+    }
+
+    const auto& nozzle_vec = nozzle_group_res->get_used_nozzles_in_extruder(LOGIC_R_EXTRUDER_ID);
+    if (nozzle_vec.empty()) {
+        return;// no need to check if no right nozzles used in slicing
+    }
+
+    std::unordered_map<NozzleDef, int> need_nozzle_map;
+    for (const auto& slicing_nozzle : nozzle_vec) {
+        try {
+            NozzleDef data;
+            data.nozzle_diameter = std::stof(slicing_nozzle.diameter);
+            data.nozzle_flow_type = DevNozzle::ToNozzleFlowType(slicing_nozzle.volume_type);
+            need_nozzle_map[data]++;
+        } catch (const std::exception& e) {
+            assert(0);
+            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << "exception: " << e.what();
+        }
+    }
+
+    for (const auto& need_nozzle : need_nozzle_map) {
+        const auto& nozzle_info = need_nozzle.first;
+        const auto& installed_nozzles = nozzle_sys->CollectNozzles(MAIN_EXTRUDER_ID, nozzle_info.nozzle_flow_type, nozzle_info.nozzle_diameter);
+        int installed_count = installed_nozzles.size();
+        int installed_reliable_count = 0;
+        for (const auto& nozzle : installed_nozzles) {
+            if (nozzle.IsInfoReliable()) {
+                installed_reliable_count++;
+            }
+        }
+
+        // check if enough nozzles installed
+        if (need_nozzle.second > installed_count) {
+            wxString msg = _L("There are not enough available hotends currently.");
+            msg += " ";
+            if (rack->GetCaliStatus() != DevNozzleRack::Rack_CALI_OK) {
+                msg += _L("Please complete the hotend rack setup and try again.");
+            } else if (nozzle_sys->HasUnknownNozzles()) {
+                msg += _L("Please refresh the nozzle information and try again.");
+            } else {
+                msg += _L("Please re-slice to avoid filament waste.");
+            }
+
+            show_status(PrintDialogStatus::PrintStatusRackNozzleNumUnmeetWarning, { msg });
+            break;
+        }
+
+        // check if unreliable nozzle maybe used
+        if (need_nozzle.second > installed_reliable_count && nozzle_sys->HasUnreliableNozzles()) {
+            // Orca: text-only warning; this message board has no refresh / don't-show-again buttons.
+            show_status(PrintDialogStatus::PrintStatusHasUnreliableNozzleWarning,
+                        { _L("The reported hotend information may be unreliable.") + " " + _L("Please refresh the nozzle information and try again.") });
+        }
+    }
+}
+
 // Compare the extruder nozzle info between slicing file and installed on printer
 bool SelectMachineDialog::CheckErrorExtruderNozzleWithSlicing(MachineObject* obj_)
 {
@@ -4155,6 +4235,9 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
 
     // check extension tool warning
     UpdateStatusCheckWarning_ExtensionTool(obj_);
+
+    // check rack nozzle warning
+    CheckWarningRackStatus(obj_);
 
     /** normal check **/
     show_status(PrintDialogStatus::PrintStatusReadyToGo);

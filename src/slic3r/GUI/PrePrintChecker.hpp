@@ -97,6 +97,8 @@ enum PrintDialogStatus : unsigned int {
     PrintStatusToolHeadCoolingFanWarning,
     PrintStatusRackNozzleMappingWarning,
     PrintStatusFilaSwitcherSlicingNotMatch,
+    PrintStatusRackNozzleNumUnmeetWarning,
+    PrintStatusHasUnreliableNozzleWarning,
     PrintStatusPrinterWarningEnd,
 
     // Warnings for filament

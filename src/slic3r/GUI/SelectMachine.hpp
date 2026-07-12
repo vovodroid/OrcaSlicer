@@ -521,6 +521,9 @@ public:
 
     // Block Send while a rack printer is still reading its hotend information.
     bool CheckErrorRackStatus(MachineObject* obj_);
+    // Warn (without blocking) when the rack inventory looks insufficient for the sliced plate:
+    // fewer matching hotends than the plate needs, or matches relying on unreliable nozzle info.
+    void CheckWarningRackStatus(MachineObject* obj_);
     // Compare the slicing file's nozzle requirements (validity, flow, diameter) against the
     // printer; the rack extruder is checked against its whole inventory (mounted + rack).
     bool CheckErrorExtruderNozzleWithSlicing(MachineObject* obj_);//return true if no errors
