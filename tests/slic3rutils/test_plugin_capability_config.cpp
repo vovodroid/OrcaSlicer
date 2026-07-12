@@ -1,0 +1,361 @@
+#include <catch2/catch_all.hpp>
+
+#include <libslic3r/Utils.hpp>
+#include <slic3r/plugin/PluginConfig.hpp>
+#include <slic3r/plugin/PluginManager.hpp>
+#include <slic3r/plugin/PythonPluginBridge.hpp>
+#include <slic3r/plugin/PythonPluginInterface.hpp>
+
+#include "plugin_test_utils.hpp"
+
+#include <nlohmann/json.hpp>
+#include <pybind11/embed.h>
+#include <pybind11/pybind11.h>
+
+#include <memory>
+#include <string>
+
+namespace py = pybind11;
+using namespace Slic3r;
+using json = nlohmann::json;
+
+namespace {
+
+void ensure_python_initialized()
+{
+    // Same rationale as test_plugin_host_api.cpp: `orca` is an embedded module compiled into this
+    // binary, so a bare interpreter is enough and does not need the bundled Python home.
+    if (!Py_IsInitialized()) {
+        static py::scoped_interpreter interpreter;
+        (void) interpreter;
+    }
+}
+
+py::module_ import_orca_module()
+{
+    ensure_python_initialized();
+    (void) PythonPluginBridge::instance(); // force the embedded module registration into the binary
+    return py::module_::import("orca");
+}
+
+// Builds a Python capability from `body` and materializes it the way PluginLoader does: the audit
+// identity is stamped on by the host, never supplied by the plugin, and it is what scopes every
+// config call to this one capability.
+py::object make_capability(const std::string& class_name,
+                           const std::string& body,
+                           const std::string& plugin_key,
+                           const std::string& capability_name)
+{
+    // Import first: it is what brings the interpreter up, and constructing any py:: object
+    // beforehand would touch a Python that does not exist yet.
+    py::module_ orca = import_orca_module();
+
+    py::dict globals;
+    globals["orca"] = orca;
+
+    py::exec("class " + class_name + "(orca.PythonPluginBase):\n" + body, globals);
+    py::object instance = globals[class_name.c_str()]();
+
+    if (!plugin_key.empty()) {
+        auto iface = instance.cast<std::shared_ptr<PluginCapabilityInterface>>();
+        iface->set_audit_plugin_key(plugin_key);
+        iface->set_audit_capability_name(capability_name);
+    }
+    return instance;
+}
+
+std::shared_ptr<PluginCapabilityInterface> as_interface(const py::object& instance)
+{
+    return instance.cast<std::shared_ptr<PluginCapabilityInterface>>();
+}
+
+// The config the Python API actually writes to: capability_save_config persists through the
+// PluginManager singleton, so that is where the assertions read from.
+PluginConfig& host_config() { return PluginManager::instance().get_config(); }
+
+} // namespace
+
+TEST_CASE("Capability config API is exposed on every Python capability", "[PluginConfig][Python]")
+{
+    py::module_ orca = import_orca_module();
+    REQUIRE(py::hasattr(orca, "PythonPluginBase"));
+
+    py::object base = orca.attr("PythonPluginBase");
+    // Host-provided (the capability calls these). Every capability has a config, so these are
+    // always available — there is no hook to opt in or out of being configurable.
+    CHECK(py::hasattr(base, "get_config"));
+    CHECK(py::hasattr(base, "save_config"));
+    CHECK(py::hasattr(base, "get_config_version"));
+    // Plugin-provided (the host calls these). All optional.
+    CHECK(py::hasattr(base, "has_config_ui"));
+    CHECK(py::hasattr(base, "get_config_ui"));
+    CHECK(py::hasattr(base, "get_default_config"));
+
+    // Config is reached through the capability, never as a free orca.config.* function, so a
+    // capability cannot name — and therefore cannot touch — a config that is not its own.
+    CHECK_FALSE(py::hasattr(orca, "config"));
+}
+
+TEST_CASE("get_config returns only cap_config and save_config persists it", "[PluginConfig][Python]")
+{
+    ScopedDataDir data_dir_guard("plugin-config-py-roundtrip");
+    host_config().load(); // reset the singleton's in-memory store against the empty temp dir
+
+    py::object cap = make_capability("RoundTripCap", "    def get_name(self): return 'cap_a'\n", "plugin_a", "cap_a");
+
+    // Nothing stored yet: an empty dict, not None, so a plugin can index it unconditionally.
+    py::object initial = cap.attr("get_config")();
+    REQUIRE(py::isinstance<py::dict>(initial));
+    CHECK(py::len(initial) == 0);
+    CHECK(cap.attr("get_config_version")().cast<std::string>().empty());
+
+    py::dict value;
+    value["speed"] = 5;
+    value["name"]  = "fast";
+    REQUIRE(cap.attr("save_config")(value).cast<bool>());
+
+    // Persisted through PluginConfig, under this capability's identity only.
+    const BaseConfig stored = host_config().get_config("plugin_a", "cap_a");
+    REQUIRE_FALSE(stored.empty());
+    CHECK(stored.config == json{{"speed", 5}, {"name", "fast"}});
+
+    // And read back through Python as a dict of exactly cap_config — no host metadata.
+    py::object reloaded = cap.attr("get_config")();
+    REQUIRE(py::isinstance<py::dict>(reloaded));
+    CHECK(py::len(reloaded) == 2);
+    CHECK(reloaded.contains("speed"));
+    CHECK_FALSE(reloaded.contains("plugin_key"));
+    CHECK_FALSE(reloaded.contains("capability"));
+    CHECK_FALSE(reloaded.contains("cap_config"));
+    CHECK_FALSE(reloaded.contains("plugin_version"));
+}
+
+TEST_CASE("Saving one capability's config does not touch another's", "[PluginConfig][Python]")
+{
+    ScopedDataDir data_dir_guard("plugin-config-py-isolation");
+    host_config().load();
+
+    const std::string body = "    def get_name(self): return 'cap'\n";
+    // Same capability name under two different plugins, plus a second capability of plugin_a:
+    // each addresses only the entry matching its own stamped identity.
+    py::object a_cap1 = make_capability("IsoCapA1", body, "plugin_a", "cap_a");
+    py::object a_cap2 = make_capability("IsoCapA2", body, "plugin_a", "cap_b");
+    py::object b_cap1 = make_capability("IsoCapB1", body, "plugin_b", "cap_a");
+
+    py::dict one, two, three;
+    one["value"]   = 1;
+    two["value"]   = 2;
+    three["value"] = 3;
+    REQUIRE(a_cap1.attr("save_config")(one).cast<bool>());
+    REQUIRE(a_cap2.attr("save_config")(two).cast<bool>());
+    REQUIRE(b_cap1.attr("save_config")(three).cast<bool>());
+
+    py::dict updated;
+    updated["value"] = 99;
+    REQUIRE(a_cap1.attr("save_config")(updated).cast<bool>());
+
+    CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"value", 99}});
+    CHECK(host_config().get_config("plugin_a", "cap_b").config == json{{"value", 2}});
+    CHECK(host_config().get_config("plugin_b", "cap_a").config == json{{"value", 3}});
+
+    // Each capability still reads back its own value.
+    CHECK(a_cap2.attr("get_config")()["value"].cast<int>() == 2);
+    CHECK(b_cap1.attr("get_config")()["value"].cast<int>() == 3);
+}
+
+TEST_CASE("Config API refuses a capability the host never materialized", "[PluginConfig][Python]")
+{
+    ScopedDataDir data_dir_guard("plugin-config-py-unowned");
+    host_config().load();
+
+    // No audit identity: the instance was never loaded by the host, so it has no config to address.
+    // Refused rather than served from, or written to, some arbitrary entry.
+    py::object orphan = make_capability("OrphanCap", "    def get_name(self): return 'cap'\n", "", "");
+
+    CHECK_THROWS(orphan.attr("get_config")());
+    CHECK_THROWS(orphan.attr("get_config_version")());
+    CHECK_THROWS(orphan.attr("save_config")(py::dict()));
+}
+
+TEST_CASE("Custom config UI hooks dispatch to the Python override", "[PluginConfig][Python]")
+{
+    py::object cap = make_capability("CustomUiCap",
+                                     "    def get_name(self): return 'cap_a'\n"
+                                     "    def has_config_ui(self): return True\n"
+                                     "    def get_config_ui(self): return '<p>hello</p>'\n",
+                                     "plugin_a", "cap_a");
+
+    auto iface = as_interface(cap);
+    REQUIRE(iface);
+    CHECK(iface->has_config_ui());
+    CHECK(iface->get_config_ui() == "<p>hello</p>");
+}
+
+TEST_CASE("A capability that omits the config UI hooks gets the default editor", "[PluginConfig][Python]")
+{
+    ScopedDataDir data_dir_guard("plugin-config-py-bare");
+    host_config().load();
+
+    // Both hooks are optional and only choose the editor. A capability that overrides neither is
+    // still configurable — it just gets the host's JSON editor — so it stays in the Config sidebar
+    // and its config API keeps working. There is no way for a capability to opt out of having one.
+    py::object bare = make_capability("BareCap", "    def get_name(self): return 'cap_a'\n", "plugin_a", "cap_a");
+
+    auto iface = as_interface(bare);
+    REQUIRE(iface);
+    CHECK_FALSE(iface->has_config_ui()); // -> default JSON editor
+    CHECK(iface->get_config_ui().empty());
+
+    py::dict value;
+    value["speed"] = 5;
+    REQUIRE(bare.attr("save_config")(value).cast<bool>());
+    CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"speed", 5}});
+}
+
+TEST_CASE("get_default_config supplies the value Restore defaults writes back", "[PluginConfig][Python]")
+{
+    SECTION("not overridden -> an empty config")
+    {
+        // Which is already "restore defaults" for a capability that keeps its stored config sparse
+        // and applies its own defaults on read: clearing the overrides restores them.
+        py::object bare = make_capability("NoDefaultsCap", "    def get_name(self): return 'cap_a'\n", "plugin_a", "cap_a");
+
+        auto iface = as_interface(bare);
+        REQUIRE(iface);
+        CHECK(iface->get_default_config() == json::object());
+    }
+
+    SECTION("overridden -> exactly what the plugin returns")
+    {
+        py::object cap = make_capability("DefaultsCap",
+                                         "    def get_name(self): return 'cap_a'\n"
+                                         "    def get_default_config(self):\n"
+                                         "        return {'speed': 5, 'nested': {'on': True}, 'items': [1, 2]}\n",
+                                         "plugin_a", "cap_a");
+
+        auto iface = as_interface(cap);
+        REQUIRE(iface);
+        // Round-trips through py_to_json untouched: the host does not reshape or validate it.
+        CHECK(iface->get_default_config() == json{{"speed", 5}, {"nested", {{"on", true}}}, {"items", {1, 2}}});
+    }
+
+    SECTION("overridden but returns None -> an empty config, never a null")
+    {
+        // `def get_default_config(self): pass` is the easy mistake. It must not be able to store
+        // "cap_config": null — an unimplemented hook means an empty config, however it is spelled.
+        py::object cap = make_capability("NoneDefaultsCap",
+                                         "    def get_name(self): return 'cap_a'\n"
+                                         "    def get_default_config(self): pass\n",
+                                         "plugin_a", "cap_a");
+
+        auto iface = as_interface(cap);
+        REQUIRE(iface);
+
+        const json restored = iface->get_default_config();
+        CHECK(restored == json::object());
+        CHECK_FALSE(restored.is_null());
+    }
+
+    SECTION("overridden but returns a non-object -> an empty config")
+    {
+        py::object cap = make_capability("ScalarDefaultsCap",
+                                         "    def get_name(self): return 'cap_a'\n"
+                                         "    def get_default_config(self): return [1, 2, 3]\n",
+                                         "plugin_a", "cap_a");
+
+        auto iface = as_interface(cap);
+        REQUIRE(iface);
+        CHECK(iface->get_default_config() == json::object());
+    }
+}
+
+TEST_CASE("Restoring defaults overwrites only the target capability", "[PluginConfig][Python]")
+{
+    ScopedDataDir data_dir_guard("plugin-config-py-restore");
+    host_config().load();
+
+    const std::string defaults_body = "    def get_name(self): return 'cap'\n"
+                                      "    def get_default_config(self): return {'speed': 1}\n";
+    py::object target   = make_capability("RestoreTargetCap", defaults_body, "plugin_a", "cap_a");
+    py::object bystander = make_capability("RestoreBystanderCap", defaults_body, "plugin_b", "cap_a");
+
+    py::dict edited;
+    edited["speed"] = 99;
+    REQUIRE(target.attr("save_config")(edited).cast<bool>());
+    REQUIRE(bystander.attr("save_config")(edited).cast<bool>());
+
+    // What PluginsDialog::restore_capability_config does: ask the capability, store the answer.
+    auto iface = as_interface(target);
+    REQUIRE(host_config().store_capability_config("plugin_a", "cap_a", iface->get_default_config()));
+
+    CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"speed", 1}});
+    // The same capability name under another plugin keeps its edited value.
+    CHECK(host_config().get_config("plugin_b", "cap_a").config == json{{"speed", 99}});
+}
+
+TEST_CASE("A raising get_default_config leaves the stored config untouched", "[PluginConfig][Python]")
+{
+    ScopedDataDir data_dir_guard("plugin-config-py-restore-raise");
+    host_config().load();
+
+    py::object cap = make_capability("RaisingDefaultsCap",
+                                     "    def get_name(self): return 'cap_a'\n"
+                                     "    def get_default_config(self): raise RuntimeError('boom')\n",
+                                     "plugin_a", "cap_a");
+
+    py::dict value;
+    value["keep"] = "me";
+    REQUIRE(cap.attr("save_config")(value).cast<bool>());
+
+    auto iface = as_interface(cap);
+    REQUIRE(iface);
+    CHECK_THROWS_AS(iface->get_default_config(), py::error_already_set);
+
+    // The dialog stores nothing when the hook throws: a broken plugin must not wipe user settings.
+    CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"keep", "me"}});
+}
+
+TEST_CASE("A raising config UI hook surfaces as an exception the host can catch", "[PluginConfig][Python]")
+{
+    py::object cap = make_capability("RaisingCap",
+                                     "    def get_name(self): return 'cap_a'\n"
+                                     "    def has_config_ui(self): return True\n"
+                                     "    def get_config_ui(self): raise RuntimeError('boom')\n",
+                                     "plugin_a", "cap_a");
+
+    auto iface = as_interface(cap);
+    REQUIRE(iface);
+
+    // The trampoline logs the traceback and rethrows; callers (PluginLoader when caching the flag,
+    // PluginsDialog when opening the Config tab) catch it and fall back to the default JSON editor
+    // instead of crashing.
+    CHECK_THROWS_AS(iface->get_config_ui(), py::error_already_set);
+
+    // Catching it leaves the interpreter usable — the host is still able to talk to the capability.
+    CHECK(iface->get_name() == "cap_a");
+}
+
+TEST_CASE("A config UI hook returning the wrong type does not crash the host", "[PluginConfig][Python]")
+{
+    // has_config_ui() is plugin-authored, so it can return anything. Whatever pybind makes of a
+    // non-bool, the host must survive the call: it either converts or throws, never crashes.
+    py::object cap = make_capability("BadTypeCap",
+                                     "    def get_name(self): return 'cap_a'\n"
+                                     "    def has_config_ui(self): return 'not a bool'\n",
+                                     "plugin_a", "cap_a");
+
+    auto iface = as_interface(cap);
+    REQUIRE(iface);
+
+    // Deliberately not REQUIRE_THROWS: pybind may coerce the value or reject it, and both are
+    // acceptable. What must hold is that the call is survivable — a throw is what PluginLoader's
+    // guard turns into "no custom UI".
+    try {
+        (void) iface->has_config_ui();
+    } catch (const std::exception&) {
+    }
+
+    // The capability is still usable afterwards: the bad hook cost it nothing but its own answer.
+    CHECK(iface->get_name() == "cap_a");
+    CHECK(iface->get_config_ui().empty());
+}

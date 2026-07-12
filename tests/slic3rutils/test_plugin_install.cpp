@@ -5,6 +5,8 @@
 #include <slic3r/plugin/PluginDescriptor.hpp>
 #include <slic3r/plugin/PythonFileUtils.hpp>
 
+#include "plugin_test_utils.hpp"
+
 #include <boost/filesystem.hpp>
 
 #include <fstream>
@@ -14,30 +16,6 @@ using namespace Slic3r;
 namespace fs = boost::filesystem;
 
 namespace {
-
-// Point data_dir() at a throwaway directory for the lifetime of a test and
-// restore the previous value afterwards, so install_plugin() writes into a
-// disposable tree and tests don't leak state into each other.
-struct ScopedDataDir
-{
-    std::string previous;
-    fs::path    dir;
-
-    explicit ScopedDataDir(const std::string& tag)
-    {
-        previous = data_dir();
-        dir      = fs::temp_directory_path() / fs::unique_path("orca-" + tag + "-%%%%-%%%%");
-        fs::create_directories(dir);
-        set_data_dir(dir.string());
-    }
-
-    ~ScopedDataDir()
-    {
-        set_data_dir(previous);
-        boost::system::error_code ec;
-        fs::remove_all(dir, ec);
-    }
-};
 
 fs::path write_py_file(const fs::path& dir, const std::string& filename, const std::string& contents)
 {
