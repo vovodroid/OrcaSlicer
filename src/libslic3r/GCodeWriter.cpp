@@ -594,23 +594,15 @@ std::string GCodeWriter::update_progress(unsigned int num, unsigned int tot, boo
 
 std::string GCodeWriter::toolchange_prefix() const
 {
-    std::string gcode = "T";
+    // Orca: the manual-filament-change tag must stay ahead of the flavor selection so
+    // MMU manual-change handling keeps working.
     if (config.manual_filament_change)
-        gcode = ";" + GCodeProcessor::reserved_tag(GCodeProcessor::ETags::Manual_Tool_Change) + "T";
-    else {
-        if (m_is_bbl_printers)
-            gcode = "M1020 S";
-        else {
-            if (FLAVOR_IS(gcfMakerWare))
-                gcode = "M135 T";
-            else if (FLAVOR_IS(gcfSailfish))
-                gcode = "M108 T";
-        }
-    }
-    return gcode;
+        return ";" + GCodeProcessor::reserved_tag(GCodeProcessor::ETags::Manual_Tool_Change) + "T";
+    return FLAVOR_IS(gcfMakerWare) ? "M135 T" :
+           FLAVOR_IS(gcfSailfish)  ? "M108 T" : "T";
 }
 
-std::string GCodeWriter::toolchange(unsigned int filament_id)
+std::string GCodeWriter::toolchange(unsigned int filament_id, int nozzle_id)
 {
     // set the new extruder
     auto filament_extruder_iter = Slic3r::lower_bound_by_predicate(m_filament_extruders.begin(), m_filament_extruders.end(), [filament_id](const Extruder &e) { return e.id() < filament_id; });
@@ -621,9 +613,16 @@ std::string GCodeWriter::toolchange(unsigned int filament_id)
     // return the toolchange command
     // if we are running a single-extruder setup, just set the extruder and return nothing
     std::ostringstream gcode;
+    // Orca: also emit for non-BBL single-extruder multi-filament setups (MMU-style).
     if (this->multiple_extruders || (this->config.filament_diameter.values.size() > 1 && !is_bbl_printers())) {
-        // Orca: call toolchange_prefix() to get the correct command prefix based on the configuration and flavor.
-        gcode << this->toolchange_prefix() << filament_id;
+        // Orca: manual filament change keeps its tag line even on BBL machines, so the
+        // M1020 form must not shadow it. nozzle_id is signed: the null-safe nozzle
+        // lookup legitimately yields -1 ("no specific nozzle"), matching the literal
+        // H-1 the stock change templates emit; an unsigned would wrap.
+        if (m_is_bbl_printers && !config.manual_filament_change)
+            gcode << "M1020 S" << filament_id << " H" << nozzle_id;
+        else
+            gcode << this->toolchange_prefix() << filament_id;
         if (GCodeWriter::full_gcode_comment)
             gcode << " ; change extruder";
         gcode << "\n";
@@ -1271,8 +1270,9 @@ std::string GCodeWriter::set_extruder(unsigned int filament_id)
     auto filament_ext_it = Slic3r::lower_bound_by_predicate(m_filament_extruders.begin(), m_filament_extruders.end(), [filament_id](const Extruder &e) { return e.id() < filament_id; });
     unsigned int extruder_id = filament_ext_it->extruder_id();
     assert(filament_ext_it != m_filament_extruders.end() && filament_ext_it->id() == filament_id);
-    //TODO: optmize here, pass extruder_id to toolchange
-    return this->need_toolchange(filament_id) ? this->toolchange(filament_id) : "";
+    // Orca: writer-only context (calibration paths) has no nozzle grouping; the
+    // filament's own extruder id is the correct degenerate nozzle value.
+    return this->need_toolchange(filament_id) ? this->toolchange(filament_id, (int) extruder_id) : "";
 }
 
 void GCodeWriter::init_extruder(unsigned int filament_id)

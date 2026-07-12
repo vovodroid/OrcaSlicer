@@ -927,9 +927,6 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
             }
         }
 
-        //BBS: increase toolchange count
-        gcodegen.m_toolchange_count++;
-
         std::string toolchange_gcode_str;
 
         ZHopType z_hope_type = ZHopType(gcodegen.config().z_hop_types.get_at(gcodegen.get_filament_config_index((int)gcodegen.writer().filament()->id())));
@@ -1058,7 +1055,7 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
 
                 config.set_key_value("max_layer_z", new ConfigOptionFloat(gcodegen.m_max_layer_z));
                 config.set_key_value("relative_e_axis", new ConfigOptionBool(full_config.use_relative_e_distances));
-                config.set_key_value("toolchange_count", new ConfigOptionInt((int) gcodegen.m_toolchange_count));
+                config.set_key_value("toolchange_count", new ConfigOptionInt((int) gcodegen.m_toolchange_count + 1));
                 // BBS: fan speed is useless placeholer now, but we don't remove it to avoid
                 // slicing error in old change_filament_gcode in old 3MF
                 config.set_key_value("fan_speed", new ConfigOptionInt((int) 0));
@@ -1180,7 +1177,10 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
 
         std::string toolchange_command;
         if (tcr.priming || (new_filament_id >= 0 && gcodegen.writer().need_toolchange(new_filament_id)))
-            toolchange_command = gcodegen.writer().toolchange(new_filament_id);
+            // Orca: null-safe, layer-aware nozzle lookup — group_result may be null on
+            // non-multi-nozzle paths (the helper falls back to the extruder id).
+            toolchange_command = gcodegen.writer().toolchange(new_filament_id,
+                nozzle_id_for_gcode_placeholder(group_result, new_filament_id, new_extruder_id, m_layer_idx));
         if (!custom_gcode_changes_tool(toolchange_gcode_str, gcodegen.writer().toolchange_prefix(), new_filament_id))
             toolchange_gcode_str += toolchange_command;
         else {
@@ -1302,6 +1302,10 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
         std::string tcr_gcode, tcr_escaped_gcode = gcodegen.placeholder_parser_process("tcr_rotated_gcode", tcr_rotated_gcode, new_filament_id, &config);
         unescape_string_cstyle(tcr_escaped_gcode, tcr_gcode);
         gcode += tcr_gcode;
+        // Count the toolchange only when the emitted block really changed the tool —
+        // tower visits without a filament change must not advance the ordinal.
+        if (custom_gcode_changes_tool(tcr_gcode, gcodegen.writer().toolchange_prefix(), new_filament_id))
+            gcodegen.m_toolchange_count++;
         check_add_eol(toolchange_gcode_str);
 
         // SoftFever: set new PA for new filament
@@ -8648,7 +8652,7 @@ std::string GCode::set_extruder(unsigned int new_filament_id, double print_z, bo
             m_pa_processor->resetPreviousPA(m_config.pressure_advance.get_at(new_filament_id));
         }
 
-        gcode += m_writer.toolchange(new_filament_id);
+        gcode += m_writer.toolchange(new_filament_id, new_extruder_id);
         if (Extruder *fil = m_writer.filament())
             fil->set_config_index((int)get_filament_config_index((int)fil->id()));
         return gcode;
@@ -8933,7 +8937,7 @@ std::string GCode::set_extruder(unsigned int new_filament_id, double print_z, bo
 
     //BBS: don't add T[next extruder] if there is no T cmd on filament change
      //We inform the writer about what is happening, but we may not use the resulting gcode.
-    std::string toolchange_command = m_writer.toolchange(new_filament_id);
+    std::string toolchange_command = m_writer.toolchange(new_filament_id, next_nozzle_id);
     if (Extruder *fil = m_writer.filament())
         fil->set_config_index((int)get_filament_config_index((int)fil->id()));
     if (!custom_gcode_changes_tool(toolchange_gcode_parsed, m_writer.toolchange_prefix(), new_filament_id))
