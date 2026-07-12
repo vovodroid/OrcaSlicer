@@ -536,6 +536,10 @@ void PluginsDialog::on_script_message(const nlohmann::json& payload)
                                plugin_capability_type_from_string(payload.value("capability_type", "")),
                                payload.value("capability_name", ""),
                                payload.contains("config") ? payload.at("config") : nlohmann::json::object());
+    } else if (command == "restore_capability_config") {
+        restore_capability_config(payload.value("plugin_key", ""),
+                                  plugin_capability_type_from_string(payload.value("capability_type", "")),
+                                  payload.value("capability_name", ""));
     } else if (command == "set_plugin_install_action") {
         const std::string action = payload.value("action", "");
         if (action == "explore" || action == "install-local")
@@ -1033,6 +1037,84 @@ void PluginsDialog::save_capability_config(const std::string& plugin_key,
     call_web_handler(response);
 
     show_status(_L("Configuration saved."), "success");
+}
+
+// Overwrites one capability's stored config with the value its get_default_config() hands back.
+// The host does not invent that value: a capability that does not override the hook restores an
+// empty config, which is exactly right for one that applies its own defaults on read.
+void PluginsDialog::restore_capability_config(const std::string& plugin_key,
+                                              PluginCapabilityType type,
+                                              const std::string& capability_name)
+{
+    nlohmann::json response;
+    response["command"]         = "capability_config_saved";
+    response["plugin_key"]      = plugin_key;
+    response["capability_name"] = capability_name;
+    response["capability_type"] = plugin_capability_type_to_string(type);
+    response["ok"]              = false;
+    response["error"]           = "";
+
+    auto cap = get_capability(plugin_key, type, capability_name);
+    if (!cap) {
+        BOOST_LOG_TRIVIAL(warning) << "Refusing to restore config for a capability that is no longer loaded. plugin_key="
+                                   << plugin_key << " capability_name=" << capability_name;
+        response["error"] = into_u8(_L("This capability is no longer available."));
+        call_web_handler(response);
+        return;
+    }
+
+    // Discards whatever the user had stored, so confirm first — same as the other destructive
+    // actions in this dialog.
+    const int rc = wxMessageBox(wxString::Format(_L("Restore the default configuration for \"%s\"?\n\n"
+                                                    "This discards the settings currently saved for this capability."),
+                                                 from_u8(capability_name)),
+                                _L("Restore defaults"), wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this);
+    if (rc != wxYES)
+        return;
+
+    nlohmann::json defaults;
+    std::string error;
+    {
+        wxBusyCursor busy;
+        try {
+            PythonGILState gil;
+            defaults = cap->instance->get_default_config();
+        } catch (const std::exception& ex) {
+            error = ex.what();
+        } catch (...) {
+            error = "Unknown error";
+        }
+    }
+
+    // A raising hook leaves the stored config exactly as it was: better to restore nothing than to
+    // wipe the user's settings on the strength of a broken plugin.
+    if (!error.empty()) {
+        BOOST_LOG_TRIVIAL(error) << "Plugin capability get_default_config() failed. plugin_key=" << plugin_key
+                                 << " capability_name=" << capability_name << " error=" << error;
+        response["error"] = into_u8(format_wxstr(_L("The plugin could not supply a default configuration (%1%). "
+                                                    "Nothing was changed."),
+                                                 from_u8(error)));
+        call_web_handler(response);
+        return;
+    }
+
+    if (!PluginManager::instance().get_config().store_capability_config(plugin_key, capability_name, defaults)) {
+        BOOST_LOG_TRIVIAL(error) << "Failed to write the plugin config file while restoring defaults. plugin_key=" << plugin_key
+                                 << " capability_name=" << capability_name;
+        response["error"] = into_u8(_L("The configuration could not be written to disk. Nothing was changed."));
+        call_web_handler(response);
+        return;
+    }
+
+    BOOST_LOG_TRIVIAL(info) << "Restored default plugin capability config. plugin_key=" << plugin_key
+                            << " capability_name=" << capability_name;
+
+    // Reuses the saved reply, so both editors reload from what was actually persisted.
+    response["ok"]     = true;
+    response["config"] = PluginManager::instance().get_config().get_config(plugin_key, capability_name).config;
+    call_web_handler(response);
+
+    show_status(_L("Default configuration restored."), "success");
 }
 
 void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::string& capability_name)

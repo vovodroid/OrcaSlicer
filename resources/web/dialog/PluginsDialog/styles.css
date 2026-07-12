@@ -1182,9 +1182,9 @@ body {
   min-height: 0;
   padding: 8px;
   box-sizing: border-box;
-  /* common.css applies `user-select: none` to *, which in WebKit also stops a textarea taking a
-     caret — the editor would be focusable but impossible to type into. Editable surfaces have to
-     opt back in (same as include/xterm/xterm.css does for the terminal). */
+  /* common.css applies `user-select: none` to *, so without this the user could type into the
+     editor but not select, drag or copy what they had typed. (What blocks typing is the global
+     onkeydown guard in common.js — see the keydown handler in index.js.) */
   -webkit-user-select: text;
   user-select: text;
   border: 1px solid var(--border);
@@ -1204,11 +1204,27 @@ body {
   border-color: var(--main-color);
 }
 
-.config-editor-footer {
+.config-view-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.config-view-footer[hidden] {
+  display: none;
+}
+
+/* Restore sits immediately left of Save, both pinned right; the validation message takes the
+   remaining space on the left. */
+.config-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.config-actions > button[hidden] {
+  display: none;
 }
 
 .config-validation {

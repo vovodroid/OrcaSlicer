@@ -3,10 +3,13 @@
 
 #include <pybind11/embed.h>
 
+#include <boost/log/trivial.hpp>
+
 #include <optional>
 
 #include "PythonPluginInterface.hpp"
 #include "PythonInterpreter.hpp"
+#include "PythonJsonUtils.hpp"
 #include "PluginAuditManager.hpp"
 
 // Trampoline variants of pybind11's override macros. Every C++->Python plugin call
@@ -88,6 +91,40 @@ public:
             std::string,
             Base,
             get_config_ui);
+    }
+
+    // Hand-rolled rather than PYBIND11_OVERRIDE: the macro casts the Python result to the return
+    // type, and nlohmann::json has no pybind caster (config crosses this boundary through the
+    // explicit py_to_json/json_to_py helpers instead). Otherwise identical — same audit scope, and
+    // a Python exception is logged with its traceback and rethrown for the caller to handle.
+    //
+    // The hook is optional, and "not implemented" must mean an EMPTY config, never a null or a
+    // stray scalar landing in cap_config. Two ways to not implement it, both resolved here:
+    //   - no override at all                     -> the base's empty object
+    //   - an override that returns None, or any  -> likewise. `def get_default_config(self): pass`
+    //     non-object (a list, a string, a number)   is the easy mistake, and it must not be able to
+    //                                               write `"cap_config": null` to config.json.
+    nlohmann::json get_default_config() const override
+    {
+        ORCA_PY_AUDIT_SCOPE(::Slic3r::PluginAuditManager::AuditMode::Loading);
+        try {
+            pybind11::gil_scoped_acquire gil;
+            pybind11::function override = pybind11::get_override(static_cast<const Base*>(this), "get_default_config");
+            if (!override)
+                return Base::get_default_config();
+
+            nlohmann::json config = ::Slic3r::py_to_json(override());
+            if (!config.is_object()) {
+                BOOST_LOG_TRIVIAL(warning)
+                    << "Plugin capability '" << this->audit_capability_name() << "' of plugin '" << this->audit_plugin_key()
+                    << "': get_default_config() returned " << config.type_name() << ", not an object; restoring an empty config";
+                return Base::get_default_config();
+            }
+            return config;
+        } catch (pybind11::error_already_set& err) {
+            ::Slic3r::log_python_exception_keep(err);
+            throw;
+        }
     }
 
     // All plugins may define their own on_load/unload functions.

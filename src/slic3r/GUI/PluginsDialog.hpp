@@ -75,6 +75,7 @@ private:
                                 PluginCapabilityType type,
                                 const std::string& capability_name,
                                 const nlohmann::json& config);
+    void restore_capability_config(const std::string& plugin_key, PluginCapabilityType type, const std::string& capability_name);
     // Pushes a one-line result into the web footer status bar (level: "success" | "warn" | "error" | "info"),
     // used for every plugin/capability operation instead of a modal box so the dialog stays non-disruptive.
     void show_status(const wxString& message, const char* level);

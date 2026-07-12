@@ -70,7 +70,15 @@ function OnInit() {
 
   document.getElementById("configSidebar")?.addEventListener("click", OnConfigSidebarClick);
   document.getElementById("configSaveBtn")?.addEventListener("click", SaveCapabilityConfig);
-  document.getElementById("configText")?.addEventListener("input", ValidateConfigText);
+  document.getElementById("configRestoreBtn")?.addEventListener("click", RestoreCapabilityConfig);
+
+  const configText = document.getElementById("configText");
+  // why: common.js installs a document-level onkeydown that cancels the default action of every key
+  //      (returnValue=false) to block webview shortcuts; on the way up it also swallows typing. Stop
+  //      the editor's keydowns from bubbling to it so the textarea stays editable, leaving the global
+  //      guard intact. Same treatment as the search field (see plugin-search.js).
+  configText?.addEventListener("keydown", (event) => event.stopPropagation());
+  configText?.addEventListener("input", ValidateConfigText);
   // The custom capability UI is sandboxed into an opaque origin, so it reaches us only through
   // postMessage. Match on the frame's own contentWindow rather than the origin (which is "null"
   // for a sandboxed frame) and ignore anything else on the channel.
@@ -939,12 +947,14 @@ function RequestCapabilityConfig() {
 }
 
 // Empties both editors, so nothing from the previously selected capability can linger while the
-// next one is still in flight.
+// next one is still in flight. The footer goes with them: until a config has actually loaded there
+// is nothing to save or restore.
 function ClearCapabilityConfigView() {
   const editor = document.getElementById("configEditor");
   const custom = document.getElementById("configCustom");
   const text = document.getElementById("configText");
   const error = document.getElementById("configError");
+  const footer = document.getElementById("configFooter");
 
   if (editor)
     editor.hidden = true;
@@ -958,6 +968,8 @@ function ClearCapabilityConfigView() {
     error.hidden = true;
     error.textContent = "";
   }
+  if (footer)
+    footer.hidden = true;
   SetConfigValidation("");
 }
 
@@ -986,6 +998,10 @@ function ApplyCapabilityConfig(payload) {
   const config = (payload && typeof payload.config === "object" && payload.config !== null) ? payload.config : {};
   const html = String(payload?.custom_html || "");
 
+  // Restore is host chrome and applies to either editor; Save and the validation message belong to
+  // the JSON editor, since a custom UI saves through its own controls via the bridge.
+  ShowConfigFooter(!html);
+
   if (html) {
     // A capability with its own UI: hand it the config through the bridge, never the raw file.
     if (custom) {
@@ -1008,6 +1024,21 @@ function ApplyCapabilityConfig(payload) {
   if (text)
     text.value = JSON.stringify(config, null, 2);
   SetConfigValidation("");
+}
+
+// Reveals the footer for the loaded capability. `withEditorControls` is false for a custom UI,
+// leaving Restore on its own.
+function ShowConfigFooter(withEditorControls) {
+  const footer = document.getElementById("configFooter");
+  const save = document.getElementById("configSaveBtn");
+  const validation = document.getElementById("configValidation");
+
+  if (footer)
+    footer.hidden = false;
+  if (save)
+    save.hidden = !withEditorControls;
+  if (validation)
+    validation.hidden = !withEditorControls;
 }
 
 function SetConfigValidation(message) {
@@ -1051,6 +1082,21 @@ function SaveCapabilityConfig() {
     capability_name: selectedCapabilityName,
     capability_type: selectedCapabilityType,
     config: text.value
+  });
+}
+
+// Asks the native side to write the capability's default config over whatever is stored. The
+// defaults come from the capability's get_default_config(), never from this page — the host does not
+// know what a given plugin considers default. The native side confirms before discarding anything,
+// and replies with the same "saved" payload, so both editors reload from what was persisted.
+function RestoreCapabilityConfig() {
+  if (!selectedPluginId || !selectedCapabilityName)
+    return;
+
+  SendMessage("restore_capability_config", {
+    plugin_key: selectedPluginId,
+    capability_name: selectedCapabilityName,
+    capability_type: selectedCapabilityType
   });
 }
 

@@ -151,16 +151,27 @@
                 <div id="configEditor" class="config-editor" hidden>
                   <textarea id="configText" class="config-textarea thin-scroll" spellcheck="false"
                     autocomplete="off" autocapitalize="off" aria-label="Capability configuration (JSON)"></textarea>
-                  <div class="config-editor-footer">
-                    <span id="configValidation" class="config-validation" role="status" aria-live="polite"></span>
-                    <button id="configSaveBtn" class="ButtonStyleConfirm ButtonTypeChoice" type="button">Save</button>
-                  </div>
                 </div>
                 <!-- Custom capability UI. Sandboxed without allow-same-origin, so the plugin's HTML
                      runs in an opaque origin: it cannot touch this page, and the only host surface
                      it gets is the window.orca getConfig/saveConfig bridge injected into srcdoc. -->
                 <iframe id="configCustom" class="config-custom" title="Plugin configuration"
                   sandbox="allow-scripts" referrerpolicy="no-referrer" hidden></iframe>
+                <!-- Host chrome for both editors, not just the JSON one: a capability with a custom
+                     UI needs Restore just as much, and keeping it here leaves it out of the plugin's
+                     HTML and off the JS bridge. Save and the validation message belong to the JSON
+                     editor alone (a custom UI saves through its own controls), so they are hidden
+                     when a custom UI is showing. -->
+                <div id="configFooter" class="config-view-footer" hidden>
+                  <span id="configValidation" class="config-validation" role="status" aria-live="polite"></span>
+                  <div class="config-actions">
+                    <button id="configRestoreBtn" class="ButtonStyleRegular ButtonTypeChoice" type="button"
+                      title="Discard the settings saved for this capability and restore the plugin's defaults">
+                      Restore defaults
+                    </button>
+                    <button id="configSaveBtn" class="ButtonStyleConfirm ButtonTypeChoice" type="button">Save</button>
+                  </div>
+                </div>
               </div>
             </div>
           </section>

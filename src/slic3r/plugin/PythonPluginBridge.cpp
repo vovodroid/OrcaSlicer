@@ -340,6 +340,16 @@ void bind_python_api(pybind11::module_& m)
              "has_config_ui() is True; an empty result falls back to the default JSON editor.\n"
              "Inside the page, use window.orca.getConfig()/saveConfig() to reach this same config.")
         .def(
+            "get_default_config",
+            [](const PluginCapabilityInterface& self) {
+                nlohmann::json config = self.get_default_config();
+                return json_to_py(config); // GIL held (binding body)
+            },
+            "Override to return the config that the Config tab's \"Restore defaults\" action writes\n"
+            "back. Optional: without it the action stores an empty dict, which already restores the\n"
+            "defaults of a capability that keeps its stored config sparse and applies its own\n"
+            "defaults on read. Override it to write an explicit starting config instead.")
+        .def(
             "get_config",
             [](const PluginCapabilityInterface& self) {
                 nlohmann::json config = capability_get_config(self);

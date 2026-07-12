@@ -6,6 +6,7 @@
 #include <string_view>
 #include <utility>
 
+#include <nlohmann/json.hpp>
 #include <pybind11/embed.h>
 
 namespace Slic3r {
@@ -115,6 +116,16 @@ public:
     // An HTML snippet for the custom configuration UI. An empty or throwing result is
     // treated as "no custom UI" and falls back to the default JSON editor.
     virtual std::string get_config_ui() const { return ""; }
+
+    // The config the Config tab's "Restore defaults" action writes back. Optional.
+    //
+    // Not overridden -> an empty object, which is the right answer for a capability that keeps
+    // its stored config sparse and applies its own defaults on read: clearing the overrides
+    // *is* restoring the defaults, and it keeps a later release free to change them.
+    // Override it to write an explicit starting config instead (e.g. to seed a form UI with
+    // every field present). The host neither invents nor validates this value; it only stores
+    // whatever comes back, so a throwing override leaves the stored config untouched.
+    virtual nlohmann::json get_default_config() const { return nlohmann::json::object(); }
 
     virtual void on_load() {}
     virtual void on_unload() {}
