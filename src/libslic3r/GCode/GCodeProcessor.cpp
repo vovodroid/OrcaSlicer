@@ -2548,6 +2548,9 @@ void GCodeProcessorResult::reset() {
     nozzle_group_result.reset();
     // per-extruder hotend types (pre-heat injector input); repopulated by apply_config.
     extruder_types.clear();
+    // machine-slot layout of the per-variant printer arrays; repopulated by apply_config.
+    printer_extruder_variant.clear();
+    printer_extruder_id.clear();
     // SKIPPABLE per-type accumulated time.
     skippable_part_time.clear();
 
@@ -2945,6 +2948,8 @@ void GCodeProcessor::apply_config(const PrintConfig& config)
     m_result.extruder_types.resize(config.extruder_type.values.size());
     for (size_t idx = 0; idx < config.extruder_type.values.size(); ++idx)
         m_result.extruder_types[idx] = static_cast<ExtruderType>(config.extruder_type.values[idx]);
+    m_result.printer_extruder_variant = config.printer_extruder_variant.values;
+    m_result.printer_extruder_id      = config.printer_extruder_id.values;
 
     m_extruder_offsets.resize(filament_count);
     m_extruder_colors.resize(filament_count);
@@ -3129,6 +3134,11 @@ void GCodeProcessor::apply_config(const DynamicPrintConfig& config)
         for (size_t idx = 0; idx < extruder_type->values.size(); ++idx)
             m_result.extruder_types[idx] = static_cast<ExtruderType>(extruder_type->values[idx]);
     }
+
+    if (const ConfigOptionStrings* pe_variant = config.option<ConfigOptionStrings>("printer_extruder_variant"))
+        m_result.printer_extruder_variant = pe_variant->values;
+    if (const ConfigOptionInts* pe_id = config.option<ConfigOptionInts>("printer_extruder_id"))
+        m_result.printer_extruder_id = pe_id->values;
 
     const ConfigOptionEnumsGenericNullable* nozzle_type = config.option<ConfigOptionEnumsGenericNullable>("nozzle_type");
     if (nozzle_type != nullptr) {
@@ -3497,6 +3507,9 @@ void GCodeProcessor::reset()
     // clear the multi-nozzle occupancy tracker between slices (the richer hotend-change model's only
     // mutable state). Inert for the single-nozzle fleet (never populated).
     m_nozzle_status_recorder = MultiNozzleUtils::NozzleStatusRecorder{};
+    // drop the slot-resolution context and its cached slot; re-seeded per export.
+    m_nozzle_group_result.reset();
+    m_machine_config_idx = 0;
     m_extruder_colors.resize(MIN_EXTRUDERS_COUNT);
     for (size_t i = 0; i < MIN_EXTRUDERS_COUNT; ++i) {
         m_extruder_colors[i] = static_cast<unsigned char>(i);
@@ -5056,7 +5069,7 @@ void GCodeProcessor::process_G1(const std::array<std::optional<double>, 4>& axes
 
             curr.abs_axis_feedrate[a] = std::abs(curr.axis_feedrate[a]);
             if (curr.abs_axis_feedrate[a] != 0.0f) {
-                float axis_max_feedrate = get_axis_max_feedrate(static_cast<PrintEstimatedStatistics::ETimeMode>(i), static_cast<Axis>(a));
+                float axis_max_feedrate = get_axis_max_feedrate(static_cast<PrintEstimatedStatistics::ETimeMode>(i), static_cast<Axis>(a), m_machine_config_idx);
                 if (axis_max_feedrate != 0.0f) min_feedrate_factor = std::min<float>(min_feedrate_factor, axis_max_feedrate / curr.abs_axis_feedrate[a]);
             }
         }
@@ -5080,7 +5093,7 @@ void GCodeProcessor::process_G1(const std::array<std::optional<double>, 4>& axes
 
         //BBS
         for (unsigned char a = X; a <= E; ++a) {
-            float axis_max_acceleration = get_axis_max_acceleration(static_cast<PrintEstimatedStatistics::ETimeMode>(i), static_cast<Axis>(a));
+            float axis_max_acceleration = get_axis_max_acceleration(static_cast<PrintEstimatedStatistics::ETimeMode>(i), static_cast<Axis>(a), m_machine_config_idx);
             if (acceleration * std::abs(delta_pos[a]) * inv_distance > axis_max_acceleration)
                 acceleration = axis_max_acceleration / (std::abs(delta_pos[a]) * inv_distance);
         }
@@ -5418,7 +5431,7 @@ void GCodeProcessor::process_VG1(const GCodeReader::GCodeLine& line)
 
             curr.abs_axis_feedrate[a] = std::abs(curr.axis_feedrate[a]);
             if (curr.abs_axis_feedrate[a] != 0.0f) {
-                float axis_max_feedrate = get_axis_max_feedrate(static_cast<PrintEstimatedStatistics::ETimeMode>(i), static_cast<Axis>(a));
+                float axis_max_feedrate = get_axis_max_feedrate(static_cast<PrintEstimatedStatistics::ETimeMode>(i), static_cast<Axis>(a), m_machine_config_idx);
                 if (axis_max_feedrate != 0.0f) min_feedrate_factor = std::min<float>(min_feedrate_factor, axis_max_feedrate / curr.abs_axis_feedrate[a]);
             }
         }
@@ -5442,7 +5455,7 @@ void GCodeProcessor::process_VG1(const GCodeReader::GCodeLine& line)
 
         //BBS
         for (unsigned char a = X; a <= E; ++a) {
-            float axis_max_acceleration = get_axis_max_acceleration(static_cast<PrintEstimatedStatistics::ETimeMode>(i), static_cast<Axis>(a));
+            float axis_max_acceleration = get_axis_max_acceleration(static_cast<PrintEstimatedStatistics::ETimeMode>(i), static_cast<Axis>(a), m_machine_config_idx);
             if (acceleration * std::abs(delta_pos[a]) * inv_distance > axis_max_acceleration)
                 acceleration = axis_max_acceleration / (std::abs(delta_pos[a]) * inv_distance);
         }
@@ -6181,16 +6194,23 @@ void GCodeProcessor::process_M201(const GCodeReader::GCodeLine& line)
     // see http://reprap.org/wiki/G-code#M201:_Set_max_printing_acceleration
     float factor = ((m_flavor != gcfRepRapSprinter && m_flavor != gcfRepRapFirmware) && m_units == EUnits::Inches) ? INCHES_TO_MM : 1.0f;
 
-    // Write to index i (0=Normal, 1=Stealth) — matches get_axis_max_acceleration's read pattern.
+    // The arrays are slot-major ([slot*2 + mode]); a firmware M201 changes the machine's live
+    // limits globally, so write the value into EVERY slot's mode entry. Orca: covering every slot
+    // (not a partial range) keeps the per-slot reads in lockstep with the mode-only reads they
+    // replaced. Per-mode gating unchanged: Stealth entries only once envelope processing is on.
+    auto set_all_slots = [](ConfigOptionFloats &option, size_t mode, float value) {
+        for (size_t slot_base = 0; slot_base < option.size(); slot_base += 2)
+            set_option_value(option, slot_base + mode, value);
+    };
     for (size_t i = 0; i < static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Count); ++i) {
         if (static_cast<PrintEstimatedStatistics::ETimeMode>(i) == PrintEstimatedStatistics::ETimeMode::Normal || m_time_processor.machine_envelope_processing_enabled) {
-            if (line.has_x()) set_option_value(m_time_processor.machine_limits.machine_max_acceleration_x, i, line.x() * factor);
+            if (line.has_x()) set_all_slots(m_time_processor.machine_limits.machine_max_acceleration_x, i, line.x() * factor);
 
-            if (line.has_y()) set_option_value(m_time_processor.machine_limits.machine_max_acceleration_y, i, line.y() * factor);
+            if (line.has_y()) set_all_slots(m_time_processor.machine_limits.machine_max_acceleration_y, i, line.y() * factor);
 
-            if (line.has_z()) set_option_value(m_time_processor.machine_limits.machine_max_acceleration_z, i, line.z() * factor);
+            if (line.has_z()) set_all_slots(m_time_processor.machine_limits.machine_max_acceleration_z, i, line.z() * factor);
 
-            if (line.has_e()) set_option_value(m_time_processor.machine_limits.machine_max_acceleration_e, i, line.e() * factor);
+            if (line.has_e()) set_all_slots(m_time_processor.machine_limits.machine_max_acceleration_e, i, line.e() * factor);
         }
     }
 }
@@ -6205,20 +6225,25 @@ void GCodeProcessor::process_M203(const GCodeReader::GCodeLine& line)
     // http://smoothieware.org/supported-g-codes
     float factor = (m_flavor == gcfMarlinLegacy || m_flavor == gcfMarlinFirmware || m_flavor == gcfSmoothie || m_flavor == gcfKlipper) ? 1.0f : MMMIN_TO_MMSEC;
 
-    // Write to index i (0=Normal, 1=Stealth) — matches get_axis_max_feedrate's read pattern.
+    // Slot-major arrays; a firmware M203 changes the live limits globally — write every slot's
+    // mode entry (see process_M201). Per-mode gating unchanged.
+    auto set_all_slots = [](ConfigOptionFloats &option, size_t mode, float value) {
+        for (size_t slot_base = 0; slot_base < option.size(); slot_base += 2)
+            set_option_value(option, slot_base + mode, value);
+    };
     for (size_t i = 0; i < static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Count); ++i) {
         if (static_cast<PrintEstimatedStatistics::ETimeMode>(i) == PrintEstimatedStatistics::ETimeMode::Normal || m_time_processor.machine_envelope_processing_enabled) {
             if (line.has_x())
-                set_option_value(m_time_processor.machine_limits.machine_max_speed_x, i, line.x() * factor);
+                set_all_slots(m_time_processor.machine_limits.machine_max_speed_x, i, line.x() * factor);
 
             if (line.has_y())
-                set_option_value(m_time_processor.machine_limits.machine_max_speed_y, i, line.y() * factor);
+                set_all_slots(m_time_processor.machine_limits.machine_max_speed_y, i, line.y() * factor);
 
             if (line.has_z())
-                set_option_value(m_time_processor.machine_limits.machine_max_speed_z, i, line.z() * factor);
+                set_all_slots(m_time_processor.machine_limits.machine_max_speed_z, i, line.z() * factor);
 
             if (line.has_e())
-                set_option_value(m_time_processor.machine_limits.machine_max_speed_e, i, line.e() * factor);
+                set_all_slots(m_time_processor.machine_limits.machine_max_speed_e, i, line.e() * factor);
         }
     }
 }
@@ -6582,11 +6607,33 @@ bool GCodeProcessor::use_multi_nozzle_change_time_model() const
 //  - Beyond total_(flush_)filament_changes, the richer counters (total_extruder_changes / load /
 //    unload / tool_change time) are maintained in the matching branches so the multi-nozzle
 //    GCodeViewer stats do not regress to zero. These are UI-only (not written to g-code).
+std::optional<MultiNozzleUtils::NozzleInfo> GCodeProcessor::resolve_target_nozzle(
+    const MultiNozzleUtils::NozzleGroupResultBase &group, int id, int nozzle_id) const
+{
+    std::optional<MultiNozzleUtils::NozzleInfo> info;
+    if (nozzle_id != -1)
+        info = group.get_nozzle_from_id(nozzle_id);
+    if (!info) {
+        auto used_nozzles = group.get_nozzles_for_filament(id);
+        if (!used_nozzles.empty())
+            info = used_nozzles.front();
+    }
+    return info;
+}
+
 void GCodeProcessor::process_filament_change(int id, int nozzle_id)
 {
     // Gate: outside the multi-nozzle context, or when the nozzle-grouping result is not available
     // (e.g. re-importing a bare g-code file), run the existing single-arg model byte-for-byte.
     if (!use_multi_nozzle_change_time_model() || !m_result.nozzle_group_result) {
+        // Orca: occupancy bookkeeping is deliberately decoupled from the gated change-time model:
+        // the per-slot machine-limit resolution needs the recorder during the streaming pass,
+        // where the richer time model stays byte-frozen behind the result-field gate above.
+        // Recorder writes have no time effect.
+        if (m_nozzle_group_result) {
+            if (auto info = resolve_target_nozzle(*m_nozzle_group_result, id, nozzle_id))
+                m_nozzle_status_recorder.set_nozzle_status(info->group_id, id, info->extruder_id);
+        }
         process_filament_change(id);
         return;
     }
@@ -6604,15 +6651,7 @@ void GCodeProcessor::process_filament_change(int id, int nozzle_id)
         m_last_filament_id[prev_extruder_id] = static_cast<unsigned char>(prev_filament_id);
 
     // Resolve the destination nozzle: by explicit H<nozzle> id first, else the filament's first nozzle.
-    std::optional<MultiNozzleUtils::NozzleInfo> target_nozzle_info;
-    if (nozzle_id != -1)
-        target_nozzle_info = m_result.nozzle_group_result->get_nozzle_from_id(nozzle_id);
-    if (!target_nozzle_info) {
-        auto used_nozzles = m_result.nozzle_group_result->get_nozzles_for_filament(id);
-        if (used_nozzles.empty())
-            return;
-        target_nozzle_info = used_nozzles.front();
-    }
+    std::optional<MultiNozzleUtils::NozzleInfo> target_nozzle_info = resolve_target_nozzle(*m_result.nozzle_group_result, id, nozzle_id);
     if (!target_nozzle_info)
         return;
 
@@ -6690,6 +6729,8 @@ void GCodeProcessor::process_filament_change(int id, int nozzle_id)
     }
 
     simulate_st_synchronize(extra_time, EMoveType::Tool_change);
+
+    m_machine_config_idx = get_machine_config_idx();
 }
 
 void GCodeProcessor::process_filament_change(int id)
@@ -6812,6 +6853,8 @@ void GCodeProcessor::process_filament_change(int id)
     }
 
     simulate_st_synchronize(extra_time, EMoveType::Tool_change);
+
+    m_machine_config_idx = get_machine_config_idx();
 }
 
 void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, bool internal_only)
@@ -6941,33 +6984,59 @@ float GCodeProcessor::minimum_travel_feedrate(PrintEstimatedStatistics::ETimeMod
     return std::max(feedrate, get_option_value(m_time_processor.machine_limits.machine_min_travel_rate, static_cast<size_t>(mode)));
 }
 
-// Machine limit arrays hold 2 values: [0]=Normal, [1]=Stealth. Index by mode only.
-// Orca: per-(extruder x volume-type) machine limits are deliberately not resolved here even
-// though the slicing side now materializes filament_map_2 and the per-filament volume map
-// (an extruder_id*2+mode style offset would need filament_map_2 in the processor-side config
-// plus a re-audit of every get_option_value(..., mode) call). This only affects
-// time-estimation fidelity: limits are mode-indexed for ALL multi-extruder printers alike, so
-// a Hybrid extruder degrades no further than existing dual-extruder machines. Follow-up.
+// Machine slot of the nozzle currently mounted in the active extruder. Slot 0 (the historical
+// single-slot read) whenever there is no grouping context (bare g-code import), no active
+// extruder yet, or the nozzle/extruder is unknown to the recorder.
+int GCodeProcessor::get_machine_config_idx() const
+{
+    const int extruder_id = get_extruder_id(false);
+    if (!m_nozzle_group_result || extruder_id < 0)
+        return 0;
+    const int nozzle_id = m_nozzle_status_recorder.get_nozzle_in_extruder(extruder_id);
+    auto nozzle_info = m_nozzle_group_result->get_nozzle_from_id(nozzle_id);
+    // Orca: bounds guard — a stale grouping context after a printer swap must not index OOB.
+    if (!nozzle_info || extruder_id >= (int) m_result.extruder_types.size())
+        return 0;
+    return std::max(0, get_config_index_base(nozzle_info->volume_type, m_result.extruder_types[extruder_id],
+                                             extruder_id + 1, m_result.printer_extruder_variant,
+                                             m_result.printer_extruder_id));
+}
+
+// Speed/acceleration limit arrays are slot-major with two mode entries per machine slot:
+// [slot*2 + mode]. Single-variant printers have one slot, so the 2-arg forms (slot 0) read
+// exactly the historical [mode] entry.
 float GCodeProcessor::get_axis_max_feedrate(PrintEstimatedStatistics::ETimeMode mode, Axis axis) const
 {
+    return get_axis_max_feedrate(mode, axis, 0);
+}
+
+float GCodeProcessor::get_axis_max_feedrate(PrintEstimatedStatistics::ETimeMode mode, Axis axis, int machine_idx) const
+{
+    const size_t pos = static_cast<size_t>(machine_idx) * 2 + static_cast<size_t>(mode);
     switch (axis)
     {
-    case X: { return get_option_value(m_time_processor.machine_limits.machine_max_speed_x, static_cast<size_t>(mode)); }
-    case Y: { return get_option_value(m_time_processor.machine_limits.machine_max_speed_y, static_cast<size_t>(mode)); }
-    case Z: { return get_option_value(m_time_processor.machine_limits.machine_max_speed_z, static_cast<size_t>(mode)); }
-    case E: { return get_option_value(m_time_processor.machine_limits.machine_max_speed_e, static_cast<size_t>(mode)); }
+    case X: { return get_option_value(m_time_processor.machine_limits.machine_max_speed_x, pos); }
+    case Y: { return get_option_value(m_time_processor.machine_limits.machine_max_speed_y, pos); }
+    case Z: { return get_option_value(m_time_processor.machine_limits.machine_max_speed_z, pos); }
+    case E: { return get_option_value(m_time_processor.machine_limits.machine_max_speed_e, pos); }
     default: { return 0.0f; }
     }
 }
 
 float GCodeProcessor::get_axis_max_acceleration(PrintEstimatedStatistics::ETimeMode mode, Axis axis) const
 {
+    return get_axis_max_acceleration(mode, axis, 0);
+}
+
+float GCodeProcessor::get_axis_max_acceleration(PrintEstimatedStatistics::ETimeMode mode, Axis axis, int machine_idx) const
+{
+    const size_t pos = static_cast<size_t>(machine_idx) * 2 + static_cast<size_t>(mode);
     switch (axis)
     {
-    case X: { return get_option_value(m_time_processor.machine_limits.machine_max_acceleration_x, static_cast<size_t>(mode)); }
-    case Y: { return get_option_value(m_time_processor.machine_limits.machine_max_acceleration_y, static_cast<size_t>(mode)); }
-    case Z: { return get_option_value(m_time_processor.machine_limits.machine_max_acceleration_z, static_cast<size_t>(mode)); }
-    case E: { return get_option_value(m_time_processor.machine_limits.machine_max_acceleration_e, static_cast<size_t>(mode)); }
+    case X: { return get_option_value(m_time_processor.machine_limits.machine_max_acceleration_x, pos); }
+    case Y: { return get_option_value(m_time_processor.machine_limits.machine_max_acceleration_y, pos); }
+    case Z: { return get_option_value(m_time_processor.machine_limits.machine_max_acceleration_z, pos); }
+    case E: { return get_option_value(m_time_processor.machine_limits.machine_max_acceleration_e, pos); }
     default: { return 0.0f; }
     }
 }

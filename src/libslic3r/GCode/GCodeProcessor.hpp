@@ -298,6 +298,10 @@ class Print;
         // (mixed-type X2D workaround). Populated in apply_config; unused until the injector side-pass
         // consumes it.
         std::vector<ExtruderType> extruder_types;
+        // Machine-slot layout of the per-variant printer arrays (one entry per (extruder x
+        // volume-type) slot). Populated in apply_config; keys the per-slot machine-limit lookup.
+        std::vector<std::string> printer_extruder_variant;
+        std::vector<int>         printer_extruder_id;
         // first key stores filaments, second keys stores the layer ranges(enclosed) that use the filaments
         std::unordered_map<std::vector<unsigned int>, std::vector<std::pair<int, int>>,FilamentSequenceHash> layer_filaments;
         std::vector<unsigned int> nozzle_change_sequence;
@@ -349,6 +353,8 @@ class Print;
             nozzle_group_result = other.nozzle_group_result;
             // Keep the per-extruder hotend types on a copied result (injector input).
             extruder_types = other.extruder_types;
+            printer_extruder_variant = other.printer_extruder_variant;
+            printer_extruder_id = other.printer_extruder_id;
             layer_filaments = other.layer_filaments;
             filament_change_sequence = other.filament_change_sequence;
             nozzle_change_sequence = other.nozzle_change_sequence;
@@ -1104,9 +1110,15 @@ class Print;
         unsigned int m_machine_start_gcode_end_line_id{ (unsigned int) (-1) };
         unsigned int m_machine_end_gcode_start_line_id{ (unsigned int) (-1) };
         // Tracks, during the stream, which filament sits in each physical nozzle and which nozzle each
-        // extruder currently carries. Consumed ONLY by the richer two-arg process_filament_change
-        // model, which single-nozzle printers (X1/P1/A1/H2S/A2L) never enter.
+        // extruder currently carries. Written by both branches of the two-arg process_filament_change
+        // (the fallback branch does occupancy bookkeeping only); read by the richer change-time model
+        // and by the per-slot machine-limit resolution. Single-nozzle printers never populate it.
         MultiNozzleUtils::NozzleStatusRecorder m_nozzle_status_recorder;
+        // Nozzle grouping context for slot resolution during the streaming pass. Set before the
+        // replay begins (see initialize_from_context); deliberately separate from
+        // m_result.nozzle_group_result, which is handed over only after the stream for the
+        // pre-heat injector's second pass and gates the richer change-time model.
+        std::shared_ptr<MultiNozzleUtils::NozzleGroupResultBase> m_nozzle_group_result;
         bool m_manual_filament_change;
 
         //BBS: x, y offset for gcode generated
@@ -1131,6 +1143,9 @@ class Print;
         std::vector<unsigned char> m_last_filament_id;
         std::vector<unsigned char> m_filament_id;
         unsigned char m_extruder_id;
+        // Cached get_machine_config_idx() value; its inputs (active extruder + recorder occupancy)
+        // change only on filament-change events, where it is recomputed.
+        int m_machine_config_idx{0};
         ExtruderColors m_extruder_colors;
         ExtruderTemps m_extruder_temps;
         bool  m_is_XL_printer = false;
@@ -1193,6 +1208,11 @@ class Print;
                                               const std::vector<std::set<int>>& unprintable_filament_types );
         void apply_config(const PrintConfig& config);
         void set_print(Print* print) { m_print = print; }
+        // Hand the nozzle grouping context to the estimator BEFORE the streaming replay, so the
+        // per-slot machine-limit resolution can follow the active nozzle. Null is fine (slot 0).
+        void initialize_from_context(const std::shared_ptr<MultiNozzleUtils::NozzleGroupResultBase>& nozzle_group_result) {
+            m_nozzle_group_result = nozzle_group_result;
+        }
 
         DynamicConfig export_config_for_render() const;
 
@@ -1412,6 +1432,15 @@ class Print;
         // filament-in-nozzle change. Self-gated: for single-nozzle printers it delegates to
         // process_filament_change(int) so their time estimate — hence exported g-code — is unchanged.
         void process_filament_change(int id, int nozzle_id);
+        // Destination nozzle of a filament change: the explicit H<nozzle> id when given, else the
+        // filament's first nozzle in the grouping. Shared by the change-time model and the
+        // fallback-path occupancy bookkeeping.
+        std::optional<MultiNozzleUtils::NozzleInfo> resolve_target_nozzle(
+            const MultiNozzleUtils::NozzleGroupResultBase &group, int id, int nozzle_id) const;
+        // Machine slot of the nozzle currently mounted in the active extruder (0 when no grouping
+        // context / unknown extruder — the single-slot layout). Cached in m_machine_config_idx,
+        // recomputed on filament-change events.
+        int  get_machine_config_idx() const;
         // True only for multi-nozzle-capable printers (H2C cluster, or a dual/multi-extruder machine
         // like H2D/X2D): the gate that admits the richer two-arg hotend-change time model. False for
         // every single-extruder single-nozzle printer (X1/P1/A1/H2S/A2L).
@@ -1440,11 +1469,14 @@ class Print;
 
         float minimum_feedrate(PrintEstimatedStatistics::ETimeMode mode, float feedrate) const;
         float minimum_travel_feedrate(PrintEstimatedStatistics::ETimeMode mode, float feedrate) const;
-        // Machine limit arrays are indexed by time mode only: [0]=Normal, [1]=Stealth.
-        // Do NOT add an extruder_id parameter — OrcaSlicer does not use BambuStudio's
-        // per-nozzle machine limits (filament_map_2 / get_config_idx_for_filament).
+        // Speed/acceleration limit arrays are slot-major with two mode entries per machine slot:
+        // [slot*2 + mode], slot from get_machine_config_idx() (0 = the only slot on single-variant
+        // printers, whose arrays hold just [Normal, Stealth]). The 2-arg forms read slot 0 and stay
+        // exactly the historical mode-only lookup; jerk and the accelerations below are mode-only.
         float get_axis_max_feedrate(PrintEstimatedStatistics::ETimeMode mode, Axis axis) const;
+        float get_axis_max_feedrate(PrintEstimatedStatistics::ETimeMode mode, Axis axis, int machine_idx) const;
         float get_axis_max_acceleration(PrintEstimatedStatistics::ETimeMode mode, Axis axis) const;
+        float get_axis_max_acceleration(PrintEstimatedStatistics::ETimeMode mode, Axis axis, int machine_idx) const;
         float get_axis_max_jerk_with_jd(PrintEstimatedStatistics::ETimeMode mode, Axis axis, float acceleration) const;
         float get_axis_max_jerk_with_jd(PrintEstimatedStatistics::ETimeMode mode, Axis axis) const;
         float get_axis_max_jerk(PrintEstimatedStatistics::ETimeMode mode, Axis axis) const;

@@ -3453,8 +3453,8 @@ void Print::update_to_config_by_nozzle_group_result(const MultiNozzleUtils::Laye
     // Note: filament_map_2 keeps its apply-time (static) derivation here; the per-slot machine
     // indices below key the override merge instead, so nothing on this path reads it. Its other
     // consumers are the three-map write-back (which recomputes it) and the diagnostic copy in
-    // the g-code header; per-(extruder x volume-type) machine limits in the g-code processor
-    // remain a follow-up (see GCodeProcessor::get_axis_max_feedrate).
+    // the g-code header; the time estimator resolves per-(extruder x volume-type) machine limits
+    // from the live nozzle occupancy instead (see GCodeProcessor::get_machine_config_idx).
     m_full_print_config = m_ori_full_print_config;
     std::set<std::string> filament_keys = filament_options_with_variant;
     filament_keys.insert("filament_self_index");
@@ -4257,6 +4257,10 @@ void Print::export_gcode_from_previous_file(const std::string& file, GCodeProces
         GCodeProcessor::s_IsBBLPrinter = is_BBL_printer();
         const Vec3d origin = this->get_plate_origin();
         processor.set_xy_offset(origin(0), origin(1));
+        // Reloaded sliced projects re-estimate with the same nozzle-grouping slot context as the
+        // original export; harmless when the result carries none (slot 0).
+        if (result != nullptr && result->nozzle_group_result)
+            processor.initialize_from_context(result->nozzle_group_result);
         //processor.enable_producers(true);
         processor.process_file(file);
 
