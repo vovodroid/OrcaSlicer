@@ -1194,6 +1194,7 @@ static std::vector<std::string> s_Preset_print_options{
     "post_process",
     "slicing_pipeline_plugin",
     "plugins",
+    "plugin_preference_overrides",
     "process_change_extrusion_role_gcode",
     "min_length_factor",
     "wall_maximum_resolution",
@@ -1345,7 +1346,8 @@ static std::vector<std::string> s_Preset_filament_options {/*"filament_colour", 
     "filament_long_retractions_when_cut","filament_retraction_distances_when_cut", "idle_temperature",
     //BBS filament change length while the extruder color
     "filament_change_length","filament_flush_volumetric_speed","filament_flush_temp", "filament_cooling_before_tower",
-    "long_retractions_when_ec", "retraction_distances_when_ec"
+    "long_retractions_when_ec", "retraction_distances_when_ec",
+    "plugin_preference_overrides"
     };
 
 static std::vector<std::string> s_Preset_machine_limits_options {
@@ -1384,7 +1386,8 @@ static std::vector<std::string> s_Preset_printer_options {
     "cooling_tube_length", "high_current_on_filament_swap", "parking_pos_retraction", "extra_loading_move", "wipe_tower_type", "purge_in_prime_tower", "enable_filament_ramming", "tool_change_on_wipe_tower",
     "z_offset",
     "disable_m73", "preferred_orientation", "emit_machine_limits_to_gcode", "pellet_modded_printer", "support_multi_bed_types", "use_3mf", "default_bed_type", "bed_mesh_min","bed_mesh_max","bed_mesh_probe_distance", "adaptive_bed_mesh_margin", "enable_long_retraction_when_cut","long_retractions_when_cut","retraction_distances_when_cut",
-    "bed_temperature_formula", "nozzle_flush_dataset"
+    "bed_temperature_formula", "nozzle_flush_dataset",
+    "plugin_preference_overrides"
     };
 
 static std::vector<std::string> s_Preset_sla_print_options {

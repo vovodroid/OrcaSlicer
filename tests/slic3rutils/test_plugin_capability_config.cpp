@@ -73,6 +73,12 @@ std::shared_ptr<PluginCapabilityInterface> as_interface(const py::object& instan
 // PluginManager singleton, so that is where the assertions read from.
 PluginConfig& host_config() { return PluginManager::instance().get_config(); }
 
+// The Python config API speaks JSON text, not dicts: get_config()/get_default_config() hand back a
+// JSON string and save_config() takes one. These helpers keep the tests written in terms of values.
+json py_get_config(const py::object& cap) { return json::parse(cap.attr("get_config")().cast<std::string>()); }
+
+bool py_save_config(const py::object& cap, const json& value) { return cap.attr("save_config")(value.dump()).cast<bool>(); }
+
 } // namespace
 
 TEST_CASE("Capability config API is exposed on every Python capability", "[PluginConfig][Python]")
@@ -103,31 +109,43 @@ TEST_CASE("get_config returns only cap_config and save_config persists it", "[Pl
 
     py::object cap = make_capability("RoundTripCap", "    def get_name(self): return 'cap_a'\n", "plugin_a", "cap_a");
 
-    // Nothing stored yet: an empty dict, not None, so a plugin can index it unconditionally.
+    // Nothing stored yet: the JSON text of an empty object, not None, so a plugin can json.loads()
+    // and index it unconditionally.
     py::object initial = cap.attr("get_config")();
-    REQUIRE(py::isinstance<py::dict>(initial));
-    CHECK(py::len(initial) == 0);
+    REQUIRE(py::isinstance<py::str>(initial));
+    CHECK(json::parse(initial.cast<std::string>()) == json::object());
     CHECK(cap.attr("get_config_version")().cast<std::string>().empty());
 
-    py::dict value;
-    value["speed"] = 5;
-    value["name"]  = "fast";
-    REQUIRE(cap.attr("save_config")(value).cast<bool>());
+    REQUIRE(py_save_config(cap, json{{"speed", 5}, {"name", "fast"}}));
 
     // Persisted through PluginConfig, under this capability's identity only.
     const BaseConfig stored = host_config().get_config("plugin_a", "cap_a");
     REQUIRE_FALSE(stored.empty());
     CHECK(stored.config == json{{"speed", 5}, {"name", "fast"}});
 
-    // And read back through Python as a dict of exactly cap_config — no host metadata.
-    py::object reloaded = cap.attr("get_config")();
-    REQUIRE(py::isinstance<py::dict>(reloaded));
-    CHECK(py::len(reloaded) == 2);
+    // And read back through Python as exactly cap_config — no host metadata.
+    const json reloaded = py_get_config(cap);
+    CHECK(reloaded.size() == 2);
     CHECK(reloaded.contains("speed"));
     CHECK_FALSE(reloaded.contains("plugin_key"));
     CHECK_FALSE(reloaded.contains("capability"));
     CHECK_FALSE(reloaded.contains("cap_config"));
     CHECK_FALSE(reloaded.contains("plugin_version"));
+}
+
+TEST_CASE("save_config rejects a string that is not valid JSON", "[PluginConfig][Python]")
+{
+    ScopedDataDir data_dir_guard("plugin-config-py-badjson");
+    host_config().load();
+
+    py::object cap = make_capability("BadJsonCap", "    def get_name(self): return 'cap_a'\n", "plugin_a", "cap_a");
+
+    REQUIRE(py_save_config(cap, json{{"keep", "me"}}));
+
+    // The binding parses the string it is handed. Unparseable text is refused, and refusing it must
+    // leave the previously stored config alone rather than clobbering it with nothing.
+    CHECK_FALSE(cap.attr("save_config")("{not json").cast<bool>());
+    CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"keep", "me"}});
 }
 
 TEST_CASE("Saving one capability's config does not touch another's", "[PluginConfig][Python]")
@@ -142,25 +160,19 @@ TEST_CASE("Saving one capability's config does not touch another's", "[PluginCon
     py::object a_cap2 = make_capability("IsoCapA2", body, "plugin_a", "cap_b");
     py::object b_cap1 = make_capability("IsoCapB1", body, "plugin_b", "cap_a");
 
-    py::dict one, two, three;
-    one["value"]   = 1;
-    two["value"]   = 2;
-    three["value"] = 3;
-    REQUIRE(a_cap1.attr("save_config")(one).cast<bool>());
-    REQUIRE(a_cap2.attr("save_config")(two).cast<bool>());
-    REQUIRE(b_cap1.attr("save_config")(three).cast<bool>());
+    REQUIRE(py_save_config(a_cap1, json{{"value", 1}}));
+    REQUIRE(py_save_config(a_cap2, json{{"value", 2}}));
+    REQUIRE(py_save_config(b_cap1, json{{"value", 3}}));
 
-    py::dict updated;
-    updated["value"] = 99;
-    REQUIRE(a_cap1.attr("save_config")(updated).cast<bool>());
+    REQUIRE(py_save_config(a_cap1, json{{"value", 99}}));
 
     CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"value", 99}});
     CHECK(host_config().get_config("plugin_a", "cap_b").config == json{{"value", 2}});
     CHECK(host_config().get_config("plugin_b", "cap_a").config == json{{"value", 3}});
 
     // Each capability still reads back its own value.
-    CHECK(a_cap2.attr("get_config")()["value"].cast<int>() == 2);
-    CHECK(b_cap1.attr("get_config")()["value"].cast<int>() == 3);
+    CHECK(py_get_config(a_cap2).at("value") == 2);
+    CHECK(py_get_config(b_cap1).at("value") == 3);
 }
 
 TEST_CASE("Config API refuses a capability the host never materialized", "[PluginConfig][Python]")
@@ -174,7 +186,7 @@ TEST_CASE("Config API refuses a capability the host never materialized", "[Plugi
 
     CHECK_THROWS(orphan.attr("get_config")());
     CHECK_THROWS(orphan.attr("get_config_version")());
-    CHECK_THROWS(orphan.attr("save_config")(py::dict()));
+    CHECK_THROWS(orphan.attr("save_config")(json::object().dump()));
 }
 
 TEST_CASE("Custom config UI hooks dispatch to the Python override", "[PluginConfig][Python]")
@@ -206,9 +218,7 @@ TEST_CASE("A capability that omits the config UI hooks gets the default editor",
     CHECK_FALSE(iface->has_config_ui()); // -> default JSON editor
     CHECK(iface->get_config_ui().empty());
 
-    py::dict value;
-    value["speed"] = 5;
-    REQUIRE(bare.attr("save_config")(value).cast<bool>());
+    REQUIRE(py_save_config(bare, json{{"speed", 5}}));
     CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"speed", 5}});
 }
 
@@ -279,10 +289,9 @@ TEST_CASE("Restoring defaults overwrites only the target capability", "[PluginCo
     py::object target   = make_capability("RestoreTargetCap", defaults_body, "plugin_a", "cap_a");
     py::object bystander = make_capability("RestoreBystanderCap", defaults_body, "plugin_b", "cap_a");
 
-    py::dict edited;
-    edited["speed"] = 99;
-    REQUIRE(target.attr("save_config")(edited).cast<bool>());
-    REQUIRE(bystander.attr("save_config")(edited).cast<bool>());
+    const json edited = json{{"speed", 99}};
+    REQUIRE(py_save_config(target, edited));
+    REQUIRE(py_save_config(bystander, edited));
 
     // What PluginsDialog::restore_capability_config does: ask the capability, store the answer.
     auto iface = as_interface(target);
@@ -303,9 +312,7 @@ TEST_CASE("A raising get_default_config leaves the stored config untouched", "[P
                                      "    def get_default_config(self): raise RuntimeError('boom')\n",
                                      "plugin_a", "cap_a");
 
-    py::dict value;
-    value["keep"] = "me";
-    REQUIRE(cap.attr("save_config")(value).cast<bool>());
+    REQUIRE(py_save_config(cap, json{{"keep", "me"}}));
 
     auto iface = as_interface(cap);
     REQUIRE(iface);

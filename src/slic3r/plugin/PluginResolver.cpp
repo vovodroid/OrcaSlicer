@@ -12,6 +12,7 @@
 #include <boost/log/trivial.hpp>
 #include <libslic3r/Config.hpp>
 #include <libslic3r/PresetBundle.hpp>
+#include <slic3r/plugin/PluginLoader.hpp>
 #include <vector>
 #include <wx/utils.h>
 
@@ -20,6 +21,7 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 
 namespace Slic3r {
@@ -90,6 +92,96 @@ static std::map<Preset::Type, std::unordered_map<std::string, MissingPlugin>> s_
 static bool is_tracked_type(Preset::Type type)
 {
     return type == Preset::TYPE_PRINT || type == Preset::TYPE_PRINTER || type == Preset::TYPE_FILAMENT;
+}
+
+std::vector<PluginCapabilityRef> referenced_capabilities(Preset::Type type, const Preset& preset)
+{
+    if (!is_tracked_type(type))
+        return {};
+
+    const auto* manifest = dynamic_cast<const ConfigOptionStrings*>(preset.config.option("plugins"));
+    if (manifest == nullptr)
+        return {};
+
+    std::vector<PluginCapabilityRef> refs;
+    for (const std::string& entry : manifest->values) {
+        const auto ref = parse_capability_ref(entry);
+        if (!ref)
+            continue;
+        // The same test the missing-plugin path uses: an entry no option points at is not in use.
+        if (find_option_for_capability(type, preset, *ref).empty())
+            continue;
+        refs.push_back(*ref);
+    }
+    return refs;
+}
+
+namespace {
+
+// Resolve one preset's referenced capabilities to loaded capability identifiers, appending to `out`.
+// A ref whose plugin is not in the catalog, or whose capability is not currently loaded, is dropped:
+// there is no instance to ask for a config UI or defaults, so there is nothing to configure.
+void collect_capabilities_in_use(Preset::Type type, const Preset& preset, std::vector<PluginCapabilityIdentifier>& out)
+{
+    PluginLoader&        loader  = PluginManager::instance().get_loader();
+    const PluginCatalog& catalog = PluginManager::instance().get_catalog();
+
+    for (const PluginCapabilityRef& ref : referenced_capabilities(type, preset)) {
+        // Cloud plugins resolve by UUID, local plugins by plugin_key — the rule refresh_missing_plugins uses.
+        const std::string key = ref.uuid.empty() ? ref.name : ref.uuid;
+        if (key.empty())
+            continue;
+
+        PluginDescriptor descriptor;
+        if (!catalog.try_get_plugin_descriptor(key, descriptor))
+            continue;
+
+        // The loaded capability is also what supplies the type: the manifest ref does not carry one.
+        for (const auto& capability : loader.get_loaded_plugin_capabilities(descriptor.plugin_key))
+            if (capability && capability->name == ref.capability_name)
+                out.push_back(PluginCapabilityIdentifier{capability->type, capability->name, capability->plugin_key});
+    }
+}
+
+} // namespace
+
+std::vector<PluginCapabilityIdentifier> capabilities_in_use(const PresetBundle& preset_bundle, Preset::Type type)
+{
+    if (!is_tracked_type(type))
+        return {};
+
+    std::vector<PluginCapabilityIdentifier> result;
+    if (type == Preset::TYPE_PRINT) {
+        collect_capabilities_in_use(type, preset_bundle.prints.get_edited_preset(), result);
+    } else if (type == Preset::TYPE_PRINTER) {
+        collect_capabilities_in_use(type, preset_bundle.printers.get_edited_preset(), result);
+    } else {
+        // Filament: every selected filament preset, tested against its own config. (Note that
+        // refresh_missing_plugins cannot do this — it unions the manifests and loses the preset.)
+        for (const std::string& filament_name : preset_bundle.filament_presets)
+            if (const Preset* filament = preset_bundle.filaments.find_preset(filament_name))
+                collect_capabilities_in_use(type, *filament, result);
+    }
+
+    std::sort(result.begin(), result.end(), [](const PluginCapabilityIdentifier& a, const PluginCapabilityIdentifier& b) {
+        return std::tie(a.plugin_key, a.name, a.type) < std::tie(b.plugin_key, b.name, b.type);
+    });
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    return result;
+}
+
+std::vector<PluginCapabilityIdentifier> capabilities_in_use(Preset::Type type, const Preset& preset)
+{
+    std::vector<PluginCapabilityIdentifier> result;
+    if (!is_tracked_type(type))
+        return result;
+
+    collect_capabilities_in_use(type, preset, result);
+    std::sort(result.begin(), result.end(), [](const PluginCapabilityIdentifier& a, const PluginCapabilityIdentifier& b) {
+        return std::tie(a.plugin_key, a.name, a.type) < std::tie(b.plugin_key, b.name, b.type);
+    });
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    return result;
 }
 
 static std::string resolve_cloud_base_url()

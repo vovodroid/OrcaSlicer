@@ -53,6 +53,7 @@ const t_field& OptionsGroup::build_field(const t_config_option_key& id, const Co
         break;
     case ConfigOptionDef::GUIType::one_string: m_fields.emplace(id, TextCtrl::Create<TextCtrl>(this->ctrl_parent(), opt, id)); break;
     case ConfigOptionDef::GUIType::plugin_picker: m_fields.emplace(id, PluginField::Create<PluginField>(this->ctrl_parent(), opt, id)); break;
+    case ConfigOptionDef::GUIType::plugin_config: m_fields.emplace(id, PluginConfigField::Create<PluginConfigField>(this->ctrl_parent(), opt, id)); break;
     default:
         switch (opt.type) {
             case coFloatOrPercent:
@@ -125,6 +126,13 @@ const t_field& OptionsGroup::build_field(const t_config_option_key& id, const Co
             return this->pick_plugin(plugin_field->m_opt);
         });
     }
+
+    // The dialog behind the button edits one preset's overrides, so it has to know which preset. The
+    // group already carries its Tab's type, and fields are built lazily on activate() — too late for
+    // the Tab to reach in and set it afterwards.
+    if (auto plugin_config_field = dynamic_cast<PluginConfigField*>(field.get()))
+        if (auto config_group = dynamic_cast<ConfigOptionsGroup*>(this))
+            plugin_config_field->set_preset_type(config_group->config_type());
 
     // assign function objects for callbacks, etc.
     return field;

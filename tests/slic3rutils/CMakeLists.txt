@@ -5,6 +5,7 @@ add_executable(${_TEST_NAME}_tests
     test_plugin_capability_config.cpp
     test_plugin_capability_identifier.cpp
     test_plugin_config.cpp
+    test_plugin_capabilities_in_use.cpp
     test_plugin_install.cpp
     test_slicing_pipeline_bindings.cpp
     test_plugin_sort.cpp

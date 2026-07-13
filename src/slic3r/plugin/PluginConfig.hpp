@@ -3,17 +3,26 @@
 #include <libslic3r/Utils.hpp>
 #include <boost/filesystem.hpp>
 #include <nlohmann/json.hpp>
+#include <slic3r/plugin/CapabilityConfigDocument.hpp>
 #include <slic3r/plugin/PluginFsUtils.hpp>
+#include <slic3r/plugin/PluginLoader.hpp>
 #include <map>
 #include <mutex>
 #include <string>
 #include <utility>
+#include <vector>
 
 #define PLUGIN_CONFIG_DIR "config.json"
 
 namespace Slic3r {
 
 class PluginCapabilityInterface;
+
+enum class PluginConfigSource {
+    None,
+    Base,
+    Preset,
+};
 
 /*
 Example config.json shape
@@ -95,6 +104,7 @@ public:
     // untouched, so saving one capability cannot disturb another's config.
     // The single mutation entry point for both the Plugins dialog and the Python binding.
     bool store_capability_config(const std::string& plugin_key, const std::string& capability_name, const nlohmann::json& config);
+    bool erase_capability_config(const std::string& plugin_key, const std::string& capability_name);
 
     // Returns a default-constructed BaseConfig (see BaseConfig::empty) when the capability has
     // no stored config.
@@ -103,12 +113,35 @@ public:
 
     bool dirty() const;
 
-private:
-    // (plugin_key, capability_name) -> entry. Ordered, so config.json serializes stably.
-    using CapabilityId = std::pair<std::string, std::string>;
+    // ---- Webview-facing helpers, shared by PluginsDialog's Config tab and PluginsConfigDialog ----
+    //
+    // These build the payloads both dialogs' config views speak, so the two pages stay in step and
+    // neither dialog owns the config protocol. They are static because a capability's config is
+    // addressed globally by (plugin_key, capability_name) through PluginManager's store, not through
+    // any one PluginConfig instance.
+    //
+    // The caller owns the UI: it confirms destructive restores and shows status toasts. These only
+    // touch the store, the loaded capability, and the payload.
 
+    // The config sidebar's rows: one entry per capability, in the order given. Capabilities that are
+    // no longer loaded are skipped — the sidebar only offers what can actually be configured.
+    static nlohmann::json capabilities_payload(const std::vector<PluginCapabilityIdentifier>& caps);
+
+    // One capability's stored config, plus its custom HTML UI when it provides one.
+    static nlohmann::json get_config_response(const PluginCapabilityIdentifier& id);
+
+    // Persists one capability's config. `config` is either text straight from the default editor
+    // (re-parsed here, so malformed JSON can never reach config.json) or a structured value from a
+    // custom UI.
+    static nlohmann::json save_config_response(const PluginCapabilityIdentifier& id, const nlohmann::json& config);
+
+    // Overwrites one capability's stored config with its get_default_config(). The caller must have
+    // confirmed with the user first — this does not ask.
+    static nlohmann::json restore_config_response(const PluginCapabilityIdentifier& id);
+
+private:
     mutable std::mutex m_mutex;
-    std::map<CapabilityId, BaseConfig> m_storage;
+    CapabilityConfigDocument m_document;
     bool m_dirty = false;
 };
 

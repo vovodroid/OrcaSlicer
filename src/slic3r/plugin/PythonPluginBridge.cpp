@@ -1,9 +1,11 @@
 #include "PythonPluginBridge.hpp"
 
 #include <boost/log/trivial.hpp>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <slic3r/plugin/PluginAuditManager.hpp>
+#include <string>
 #include <unordered_map>
 
 #include <pybind11/embed.h>
@@ -343,33 +345,41 @@ void bind_python_api(pybind11::module_& m)
             "get_default_config",
             [](const PluginCapabilityInterface& self) {
                 nlohmann::json config = self.get_default_config();
-                return json_to_py(config); // GIL held (binding body)
+                return config.dump();
             },
             "Override to return the config that the Config tab's \"Restore defaults\" action writes\n"
-            "back. Optional: without it the action stores an empty dict, which already restores the\n"
-            "defaults of a capability that keeps its stored config sparse and applies its own\n"
-            "defaults on read. Override it to write an explicit starting config instead.")
+            "back, as a dict. Optional: without it the action stores an empty config, which already\n"
+            "restores the defaults of a capability that keeps its stored config sparse and applies\n"
+            "its own defaults on read. Override it to write an explicit starting config instead.\n"
+            "Calling it returns that config as a JSON string.")
         .def(
             "get_config",
             [](const PluginCapabilityInterface& self) {
                 nlohmann::json config = capability_get_config(self);
-                return json_to_py(config); // GIL held (binding body)
+                return config.dump();
             },
-            "Return this capability's stored config. An empty dict if it has never been saved.")
+            "Return this capability's stored config as a JSON string — json.loads() it to use.\n"
+            "\"{}\" if it has never been saved, so the parsed result is always indexable.")
         .def(
-            "get_config_version",
-            [](const PluginCapabilityInterface& self) { return capability_get_config_version(self); },
+            "get_config_version", [](const PluginCapabilityInterface& self) { return capability_get_config_version(self); },
             "Return the plugin version that last wrote this capability's config, so a newer\n"
             "release can spot a stale config and migrate it. Empty string if never saved.")
         .def(
             "save_config",
-            [](const PluginCapabilityInterface& self, const py::object& config) {
-                return capability_save_config(self, py_to_json(config)); // GIL held (binding body)
+            [](const PluginCapabilityInterface& self, const std::string& config_str) {
+                nlohmann::json config = nlohmann::json::parse(config_str, nullptr, /* allow_exceptions */ false);
+                if (config.is_discarded()) {
+                    // Refused rather than stored: the caller gets False, and the previously stored
+                    // config is left alone. Logged because False alone does not say why.
+                    BOOST_LOG_TRIVIAL(error) << "save_config: capability '" << self.get_name() << "' passed a config that is not valid JSON";
+                    return false;
+                }
+                return capability_save_config(self, config);
             },
             py::arg("config"),
-            "Persist this capability's config, given as a JSON-compatible value (usually a dict).\n"
+            "Persist this capability's config, given as a JSON string (e.g. json.dumps(cfg)).\n"
             "The plugin key, capability name and version are supplied by the host. Returns False if\n"
-            "the config file could not be written.");
+            "the string is not valid JSON, or if the config file could not be written.");
 
     // Expose the package marker base as orca.base. @orca.plugin later verifies that the
     // decorated class derives from this exact pybind-registered C++ type.

@@ -4,53 +4,20 @@
 #include <boost/log/trivial.hpp>
 #include <boost/nowide/fstream.hpp>
 
+#include <slic3r/GUI/GUI.hpp>
+#include <slic3r/GUI/I18N.hpp>
+#include <slic3r/GUI/format.hpp>
+#include <slic3r/plugin/PluginLoader.hpp>
 #include <slic3r/plugin/PluginManager.hpp>
+#include <slic3r/plugin/PythonInterpreter.hpp>
 #include <slic3r/plugin/PythonPluginInterface.hpp>
 #include <stdexcept>
-#include <utility>
+
+#include <wx/utils.h>
 
 namespace Slic3r {
 
 namespace {
-
-constexpr const char* KEY_ENTRIES    = "config";
-constexpr const char* KEY_PLUGIN     = "plugin_key";
-constexpr const char* KEY_CAPABILITY = "capability";
-constexpr const char* KEY_VERSION    = "plugin_version";
-constexpr const char* KEY_CAP_CONFIG = "cap_config";
-
-std::string string_field(const nlohmann::json& entry, const char* key)
-{
-    const auto it = entry.find(key);
-    return it != entry.end() && it->is_string() ? it->get<std::string>() : std::string();
-}
-
-// Rejects entries missing an identity, which could never be looked up again.
-bool entry_to_config(const nlohmann::json& entry, BaseConfig& out)
-{
-    if (!entry.is_object())
-        return false;
-
-    out.plugin_key      = string_field(entry, KEY_PLUGIN);
-    out.capability_name = string_field(entry, KEY_CAPABILITY);
-    out.plugin_version  = string_field(entry, KEY_VERSION);
-    if (out.empty())
-        return false;
-
-    const auto cap_config = entry.find(KEY_CAP_CONFIG);
-    out.config            = cap_config != entry.end() ? *cap_config : nlohmann::json::object();
-    return true;
-}
-
-nlohmann::json config_to_entry(const BaseConfig& config)
-{
-    return nlohmann::json{
-        {KEY_PLUGIN, config.plugin_key},
-        {KEY_CAPABILITY, config.capability_name},
-        {KEY_VERSION, config.plugin_version},
-        {KEY_CAP_CONFIG, config.config},
-    };
-}
 
 // The version of the plugin package currently running. PluginDescriptor::version is
 // overwritten with the latest cloud version when a cloud merge happens, so it can name a
@@ -83,7 +50,7 @@ void PluginConfig::load()
     const std::string path = plugin_config_file();
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_storage.clear();
+    m_document = CapabilityConfigDocument();
     m_dirty = false;
 
     boost::system::error_code ec;
@@ -99,20 +66,14 @@ void PluginConfig::load()
         return;
     }
 
-    const auto entries = root.find(KEY_ENTRIES);
+    const auto entries = root.find(CapabilityConfigDocument::KeyEntries);
     if (entries == root.end() || !entries->is_array()) {
-        BOOST_LOG_TRIVIAL(warning) << "PluginConfig: " << path << " has no \"" << KEY_ENTRIES << "\" array; starting with an empty config";
+        BOOST_LOG_TRIVIAL(warning) << "PluginConfig: " << path << " has no \"" << CapabilityConfigDocument::KeyEntries
+                                   << "\" array; starting with an empty config";
         return;
     }
 
-    for (const auto& entry : *entries) {
-        BaseConfig config;
-        if (!entry_to_config(entry, config)) {
-            BOOST_LOG_TRIVIAL(warning) << "PluginConfig: skipping entry without a plugin key and capability name";
-            continue;
-        }
-        m_storage[{config.plugin_key, config.capability_name}] = std::move(config);
-    }
+    m_document = CapabilityConfigDocument::from_root_json(root);
 }
 
 bool PluginConfig::save()
@@ -120,11 +81,10 @@ bool PluginConfig::save()
     const std::string path = plugin_config_file();
 
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_dirty)
+        return true;
 
-    nlohmann::json root;
-    root[KEY_ENTRIES] = nlohmann::json::array();
-    for (const auto& [id, config] : m_storage)
-        root[KEY_ENTRIES].push_back(config_to_entry(config));
+    const nlohmann::json root = m_document.root_json();
 
     boost::system::error_code ec;
     boost::filesystem::create_directories(boost::filesystem::path(path).parent_path(), ec);
@@ -177,21 +137,37 @@ void PluginConfig::save_config(const BaseConfig& config)
     }
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_storage[{config.plugin_key, config.capability_name}] = config;
-    m_dirty                                                = true;
+    m_dirty = m_document.upsert(CapabilityConfigEntry{{config.plugin_key, config.capability_name}, config.plugin_version, config.config}) || m_dirty;
+}
+
+bool PluginConfig::erase_capability_config(const std::string& plugin_key, const std::string& capability_name)
+{
+    if (plugin_key.empty() || capability_name.empty())
+        return false;
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (!m_document.erase({plugin_key, capability_name}))
+            return true;
+        m_dirty = true;
+    }
+
+    return save();
 }
 
 BaseConfig PluginConfig::get_config(const std::string& plugin_key, const std::string& capability_name) const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    const auto it = m_storage.find({plugin_key, capability_name});
-    return it != m_storage.end() ? it->second : BaseConfig();
+    const auto entry = m_document.find({plugin_key, capability_name});
+    if (!entry)
+        return BaseConfig();
+    return BaseConfig{entry->id.plugin_key, entry->id.capability, entry->plugin_version, entry->cap_config};
 }
 
 bool PluginConfig::has_config(const std::string& plugin_key, const std::string& capability_name) const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_storage.count({plugin_key, capability_name}) != 0;
+    return m_document.contains({plugin_key, capability_name});
 }
 
 bool PluginConfig::dirty() const
@@ -221,6 +197,196 @@ bool capability_save_config(const PluginCapabilityInterface& capability, const n
     const auto [plugin_key, capability_name] = capability_identity(capability, "save_config");
 
     return PluginManager::instance().get_config().store_capability_config(plugin_key, capability_name, config);
+}
+
+nlohmann::json PluginConfig::capabilities_payload(const std::vector<PluginCapabilityIdentifier>& caps)
+{
+    PluginLoader& loader = PluginManager::instance().get_loader();
+
+    nlohmann::json payload = nlohmann::json::array();
+    for (const PluginCapabilityIdentifier& id : caps) {
+        // Read has_config_ui off the live capability rather than trusting the caller's copy: a
+        // capability that has been unloaded since the list was built has nothing to configure.
+        const auto capability = loader.get_plugin_capability_by_name(id);
+        if (!capability)
+            continue;
+
+        nlohmann::json entry;
+        entry["plugin_key"]    = id.plugin_key;
+        entry["name"]          = id.name;
+        entry["type"]          = plugin_capability_type_display_name(id.type);
+        entry["type_key"]      = plugin_capability_type_to_string(id.type);
+        entry["has_config_ui"] = capability->has_config_ui;
+        payload.push_back(std::move(entry));
+    }
+    return payload;
+}
+
+// Replies with one capability's stored config, plus the custom HTML UI when the capability provides
+// one. Config is sent as a JSON value, not text: the default editor pretty-prints it into its
+// textarea, and a custom UI receives it as-is through window.orca.
+nlohmann::json PluginConfig::get_config_response(const PluginCapabilityIdentifier& id)
+{
+    nlohmann::json response;
+    response["command"]         = "capability_config";
+    response["plugin_key"]      = id.plugin_key;
+    response["capability_name"] = id.name;
+    response["capability_type"] = plugin_capability_type_to_string(id.type);
+    response["config"]          = nlohmann::json::object();
+    response["custom_html"]     = "";
+    response["error"]           = "";
+
+    // Scoped to the full identity, so a stale request from a page that has not caught up with a
+    // refresh cannot read a different plugin's config — it just misses.
+    const auto cap = PluginManager::instance().get_loader().get_plugin_capability_by_name(id);
+    if (!cap) {
+        BOOST_LOG_TRIVIAL(warning) << "Ignoring config request for a capability that is no longer loaded. plugin_key="
+                                   << id.plugin_key << " capability_name=" << id.name;
+        response["error"] = GUI::into_u8(_L("This capability is no longer available."));
+        return response;
+    }
+
+    response["config"] = PluginManager::instance().get_config().get_config(id.plugin_key, id.name).config;
+
+    if (cap->has_config_ui) {
+        // Plugin-authored HTML. A raising or empty get_config_ui() costs the capability only its
+        // custom UI: we report the failure and let the page fall back to the default JSON editor,
+        // which edits the very same stored config.
+        std::string html;
+        std::string error;
+        {
+            wxBusyCursor busy;
+            try {
+                PythonGILState gil;
+                html = cap->instance->get_config_ui();
+            } catch (const std::exception& ex) {
+                error = ex.what();
+            } catch (...) {
+                error = "Unknown error";
+            }
+        }
+
+        if (!error.empty()) {
+            BOOST_LOG_TRIVIAL(error) << "Plugin capability get_config_ui() failed. plugin_key=" << id.plugin_key
+                                     << " capability_name=" << id.name << " error=" << error;
+            response["error"] = GUI::into_u8(GUI::format_wxstr(_L("The plugin's configuration UI failed to load (%1%). Showing the default editor."),
+                                                     GUI::from_u8(error)));
+        } else if (html.empty()) {
+            BOOST_LOG_TRIVIAL(warning) << "Plugin capability reports a config UI but returned no HTML. plugin_key=" << id.plugin_key
+                                       << " capability_name=" << id.name;
+            response["error"] = GUI::into_u8(_L("The plugin's configuration UI was empty. Showing the default editor."));
+        } else {
+            response["custom_html"] = html;
+        }
+    }
+
+    return response;
+}
+
+nlohmann::json PluginConfig::save_config_response(const PluginCapabilityIdentifier& id, const nlohmann::json& config)
+{
+    nlohmann::json response;
+    response["command"]         = "capability_config_saved";
+    response["plugin_key"]      = id.plugin_key;
+    response["capability_name"] = id.name;
+    response["capability_type"] = plugin_capability_type_to_string(id.type);
+    response["ok"]              = false;
+    response["error"]           = "";
+
+    const auto cap = PluginManager::instance().get_loader().get_plugin_capability_by_name(id);
+    if (!cap) {
+        BOOST_LOG_TRIVIAL(warning) << "Refusing to save config for a capability that is no longer loaded. plugin_key="
+                                   << id.plugin_key << " capability_name=" << id.name;
+        response["error"] = GUI::into_u8(_L("This capability is no longer available. Your changes were not saved."));
+        return response;
+    }
+
+    nlohmann::json parsed = config;
+    if (config.is_string()) {
+        // The page validates as the user types, but it is not the authority: re-parse here so a
+        // malformed document is rejected before it can reach config.json.
+        parsed = nlohmann::json::parse(config.get<std::string>(), nullptr, /* allow_exceptions */ false);
+        if (parsed.is_discarded()) {
+            response["error"] = GUI::into_u8(_L("The configuration is not valid JSON. Your changes were not saved."));
+            return response;
+        }
+    }
+
+    if (!PluginManager::instance().get_config().store_capability_config(id.plugin_key, id.name, parsed)) {
+        BOOST_LOG_TRIVIAL(error) << "Failed to write the plugin config file. plugin_key=" << id.plugin_key
+                                 << " capability_name=" << id.name;
+        response["error"] = GUI::into_u8(_L("The configuration could not be written to disk. Your changes were not saved."));
+        return response;
+    }
+
+    BOOST_LOG_TRIVIAL(info) << "Saved plugin capability config. plugin_key=" << id.plugin_key << " capability_name=" << id.name;
+
+    // Echo the persisted value back so the editor reloads from what is actually stored rather than
+    // from what the user typed.
+    response["ok"]     = true;
+    response["config"] = PluginManager::instance().get_config().get_config(id.plugin_key, id.name).config;
+    return response;
+}
+
+// The host does not invent the default: a capability that does not override get_default_config()
+// restores an empty config, which is exactly right for one that applies its own defaults on read.
+nlohmann::json PluginConfig::restore_config_response(const PluginCapabilityIdentifier& id)
+{
+    nlohmann::json response;
+    response["command"]         = "capability_config_saved";
+    response["plugin_key"]      = id.plugin_key;
+    response["capability_name"] = id.name;
+    response["capability_type"] = plugin_capability_type_to_string(id.type);
+    response["ok"]              = false;
+    response["error"]           = "";
+
+    const auto cap = PluginManager::instance().get_loader().get_plugin_capability_by_name(id);
+    if (!cap) {
+        BOOST_LOG_TRIVIAL(warning) << "Refusing to restore config for a capability that is no longer loaded. plugin_key="
+                                   << id.plugin_key << " capability_name=" << id.name;
+        response["error"] = GUI::into_u8(_L("This capability is no longer available."));
+        return response;
+    }
+
+    nlohmann::json defaults;
+    std::string    error;
+    {
+        wxBusyCursor busy;
+        try {
+            PythonGILState gil;
+            defaults = cap->instance->get_default_config();
+        } catch (const std::exception& ex) {
+            error = ex.what();
+        } catch (...) {
+            error = "Unknown error";
+        }
+    }
+
+    // A raising hook leaves the stored config exactly as it was: better to restore nothing than to
+    // wipe the user's settings on the strength of a broken plugin.
+    if (!error.empty()) {
+        BOOST_LOG_TRIVIAL(error) << "Plugin capability get_default_config() failed. plugin_key=" << id.plugin_key
+                                 << " capability_name=" << id.name << " error=" << error;
+        response["error"] = GUI::into_u8(GUI::format_wxstr(_L("The plugin could not supply a default configuration (%1%). "
+                                                    "Nothing was changed."),
+                                                 GUI::from_u8(error)));
+        return response;
+    }
+
+    if (!PluginManager::instance().get_config().store_capability_config(id.plugin_key, id.name, defaults)) {
+        BOOST_LOG_TRIVIAL(error) << "Failed to write the plugin config file while restoring defaults. plugin_key="
+                                 << id.plugin_key << " capability_name=" << id.name;
+        response["error"] = GUI::into_u8(_L("The configuration could not be written to disk. Nothing was changed."));
+        return response;
+    }
+
+    BOOST_LOG_TRIVIAL(info) << "Restored default plugin capability config. plugin_key=" << id.plugin_key
+                            << " capability_name=" << id.name;
+
+    // Reuses the saved reply, so both editors reload from what was actually persisted.
+    response["ok"]     = true;
+    response["config"] = PluginManager::instance().get_config().get_config(id.plugin_key, id.name).config;
+    return response;
 }
 
 } // namespace Slic3r

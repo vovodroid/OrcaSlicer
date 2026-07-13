@@ -23,6 +23,8 @@
 #include "OG_CustomCtrl.hpp"
 #include "MsgDialog.hpp"
 #include "BitmapComboBox.hpp"
+#include "PluginsConfigDialog.hpp"
+#include "Widgets/Button.hpp"
 
 // BBS
 #include "Notebook.hpp"
@@ -2306,6 +2308,136 @@ void PluginField::msw_rescale()
 {
     Field::msw_rescale();
     rebuild_ui();
+}
+
+namespace {
+
+// The stored text as a document, or an empty array when it is absent or unparseable. Used to compare
+// two versions of the value semantically: re-serializing an unchanged document can reorder keys or
+// drop whitespace, and that alone must not be allowed to mark the preset dirty.
+nlohmann::json plugin_overrides_as_json(const std::string& text)
+{
+    if (text.empty())
+        return nlohmann::json::array();
+    return nlohmann::json::parse(text, nullptr, /* allow_exceptions */ false);
+}
+
+} // namespace
+
+void PluginConfigField::BUILD()
+{
+    // The button *is* the field's window (the ColourPicker idiom). Wrapping it in a panel would make
+    // this a container that OG_CustomCtrl sizes but never lays out, leaving the button unsized — and
+    // a zero-height row collapses its whole option group out of the page.
+    m_button = new ::Button(m_parent, _L("Configure"));
+    // ButtonType::Parameter is the style for a button sitting next to parameter boxes: it is what
+    // gives the button the same height as the fields above it, which a bare wxButton does not.
+    m_button->SetStyle(ButtonStyle::Regular, ButtonType::Parameter);
+
+    wxSize size(def_width_wider() * m_em_unit, m_button->GetMinSize().GetHeight());
+    if (m_opt.height >= 0) size.SetHeight(m_opt.height * m_em_unit);
+    if (m_opt.width >= 0)  size.SetWidth(m_opt.width * m_em_unit);
+    m_button->SetMinSize(size);
+    m_button->SetSize(size);
+
+    m_button->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { open_dialog(); });
+    m_button->SetToolTip(get_tooltip_text(_L("Configure")));
+
+    window = m_button;
+
+    if (const ConfigOptionString* def = m_opt.get_default_value<ConfigOptionString>())
+        m_json = def->value;
+
+    update_button_label();
+    m_value = m_json;
+}
+
+void PluginConfigField::update_button_label()
+{
+    if (m_button == nullptr)
+        return;
+
+    const nlohmann::json entries = plugin_overrides_as_json(m_json);
+    const size_t         count   = entries.is_array() ? entries.size() : 0;
+
+    // The count is the whole state this row can show: which capabilities they belong to, and what
+    // they hold, is the dialog's job.
+    m_button->SetLabel(count == 0 ? _L("Configure")
+                                  : wxString::Format(_L("Configure (%d)"), int(count)));
+}
+
+void PluginConfigField::open_dialog()
+{
+    const Preset::Type type = static_cast<Preset::Type>(m_preset_type);
+    if (type != Preset::TYPE_PRINT && type != Preset::TYPE_FILAMENT && type != Preset::TYPE_PRINTER)
+        return;
+
+    std::string edited;
+    {
+        PluginsConfigDialog dlg(m_button, type, m_json);
+        dlg.ShowModal();
+        edited = dlg.overrides_json();
+    }
+
+    // Only a semantic change is a change: reopening the dialog and closing it must not dirty the
+    // preset just because the document round-tripped through the serializer.
+    if (plugin_overrides_as_json(m_json) == plugin_overrides_as_json(edited))
+        return;
+
+    m_json  = edited;
+    m_value = m_json;
+    update_button_label();
+    // The one call that makes this behave like every other setting: it drives change_opt_value into
+    // the preset config, Tab::update_dirty(), and the revert arrow.
+    on_change_field();
+}
+
+void PluginConfigField::set_value(const boost::any& value, bool change_event)
+{
+    m_disable_change_event = !change_event;
+
+    if (value.type() == typeid(wxString))
+        m_json = into_u8(boost::any_cast<wxString>(value));
+    else if (value.type() == typeid(std::string))
+        m_json = boost::any_cast<std::string>(value);
+
+    m_value = m_json;
+    update_button_label();
+
+    m_disable_change_event = false;
+}
+
+boost::any& PluginConfigField::get_value()
+{
+    // std::string, not wxString: change_opt_value any_casts a coString to std::string.
+    m_value = m_json;
+    return m_value;
+}
+
+void PluginConfigField::enable()
+{
+    if (m_button)
+        m_button->Enable();
+}
+
+void PluginConfigField::disable()
+{
+    if (m_button)
+        m_button->Disable();
+}
+
+void PluginConfigField::msw_rescale()
+{
+    Field::msw_rescale();
+    if (m_button == nullptr)
+        return;
+
+    m_button->SetStyle(ButtonStyle::Regular, ButtonType::Parameter);
+
+    wxSize size(def_width_wider() * m_em_unit, m_button->GetMinSize().GetHeight());
+    if (m_opt.height >= 0) size.SetHeight(m_opt.height * m_em_unit);
+    if (m_opt.width >= 0)  size.SetWidth(m_opt.width * m_em_unit);
+    m_button->SetMinSize(size);
 }
 
 void ColourPicker::BUILD()

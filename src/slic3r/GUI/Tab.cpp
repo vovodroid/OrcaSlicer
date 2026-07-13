@@ -3086,6 +3086,13 @@ void TabPrint::build()
         option.opt.full_width = true;
         optgroup->append_single_option_line(option, "others_settings_plugin_picker");
 
+        // Its own group rather than the one above: that one hides its labels, and this row needs its
+        // label — and so the revert arrow beside it — to show. No label-width override either: a 0
+        // there means "no label column", which is what the neighbouring full-width groups want and
+        // what would collapse this one.
+        optgroup = page->new_optgroup(L("Plugin Configuration"), L"param_gcode");
+        optgroup->append_single_option_line("plugin_preference_overrides");
+
         optgroup = page->new_optgroup(L("Notes"), "note", 0);
         option = optgroup->get_option("notes");
         option.opt.full_width = true;
@@ -4481,6 +4488,9 @@ void TabFilament::build()
         option.opt.height = gcode_field_height;// 150;
         optgroup->append_single_option_line(option);
 
+        optgroup = page->new_optgroup(L("Plugin Configuration"), L"param_gcode");
+        optgroup->append_single_option_line("plugin_preference_overrides");
+
     page = add_options_page(L("Multimaterial"), "custom-gcode_multi_material"); // ORCA: icon only visible on placeholders
         optgroup = page->new_optgroup(L("Wipe tower parameters"), "param_tower");
         optgroup->append_single_option_line("filament_minimal_purge_on_wipe_tower", "material_multimaterial#multimaterial-wipe-tower-parameters");
@@ -4923,6 +4933,7 @@ void TabPrinter::build_fff()
         optgroup->append_single_option_line("use_firmware_retraction", "printer_basic_information_advanced#use-firmware-retraction");
         // optgroup->append_single_option_line("spaghetti_detector");
         optgroup->append_single_option_line("time_cost", "printer_basic_information_advanced#time-cost");
+        optgroup->append_single_option_line("plugin_preference_overrides");
 
         optgroup  = page->new_optgroup(L("Cooling Fan"), "param_cooling_fan");
         Line line = Line{ L("Fan speed-up time"), optgroup->get_option("fan_speedup_time").opt.tooltip };

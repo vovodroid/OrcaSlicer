@@ -504,9 +504,8 @@ function HasMixedCapabilityState(plugin) {
     String(capability?.type_key || "")
   );
 
-  const hasEnabled = toggleableCapabilities.some((capability) => capability?.enabled === true);
   const hasDisabled = toggleableCapabilities.some((capability) => capability?.enabled !== true);
-  return hasEnabled && hasDisabled;
+  return toggleableCapabilities.length > 0 && hasDisabled;
 }
 
 function IsPluginLoading(plugin) {
@@ -826,12 +825,12 @@ function RenderDetails() {
 // native side sends and sends back what the user saves.
 // ---------------------------------------------------------------------------
 
-// Every capability is configurable — it always gets at least the default JSON editor over its
-// stored config — so the sidebar lists them all. The only exception is the descriptor-only rows
-// shown for a plugin that is not activated: those carry no capability name, so there is nothing to
-// address on the native side and nothing to configure yet.
+// The config sidebar's rows, built natively by PluginConfig::capabilities_payload and shared with
+// PluginsConfigDialog. Only loaded, addressable capabilities appear: the descriptor-only rows the
+// list tab shows for a plugin that is not activated carry no capability name, so there is nothing to
+// configure and nothing to address on the native side.
 function GetConfigurableCapabilities(plugin) {
-  return GetCapabilities(plugin).filter((capability) => String(capability?.name || ""));
+  return Array.isArray(plugin?.config_capabilities) ? plugin.config_capabilities : [];
 }
 
 function RenderConfig(plugin) {

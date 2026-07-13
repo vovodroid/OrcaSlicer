@@ -929,6 +929,17 @@ void PrintConfigDef::init_common_params()
         def = this->add("preset_name", coString);
         def->set_default_value(new ConfigOptionString());
     }
+
+    def = this->add("plugin_preference_overrides", coString);
+    def->label = L("Plugin configuration");
+    def->tooltip = L("Configuration for the plugin capabilities this preset uses, overriding the global "
+                     "plugin configuration. Stored as a raw JSON array and edited through the dialog "
+                     "behind the button, never typed in directly.");
+    // Never shown as a text field: plugin_config renders a button that opens PluginsConfigDialog.
+    def->gui_type = ConfigOptionDef::GUIType::plugin_config;
+    def->mode = comAdvanced;
+    def->cli = ConfigOptionDef::nocli;
+    def->set_default_value(new ConfigOptionString(""));
 }
 
 void PrintConfigDef::init_fff_params()
