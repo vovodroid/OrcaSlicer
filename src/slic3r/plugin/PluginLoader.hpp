@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PluginCallbackList.hpp"
 #include "PluginDescriptor.hpp"
 
 #include <boost/filesystem/path.hpp>
@@ -197,8 +198,10 @@ private:
     mutable std::mutex m_mutex;
     mutable std::condition_variable m_plugin_load_cv;
 
-    std::unordered_map<CallbackType, std::vector<PluginLifecycleCompleteFn>> m_callbacks{};
-    std::unordered_map<CallbackType, std::vector<CapabilityLifecycleFn>> m_capability_callbacks{};
+    PluginCallbackList<void(const std::string&)>                m_load_callbacks;
+    PluginCallbackList<void(const std::string&)>                m_unload_callbacks;
+    PluginCallbackList<void(const PluginCapabilityIdentifier&)> m_capability_load_callbacks;
+    PluginCallbackList<void(const PluginCapabilityIdentifier&)> m_capability_unload_callbacks;
 
     /*
         callbacks:

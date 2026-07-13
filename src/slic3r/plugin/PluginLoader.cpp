@@ -1429,7 +1429,7 @@ void PluginLoader::unload_cloud_plugins()
 
 void PluginLoader::run_on_load_callbacks(const std::string& plugin_key)
 {
-    for (auto& fn : m_callbacks[CallbackType::Load]) {
+    m_load_callbacks.dispatch([&plugin_key](const PluginLifecycleCompleteFn& fn) {
         try {
             fn(plugin_key);
         } catch (const std::exception& ex) {
@@ -1437,12 +1437,12 @@ void PluginLoader::run_on_load_callbacks(const std::string& plugin_key)
         } catch (...) {
             BOOST_LOG_TRIVIAL(error) << "Plugin load completion callback failed for " << plugin_key;
         }
-    }
+    });
 }
 
 void PluginLoader::run_on_unload_callbacks(const std::string& plugin_key)
 {
-    for (auto& fn : m_callbacks[CallbackType::Unload]) {
+    m_unload_callbacks.dispatch([&plugin_key](const PluginLifecycleCompleteFn& fn) {
         try {
             fn(plugin_key);
         } catch (const std::exception& ex) {
@@ -1450,12 +1450,12 @@ void PluginLoader::run_on_unload_callbacks(const std::string& plugin_key)
         } catch (...) {
             BOOST_LOG_TRIVIAL(error) << "Plugin unload completion callback failed for " << plugin_key << ": unknown error";
         }
-    }
+    });
 }
 
 void PluginLoader::run_on_capability_load_callbacks(const PluginCapabilityIdentifier& id)
 {
-    for (auto& fn : m_capability_callbacks[CallbackType::Load]) {
+    m_capability_load_callbacks.dispatch([&id](const CapabilityLifecycleFn& fn) {
         try {
             fn(id);
         } catch (const std::exception& ex) {
@@ -1465,12 +1465,12 @@ void PluginLoader::run_on_capability_load_callbacks(const PluginCapabilityIdenti
             BOOST_LOG_TRIVIAL(error) << "Plugin capability load callback failed for " << id.plugin_key << "/"
                                      << id.name << ": unknown error";
         }
-    }
+    });
 }
 
 void PluginLoader::run_on_capability_unload_callbacks(const PluginCapabilityIdentifier& id)
 {
-    for (auto& fn : m_capability_callbacks[CallbackType::Unload]) {
+    m_capability_unload_callbacks.dispatch([&id](const CapabilityLifecycleFn& fn) {
         try {
             fn(id);
         } catch (const std::exception& ex) {
@@ -1480,27 +1480,27 @@ void PluginLoader::run_on_capability_unload_callbacks(const PluginCapabilityIden
             BOOST_LOG_TRIVIAL(error) << "Plugin capability unload callback failed for " << id.plugin_key << "/"
                                      << id.name << ": unknown error";
         }
-    }
+    });
 }
 
 void PluginLoader::subscribe_on_load_callback(PluginLifecycleCompleteFn fn)
 {
-    m_callbacks[CallbackType::Load].push_back(std::move(fn));
+    m_load_callbacks.subscribe(std::move(fn));
 }
 
 void PluginLoader::subscribe_on_unload_callback(PluginLifecycleCompleteFn fn)
 {
-    m_callbacks[CallbackType::Unload].push_back(std::move(fn));
+    m_unload_callbacks.subscribe(std::move(fn));
 }
 
 void PluginLoader::subscribe_on_capability_load_callback(CapabilityLifecycleFn fn)
 {
-    m_capability_callbacks[CallbackType::Load].push_back(std::move(fn));
+    m_capability_load_callbacks.subscribe(std::move(fn));
 }
 
 void PluginLoader::subscribe_on_capability_unload_callback(CapabilityLifecycleFn fn)
 {
-    m_capability_callbacks[CallbackType::Unload].push_back(std::move(fn));
+    m_capability_unload_callbacks.subscribe(std::move(fn));
 }
 
 } // namespace Slic3r
