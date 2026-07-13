@@ -9,7 +9,7 @@
 // file lives in the GUI layer (libslic3r must not depend on pybind11 / PluginManager).
 #include "libslic3r/Config.hpp"
 #include "slic3r/plugin/PluginManager.hpp"
-#include "slic3r/plugin/pluginTypes/gcode/GCodePluginCapability.hpp"
+#include "slic3r/plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.hpp"
 #include "slic3r/plugin/PythonInterpreter.hpp"
 
 #include <boost/algorithm/string.hpp>
@@ -241,27 +241,39 @@ void gcode_add_line_number(const std::string& path, const DynamicPrintConfig& co
     fs.close();
 }
 
-// Run the configured post-processing plugins on `gcode_path` in place. Plugins are executed in-process
-// through the embedded Python interpreter. Throws Slic3r::RuntimeError on any failure; the caller is
-// responsible for removing the working copy (see run_post_process_scripts' catch block).
-// Entries are bare capability names; the top-level plugins manifest carries the full plugin refs.
+// Run the configured slicing-pipeline plugins on `gcode_path` in place, at their Step.psGCodePostProcess
+// seam. This is the same capability that runs at the geometry seams inside Print::process(); here it is
+// dispatched a final time on the exported G-code, so a plugin can edit slices AND the final G-code from
+// one class. Plugins are executed in-process through the embedded Python interpreter. Throws
+// Slic3r::RuntimeError on any failure; the caller removes the working copy (see run_post_process_scripts'
+// catch block). Entries are bare capability names; the top-level plugins manifest carries the full refs.
+// A geometry-only plugin simply returns success here (it filters on ctx.step), so it costs nothing beyond
+// one no-op call, but note any configured pipeline plugin still engages this post-process path (i.e. the
+// non-BBL ".pp" working copy) even if it does no G-code work.
 static void run_post_process_plugins(const ConfigOptionStrings& capabilities,
                                      const ConfigOptionStrings* plugins,
                                      const std::string& gcode_path,
                                      const std::string& host,
-                                     const std::string& output_name)
+                                     const std::string& output_name,
+                                     const DynamicPrintConfig& config)
 {
     // Let plugins observe the (possibly script-updated) target file name, mirroring the script env.
     boost::nowide::setenv("SLIC3R_PP_OUTPUT_NAME", output_name.c_str(), 1);
 
     const boost::filesystem::path gcode_file(gcode_path);
 
-    auto execute_fn = [&](std::shared_ptr<GCodePluginCapability> cap, const PluginCapabilityRef& ref) {
-        GCodePluginContext ctx;
+    auto execute_fn = [&](std::shared_ptr<SlicingPipelinePluginCapability> cap, const PluginCapabilityRef& ref) {
+        SlicingPipelineContext ctx;
         ctx.orca_version = SoftFever_VERSION;
+        ctx.step         = SlicingPipelineStepPlugin::psGCodePostProcess;
         ctx.gcode_path   = gcode_path;
         ctx.host         = host;
         ctx.output_name  = output_name;
+        ctx.full_config  = &config;   // no live Print here; config_value() reads this
+        // Hand the plugin its own [tool.orcaslicer.plugin.settings] as ctx.params (same plugin_key the
+        // capability was resolved by), mirroring the in-pipeline dispatcher in GUI_App.cpp.
+        const std::string plugin_key = ref.uuid.empty() ? ref.name : ref.uuid;
+        ctx.params = PluginManager::instance().get_loader().get_plugin_settings(plugin_key);
 
         ExecutionResult exec_result;
         try {
@@ -298,11 +310,12 @@ static void run_post_process_plugins(const ConfigOptionStrings& capabilities,
         BOOST_LOG_TRIVIAL(info) << "Post-processing plugin " << ref.capability_name << " completed successfully";
     };
 
-    execute_capabilities_from_refs<GCodePluginCapability>(capabilities, plugins, PluginCapabilityType::PostProcessing, execute_fn);
+    execute_capabilities_from_refs<SlicingPipelinePluginCapability>(capabilities, plugins, PluginCapabilityType::SlicingPipeline, execute_fn);
 }
 
-// Run post-processing scripts ("post_process") and/or post-processing plugins ("post_process_plugin")
-// if defined. Both run on the same working copy of the G-code (the ".pp" temp when make_copy), so a
+// Run post-processing scripts ("post_process") and/or the slicing-pipeline plugins' psGCodePostProcess
+// step ("slicing_pipeline_plugin") if defined. Both run on the same working copy of the G-code (the
+// ".pp" temp when make_copy), so a
 // plugin never opens the original file the G-code viewer keeps memory-mapped (a writable open of the
 // mapped file fails on Windows with a sharing violation).
 // Returns true if a script or plugin was executed.
@@ -317,11 +330,13 @@ static void run_post_process_plugins(const ConfigOptionStrings& capabilities,
 bool run_post_process_scripts(
     std::string& src_path, bool make_copy, const std::string& host, std::string& output_name, const DynamicPrintConfig& config)
 {
-    // post_process / post_process_plugin are absent in SLA mode, hence the null checks.
-    const auto* post_process        = config.opt<ConfigOptionStrings>("post_process");
-    const auto* post_process_plugin = config.opt<ConfigOptionStrings>("post_process_plugin");
-    const bool  have_scripts        = post_process != nullptr && !post_process->values.empty();
-    const bool  have_plugins        = post_process_plugin != nullptr && !post_process_plugin->values.empty();
+    // post_process / slicing_pipeline_plugin are absent in SLA mode, hence the null checks. G-code
+    // post-processing is now the psGCodePostProcess step of the slicing-pipeline plugin, so the same
+    // slicing_pipeline_plugin option drives both the geometry seams and this final G-code seam.
+    const auto* post_process            = config.opt<ConfigOptionStrings>("post_process");
+    const auto* slicing_pipeline_plugin = config.opt<ConfigOptionStrings>("slicing_pipeline_plugin");
+    const bool  have_scripts            = post_process != nullptr && !post_process->values.empty();
+    const bool  have_plugins            = slicing_pipeline_plugin != nullptr && !slicing_pipeline_plugin->values.empty();
     if (!have_scripts && !have_plugins)
         return false;
 
@@ -469,7 +484,7 @@ bool run_post_process_scripts(
         // Run plugins after the scripts so they observe any output_name the scripts produced. A thrown
         // exception is handled by the catch below, which removes the temp copy.
         if (have_plugins) {
-            run_post_process_plugins(*post_process_plugin, config.opt<ConfigOptionStrings>("plugins"), path, host, output_name);
+            run_post_process_plugins(*slicing_pipeline_plugin, config.opt<ConfigOptionStrings>("plugins"), path, host, output_name, config);
         }
     } catch (...) {
         remove_output_name_file();

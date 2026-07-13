@@ -596,10 +596,19 @@ set(SLIC3R_GUI_SOURCES
     plugin/PythonPluginBridge.hpp
     plugin/PythonPluginInterface.hpp
     plugin/PyPluginPackage.hpp
-    plugin/PluginHostApi.cpp
-    plugin/PluginHostApi.hpp
-    plugin/PluginHostUi.cpp
-    plugin/PluginHostUi.hpp
+    plugin/PluginBindingUtils.hpp
+    plugin/host/PluginHost.cpp
+    plugin/host/PluginHost.hpp
+    plugin/host/PluginHostBindings.hpp
+    plugin/host/PluginHostApp.cpp
+    plugin/host/PluginHostGeometry.cpp
+    plugin/host/PluginHostMesh.cpp
+    plugin/host/PluginHostMesh.hpp
+    plugin/host/PluginHostModel.cpp
+    plugin/host/PluginHostPresets.cpp
+    plugin/host/PluginHostSlicing.cpp
+    plugin/host/PluginHostUi.cpp
+    plugin/host/PluginHostUi.hpp
     plugin/CloudPluginService.cpp
     plugin/CloudPluginService.hpp
     plugin/PluginFsUtils.cpp
@@ -612,21 +621,23 @@ set(SLIC3R_GUI_SOURCES
     plugin/PluginLoader.cpp
     plugin/PluginLoader.hpp
     plugin/PluginDescriptor.hpp
+    plugin/PluginHooks.cpp
+    plugin/PluginHooks.hpp
     plugin/PluginManager.cpp
     plugin/PluginManager.hpp
     plugin/PluginAuditManager.cpp
     plugin/PluginAuditManager.hpp
     plugin/PluginResolver.cpp
     plugin/PluginResolver.hpp
-    plugin/pluginTypes/gcode/GCodePluginCapability.hpp
-    plugin/pluginTypes/gcode/GCodePluginCapability.cpp
-    plugin/pluginTypes/gcode/GCodePluginCapabilityTrampoline.hpp
     plugin/pluginTypes/printerAgent/PrinterAgentPluginCapability.hpp
     plugin/pluginTypes/printerAgent/PrinterAgentPluginCapability.cpp
     plugin/pluginTypes/printerAgent/PrinterAgentPluginCapabilityTrampoline.hpp
     plugin/pluginTypes/script/ScriptPluginCapability.hpp
     plugin/pluginTypes/script/ScriptPluginCapability.cpp
     plugin/pluginTypes/script/ScriptPluginCapabilityTrampoline.hpp
+    plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.hpp
+    plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.cpp
+    plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapabilityTrampoline.hpp
     pchheader.cpp
     pchheader.hpp
     Utils/ASCIIFolding.cpp

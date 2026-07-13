@@ -106,10 +106,14 @@ void execute_capabilities_from_refs(const ConfigOptionStrings& capabilities,
 {
     PluginManager&                plugin_mgr = PluginManager::instance();
 
+    // Log prefix derived from the capability type so each capability family (Printer connection,
+    // Slicing Pipeline, ...) tags its dispatch diagnostics with its own display name.
+    const std::string tag = plugin_capability_type_display_name(type);
+
     const bool has_any = std::any_of(capabilities.values.begin(), capabilities.values.end(),
                                      [](const std::string& s) { return !s.empty(); });
     if (has_any && !plugin_mgr.get_loader().wait_for_all_plugin_loads(std::chrono::seconds(10))) {
-        BOOST_LOG_TRIVIAL(warning) << "Post-process: timed out waiting for plugin loads; unresolved capabilities will be skipped";
+        BOOST_LOG_TRIVIAL(warning) << tag << ": timed out waiting for plugin loads; unresolved capabilities will be skipped";
     }
 
     for (const std::string& capability : capabilities.values) {
@@ -131,7 +135,7 @@ void execute_capabilities_from_refs(const ConfigOptionStrings& capabilities,
         }
 
         if (!ref) {
-            BOOST_LOG_TRIVIAL(warning) << "Post-processing: no plugin reference found for capability '" << capability << "'; skipping";
+            BOOST_LOG_TRIVIAL(warning) << tag << ": no plugin reference found for capability '" << capability << "'; skipping";
             continue;
         }
 
@@ -140,19 +144,19 @@ void execute_capabilities_from_refs(const ConfigOptionStrings& capabilities,
         cap        = plugin_mgr.get_loader().get_plugin_capability_by_name(plugin_key, type, cap_name);
 
         if (!cap) {
-            BOOST_LOG_TRIVIAL(warning) << "Post-processing: no loaded capability '" << cap_name
+            BOOST_LOG_TRIVIAL(warning) << tag << ": no loaded capability '" << cap_name
                                        << "' for plugin '" << plugin_key << "'; skipping";
             continue;
         }
         if (!cap->enabled) {
-            BOOST_LOG_TRIVIAL(warning) << "Post-processing: capability '" << cap_name
+            BOOST_LOG_TRIVIAL(warning) << tag << ": capability '" << cap_name
                                        << "' for plugin '" << plugin_key << "' is disabled; skipping";
             continue;
         }
 
         auto plugin_capability = std::dynamic_pointer_cast<T>(cap->instance);
         if (!plugin_capability) {
-            BOOST_LOG_TRIVIAL(warning) << "Post-processing: capability '" << cap_name
+            BOOST_LOG_TRIVIAL(warning) << tag << ": capability '" << cap_name
                                        << "' (plugin_key=" << cap->plugin_key
                                        << ") is not a " << plugin_capability_type_to_string(type) << "; skipping";
             continue;

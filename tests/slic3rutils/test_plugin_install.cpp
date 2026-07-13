@@ -124,3 +124,38 @@ TEST_CASE("install-state sidecar is the source of truth for a cloud plugin's ins
     read_install_state(plugin_dir, scanned);
     CHECK(scanned.installed_version == "1.2.0");
 }
+
+TEST_CASE("install_plugin parses [tool.orcaslicer.plugin.settings] into descriptor.settings", "[PluginInstall]")
+{
+    ScopedDataDir data_dir_guard("plugin-settings");
+
+    // A PEP-723 header with a per-plugin settings sub-table. Values stay strings; the plugin
+    // parses what it needs (ctx.params). This is the source Twistify reads its knobs from.
+    const std::string contents =
+        "# /// script\n"
+        "# requires-python = \">=3.12\"\n"
+        "#\n"
+        "# [tool.orcaslicer.plugin]\n"
+        "# name = \"Settings Plugin\"\n"
+        "# type = \"slicing-pipeline\"\n"
+        "#\n"
+        "# [tool.orcaslicer.plugin.settings]\n"
+        "# twist_deg_per_mm = \"1.5\"\n"
+        "# taper_per_mm = \"-0.004\"\n"
+        "# ///\n"
+        "print('ok')\n";
+    const fs::path py = write_py_file(data_dir_guard.dir / "src", "settings.py", contents);
+
+    PluginLoader loader; // non-cloud
+    PluginDescriptor descriptor;
+    std::string error;
+    const bool installed = loader.install_plugin(py, descriptor, error);
+
+    REQUIRE(installed);
+    CHECK(error.empty());
+    REQUIRE(descriptor.settings.count("twist_deg_per_mm") == 1);
+    CHECK(descriptor.settings.at("twist_deg_per_mm") == "1.5");
+    CHECK(descriptor.settings.at("taper_per_mm") == "-0.004");
+    // Identity keys are NOT captured as settings (they belong to [tool.orcaslicer.plugin]).
+    CHECK(descriptor.settings.count("name") == 0);
+}

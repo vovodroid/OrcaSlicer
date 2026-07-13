@@ -105,6 +105,8 @@ public:
                               std::chrono::milliseconds timeout,
                               std::string& error) const;
     std::vector<PluginDescriptor> get_all_loaded_plugin_descriptors() const;
+    // the plugin's [tool.orcaslicer.plugin.settings] table (empty if the plugin is unknown).
+    std::map<std::string, std::string> get_plugin_settings(const std::string& plugin_key) const;
 
 
     // Package descriptor accessor; returns nullptr when the package is not loaded.

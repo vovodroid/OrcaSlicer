@@ -261,6 +261,13 @@ std::shared_ptr<LoadedPluginCapability> PluginLoader::get_plugin_capability_by_n
     return nullptr;
 }
 
+std::map<std::string, std::string> PluginLoader::get_plugin_settings(const std::string& plugin_key) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const auto it = m_plugins.find(plugin_key);
+    return it != m_plugins.end() ? it->second.descriptor.settings : std::map<std::string, std::string>{};
+}
+
 std::vector<std::shared_ptr<LoadedPluginCapability>> PluginLoader::get_loaded_plugin_capabilities(const std::string& plugin_key) const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -603,7 +610,6 @@ bool PluginLoader::unload_plugin(const std::string& plugin_key, PluginCapability
         if (!torn_down_types.insert(cap_type).second)
             continue;
         switch (cap_type) {
-        case PluginCapabilityType::PostProcessing: break;
         case PluginCapabilityType::PrinterConnection: NetworkAgentFactory::deregister_python_plugin(plugin_key); break;
         default: break;
         }

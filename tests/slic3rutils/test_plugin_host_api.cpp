@@ -5,6 +5,8 @@
 #include <libslic3r/TriangleMesh.hpp>
 #include <slic3r/plugin/PythonPluginBridge.hpp>
 
+#include "python_test_support.hpp"
+
 #include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
 
@@ -14,30 +16,8 @@ namespace py = pybind11;
 
 namespace {
 
-void ensure_python_initialized()
-{
-    // Deliberately a bare scoped_interpreter rather than Slic3r::PythonInterpreter:
-    // `orca` is a PYBIND11_EMBEDDED_MODULE compiled into this test binary, so importing
-    // it needs no bundled stdlib/sys.path, and the deterministic assertions are
-    // independent of the host's Python. PythonInterpreter::initialize() expects the
-    // bundled Python home laid out next to the app bundle (lib/python3.12/encodings),
-    // which is not deployed beside the test binary, so using it here would fail to find
-    // a home on macOS/Linux. The optional numpy-backed assertions are guarded at runtime.
-    if (!Py_IsInitialized()) {
-        static py::scoped_interpreter interpreter;
-        (void) interpreter;
-    }
-}
-
-py::module_ import_orca_module()
-{
-    ensure_python_initialized();
-
-    // Force PythonPluginBridge.cpp into the test binary so the embedded
-    // PYBIND11_EMBEDDED_MODULE(orca, ...) registration is available.
-    (void) Slic3r::PythonPluginBridge::instance();
-    return py::module_::import("orca");
-}
+// import_orca_module() lives in python_test_support.hpp (shared with
+// test_slicing_pipeline_bindings.cpp).
 
 bool has_attr(const py::handle& object, const char* name)
 {
@@ -46,7 +26,7 @@ bool has_attr(const py::handle& object, const char* name)
 
 } // namespace
 
-TEST_CASE("Plugin host API exposes host-owned bundle and preset surface to Python", "[PluginHostApi][Python]")
+TEST_CASE("Plugin host API exposes host-owned bundle and preset surface to Python", "[PluginHost][Python]")
 {
     py::module_ orca = import_orca_module();
     REQUIRE(has_attr(orca, "host"));
@@ -131,7 +111,7 @@ TEST_CASE("Plugin host API exposes host-owned bundle and preset surface to Pytho
     CHECK(printers.attr("find_preset")(printer_preset.name).attr("name").cast<std::string>() == printer_preset.name);
 }
 
-TEST_CASE("Plugin host API reports unavailable GUI objects before Orca app initialization", "[PluginHostApi][Python]")
+TEST_CASE("Plugin host API reports unavailable GUI objects before Orca app initialization", "[PluginHost][Python]")
 {
     py::object host = import_orca_module().attr("host");
 
@@ -147,7 +127,7 @@ TEST_CASE("Plugin host API reports unavailable GUI objects before Orca app initi
     }
 }
 
-TEST_CASE("Plugin host API exposes the UI module and guards it before Orca app initialization", "[PluginHostApi][Python]")
+TEST_CASE("Plugin host API exposes the UI module and guards it before Orca app initialization", "[PluginHost][Python]")
 {
     py::object host = import_orca_module().attr("host");
     REQUIRE(has_attr(host, "ui"));
@@ -169,7 +149,7 @@ TEST_CASE("Plugin host API exposes the UI module and guards it before Orca app i
     }
 }
 
-TEST_CASE("Plugin host API exposes model geometry and structure to Python", "[PluginHostApi][Python]")
+TEST_CASE("Plugin host API exposes model geometry and structure to Python", "[PluginHost][Python]")
 {
     using Catch::Matchers::WithinAbs;
     using Catch::Matchers::WithinRel;
@@ -248,7 +228,7 @@ TEST_CASE("Plugin host API exposes model geometry and structure to Python", "[Pl
     CHECK(py_modifier.attr("type")().cast<Slic3r::ModelVolumeType>() == Slic3r::ModelVolumeType::PARAMETER_MODIFIER);
 }
 
-TEST_CASE("Plugin host API exposes TriangleMesh geometry to Python", "[PluginHostApi][Python]")
+TEST_CASE("Plugin host API exposes TriangleMesh geometry to Python", "[PluginHost][Python]")
 {
     using Catch::Matchers::WithinAbs;
     using Catch::Matchers::WithinRel;
