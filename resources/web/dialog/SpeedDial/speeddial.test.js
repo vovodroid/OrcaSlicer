@@ -26,4 +26,20 @@ assert.equal(ctx.shouldRenderActionList(""), false, "an empty search keeps the a
 assert.equal(ctx.shouldRenderActionList("  "), false, "whitespace-only search keeps the action list hidden");
 assert.equal(ctx.shouldRenderActionList("r"), true, "typing starts rendering matching actions");
 
+assert.equal(
+  ctx.selectedActionId({ zone: "list", i: 0 }, duplicateActions, [], ""),
+  null,
+  "Enter with an empty query must not resolve to an action the blank list never showed"
+);
+assert.equal(
+  ctx.selectedActionId({ zone: "list", i: 0 }, duplicateActions, [], "rep"),
+  "0123456789abcdef",
+  "a typed query resolves the list selection"
+);
+assert.equal(
+  ctx.selectedActionId({ zone: "fav", i: 0 }, duplicateActions, ["fedcba9876543210"], ""),
+  "fedcba9876543210",
+  "favourites stay runnable with an empty query - the fav bar is always visible"
+);
+
 console.log("ok");

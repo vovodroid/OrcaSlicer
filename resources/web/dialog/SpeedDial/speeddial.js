@@ -56,9 +56,13 @@ function shouldRenderActionList(query) {
 
 // Resolve the selection cursor {zone,i} to the action id it points at: fav zone indexes the
 // visible favourites, list zone the filtered actions. Pure so runSelected() shares one lookup.
-function selectedActionId(sel, actions, favIds) {
+function selectedActionId(sel, actions, favIds, query) {
   if (sel.zone === "fav")
     return favIds[sel.i];
+  // why: search-first keeps the list blank until the user types; an empty query still
+  //      filters to ALL actions, so without this gate Enter fires an action never shown.
+  if (!shouldRenderActionList(query))
+    return null;
   var a = actions[sel.i];
   return a && a.id;
 }
@@ -444,7 +448,7 @@ function run(a) {
 }
 
 function runSelected() {
-  var id = selectedActionId(sel, filterActions(ACTIONS, query), currentVisibleFavs());
+  var id = selectedActionId(sel, filterActions(ACTIONS, query), currentVisibleFavs(), query);
   if (id) run(byId(id));
 }
 
