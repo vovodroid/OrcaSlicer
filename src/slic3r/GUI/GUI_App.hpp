@@ -776,6 +776,9 @@ private:
     bool            on_init_network(bool try_backup = false);
     void            init_networking_callbacks();
     void            init_app_config();
+    // GUI-side subscriptions to plugin loader events (dialog refresh,
+    // network-agent registration, plate revalidation).
+    void            init_plugin_gui_wiring();
     void            remove_old_networking_plugins();
     void            drain_pending_events(int timeout_ms);
     bool            wait_for_network_idle(int timeout_ms);

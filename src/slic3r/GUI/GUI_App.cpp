@@ -79,7 +79,7 @@
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Color.hpp"
 #include "slic3r/plugin/PluginManager.hpp"
-#include "slic3r/plugin/PluginHostUi.hpp"
+#include "slic3r/plugin/host/PluginHostUi.hpp"
 #include "slic3r/plugin/PythonInterpreter.hpp"
 
 #include "GUI.hpp"
@@ -2702,6 +2702,54 @@ std::string get_system_info()
     return out.str();
 }
 
+// wx/app-level plugin wiring, kept in one place: subscriptions to plugin
+// loader events that drive GUI policy (plugins dialog refresh, network-agent
+// registration, plate revalidation). The libslic3r dispatch hooks are NOT
+// wired here -- PluginManager::initialize() installs those via
+// plugin_hooks::install().
+void GUI_App::init_plugin_gui_wiring()
+{
+    PluginManager& plugin_mgr = PluginManager::instance();
+
+    auto refresh_plugins_dialog = [] {
+        if (!wxTheApp)
+            return;
+
+        GUI_App* app = &GUI::wxGetApp();
+        if (app->is_closing())
+            return;
+
+        app->CallAfter([app] {
+            if (!app->is_closing() && app->m_plugins_dlg)
+                app->m_plugins_dlg->update_plugin_dialog_ui();
+        });
+    };
+
+    plugin_mgr.get_loader().subscribe_on_load_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
+    plugin_mgr.get_loader().subscribe_on_unload_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
+    plugin_mgr.get_loader().subscribe_on_load_callback(NetworkAgentFactory::register_python_plugin);
+    plugin_mgr.get_loader().subscribe_on_unload_callback(NetworkAgentFactory::deregister_python_plugin);
+    plugin_mgr.get_loader().subscribe_on_capability_load_callback(
+        [refresh_plugins_dialog](const PluginCapabilityIdentifier& capability) {
+            if (capability.type == PluginCapabilityType::PrinterConnection)
+                NetworkAgentFactory::register_python_printer_agent(capability.plugin_key, capability.name);
+            refresh_plugins_dialog();
+            // A newly loaded capability may satisfy a missing-plugin notification; re-validate the
+            // current plate (on the UI thread) so the notification clears once its plugin is available.
+            if (wxTheApp && !wxGetApp().is_closing())
+                wxGetApp().CallAfter([]() {
+                    if (Plater* plater = wxGetApp().plater())
+                        plater->revalidate_current_plate_if_plugins_missing();
+                });
+        });
+    plugin_mgr.get_loader().subscribe_on_capability_unload_callback(
+        [refresh_plugins_dialog](const PluginCapabilityIdentifier& capability) {
+            if (capability.type == PluginCapabilityType::PrinterConnection)
+                NetworkAgentFactory::deregister_python_printer_agent(capability.plugin_key, capability.name);
+            refresh_plugins_dialog();
+        });
+}
+
 bool GUI_App::on_init_inner()
 {
     wxLog::SetActiveTarget(new wxBoostLog());
@@ -3105,24 +3153,11 @@ bool GUI_App::on_init_inner()
     on_init_network();
 
     // Initialize plugins after network then register on_load callbacks so once the plugin loads finish, it gets registered automatically.
+    // initialize() also installs the libslic3r hooks (capability resolver,
+    // slicing-pipeline dispatcher) via plugin_hooks::install() -- no
+    // per-capability wiring belongs here.
     PluginManager& plugin_mgr = PluginManager::instance();
     plugin_mgr.initialize();
-
-    ConfigBase::set_resolve_capability_fn([&plugin_mgr](const std::string& cap_name, const std::string& cap_type) {
-        auto plugin_cap = plugin_mgr.get_loader().try_get_plugin_capability_by_name_and_type(cap_name, plugin_capability_type_from_string(cap_type));
-        if (!plugin_cap)
-            return std::string();
-
-        PluginDescriptor descriptor;
-        if (!plugin_mgr.get_catalog().try_get_plugin_descriptor(plugin_cap->plugin_key, descriptor))
-            return std::string();
-
-        // Cloud plugins are resolved at runtime via the UUID in the middle field, so the first
-        // field keeps the friendly display name. Local plugins are looked up by plugin_key (the
-        // first field, with an empty UUID), so emit the plugin_key to keep them resolvable.
-        const std::string identity = descriptor.is_cloud_plugin() ? descriptor.name : descriptor.plugin_key;
-        return identity + ';' + descriptor.cloud_uuid() + ';' + cap_name;
-    });
 
     // Set cloud plugin directory from previous session so cloud-installed
     // plugins are discovered even before the network agent is ready.
@@ -3134,43 +3169,7 @@ bool GUI_App::on_init_inner()
 
     plugin_mgr.discover_plugins(false, true);
 
-    auto refresh_plugins_dialog = [] {
-        if (!wxTheApp)
-            return;
-
-        GUI_App* app = &GUI::wxGetApp();
-        if (app->is_closing())
-            return;
-
-        app->CallAfter([app] {
-            if (!app->is_closing() && app->m_plugins_dlg)
-                app->m_plugins_dlg->update_plugin_dialog_ui();
-        });
-    };
-
-    plugin_mgr.get_loader().subscribe_on_load_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
-    plugin_mgr.get_loader().subscribe_on_unload_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
-    plugin_mgr.get_loader().subscribe_on_load_callback(NetworkAgentFactory::register_python_plugin);
-    plugin_mgr.get_loader().subscribe_on_unload_callback(NetworkAgentFactory::deregister_python_plugin);
-    plugin_mgr.get_loader().subscribe_on_capability_load_callback(
-        [refresh_plugins_dialog](const PluginCapabilityIdentifier& capability) {
-            if (capability.type == PluginCapabilityType::PrinterConnection)
-                NetworkAgentFactory::register_python_printer_agent(capability.plugin_key, capability.name);
-            refresh_plugins_dialog();
-            // A newly loaded capability may satisfy a missing-plugin notification; re-validate the
-            // current plate (on the UI thread) so the notification clears once its plugin is available.
-            if (wxTheApp && !wxGetApp().is_closing())
-                wxGetApp().CallAfter([]() {
-                    if (Plater* plater = wxGetApp().plater())
-                        plater->revalidate_current_plate_if_plugins_missing();
-                });
-        });
-    plugin_mgr.get_loader().subscribe_on_capability_unload_callback(
-        [refresh_plugins_dialog](const PluginCapabilityIdentifier& capability) {
-            if (capability.type == PluginCapabilityType::PrinterConnection)
-                NetworkAgentFactory::deregister_python_printer_agent(capability.plugin_key, capability.name);
-            refresh_plugins_dialog();
-        });
+    init_plugin_gui_wiring();
 
     // Register all AppAction sources
     m_action_registry.add_source(std::make_unique<ScriptActionSource>());

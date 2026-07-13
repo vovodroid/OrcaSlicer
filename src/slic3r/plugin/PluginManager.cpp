@@ -5,6 +5,7 @@
 
 #include "PythonPluginBridge.hpp"
 #include "PluginFsUtils.hpp"
+#include "PluginHooks.hpp"
 #include "PythonFileUtils.hpp"
 
 #include <boost/log/trivial.hpp>
@@ -120,6 +121,10 @@ bool PluginManager::initialize()
 
     m_initialized = true;
 
+    // Install the libslic3r hooks (capability resolver, slicing-pipeline
+    // dispatcher). Uninstalled in shutdown() before the interpreter finalizes.
+    plugin_hooks::install();
+
     // Persist auto-load / capability state to each plugin's .install_state.json sidecar.
     // On load: write enabled=true plus current capability flags. On unload: flip enabled=false.
     // The on-unload callback is skipped during shutdown (run_on_unload_callbacks is gated by
@@ -153,6 +158,10 @@ void PluginManager::shutdown()
     }
 
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": PluginManager shutdown enter";
+
+    // Detach the libslic3r hooks first so nothing dispatches into Python while
+    // (or after) plugins unload. Callers stop background slicing before this.
+    plugin_hooks::uninstall();
 
     // Signal the loader to reject new plugin loads before we drain.
     m_loader.set_shutting_down();
