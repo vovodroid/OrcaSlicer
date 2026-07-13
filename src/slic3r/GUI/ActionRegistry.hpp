@@ -33,11 +33,9 @@ struct AppActionRunResult
 // UnsavedChangesDialog's exit-action enum, and this header reaches most GUI TUs.
 struct AppAction
 {
-    std::string id;           // speed_dial_action_id(...) - stable identity + AppConfig key
-    std::string title;        // display name
-    // Where the action comes from. Each subclass sets it in its constructor, so the
-    // base cannot be built without one.
-    std::string source;
+    const std::string& id() const { return m_id; }
+    const std::string& title() const { return m_title; }
+    const std::string& source() const { return m_source; }
 
     // seeded from AppConfig for the snapshot / sort:
     bool        favourite = false;
@@ -48,9 +46,15 @@ struct AppAction
     virtual AppActionRunResult run() const = 0; // re-resolves + runs (UI thread)
 
 protected:
-    // why: protected + no default forces every subclass to supply id/title/source.
+    // The definition is constructor-set and immutable. Refreshes replace an action
+    // instead of mutating identity after the registry has indexed it by id.
     AppAction(std::string id, std::string title, std::string source)
-        : id(std::move(id)), title(std::move(title)), source(std::move(source)) {}
+        : m_id(std::move(id)), m_title(std::move(title)), m_source(std::move(source)) {}
+
+private:
+    std::string m_id;       // speed_dial_action_id(...) - stable identity + AppConfig key
+    std::string m_title;    // display name
+    std::string m_source;   // display name of the action's source
 };
 
 // Generic sink and single owner of runnable actions for the app session.
@@ -74,9 +78,9 @@ public:
     // until init() starts it.
     void add_source(std::unique_ptr<IActionSource> source);
 
-    // Seeds persisted state, then inserts the action or replaces the action with the
-    // same id. A null action is ignored.
-    void upsert(std::shared_ptr<AppAction> action);
+    // Takes ownership, seeds persisted state, then inserts the action or replaces
+    // the action with the same id. A null action is ignored.
+    void upsert(std::unique_ptr<AppAction> action);
 
     // Removes the action with this id. Missing ids are a harmless no-op.
     void remove(const std::string& id);

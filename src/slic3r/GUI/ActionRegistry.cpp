@@ -68,15 +68,16 @@ void ActionRegistry::add_source(std::unique_ptr<IActionSource> source)
         m_sources.push_back(std::move(source));
 }
 
-void ActionRegistry::upsert(std::shared_ptr<AppAction> action)
+void ActionRegistry::upsert(std::unique_ptr<AppAction> action)
 {
     assert(wxThread::IsMain());
     if (!action)
         return;
 
     seed_state(*action);
-    std::string id = action->id;
-    m_actions.insert_or_assign(std::move(id), std::move(action));
+    std::string id = action->id();
+    std::shared_ptr<AppAction> stored = std::move(action);
+    m_actions.insert_or_assign(std::move(id), std::move(stored));
 }
 
 void ActionRegistry::remove(const std::string& id)
@@ -88,10 +89,10 @@ void ActionRegistry::remove(const std::string& id)
 void ActionRegistry::seed_state(AppAction& a) const
 {
     auto favs = read_string_array("favourite_actions");
-    a.favourite = std::find(favs.begin(), favs.end(), a.id) != favs.end();
+    a.favourite = std::find(favs.begin(), favs.end(), a.id()) != favs.end();
 
     nlohmann::json stats = read_section("stats", nlohmann::json::object());
-    auto it = stats.find(a.id);
+    auto it = stats.find(a.id());
     if (it != stats.end() && it->is_object()) {
         a.count = it->value("count", 0);
         a.last  = it->value("last", 0LL);
@@ -208,18 +209,18 @@ nlohmann::json ActionRegistry::snapshot() const
         double sb = frecency_score(b->count, b->last, now);
         if (sa != sb)
             return sa > sb;
-        if (a->title != b->title)
-            return a->title < b->title;
-        if (a->source != b->source)
-            return a->source < b->source;
-        return a->id < b->id;
+        if (a->title() != b->title())
+            return a->title() < b->title();
+        if (a->source() != b->source())
+            return a->source() < b->source();
+        return a->id() < b->id();
     });
 
     nlohmann::json actions = nlohmann::json::array();
     for (const AppAction* a : sorted)
-        actions.push_back({{"id", a->id},
-                           {"title", a->title},
-                           {"source", a->source},
+        actions.push_back({{"id", a->id()},
+                           {"title", a->title()},
+                           {"source", a->source()},
                            {"shortcut", ""}});
     // why: favourites is the ORDERED pin list - it must come from favourite_actions
     // as stored, not be re-derived from the frecency-sorted actions (that would

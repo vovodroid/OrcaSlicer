@@ -28,7 +28,7 @@ public:
 private:
     void refresh_source(const std::string& plugin_key, ActionChange change);
     void refresh_capability(const std::string& plugin_key, const std::string& capability, ActionChange change);
-    std::shared_ptr<AppAction> make_action(const std::string& plugin_key, const std::string& capability,
+    std::unique_ptr<AppAction> make_action(const std::string& plugin_key, const std::string& capability,
                                            const std::string& source) const;
     void track(const std::string& plugin_key, const std::string& id);
     void untrack(const std::string& plugin_key, const std::string& id);

@@ -103,15 +103,15 @@ void ScriptActionSource::start(ActionRegistry& sink)
         auto source = source_names.find(capability->plugin_key);
         const std::string& source_name = source == source_names.end() ? capability->plugin_key : source->second;
         if (auto action = make_action(capability->plugin_key, capability->name, source_name)) {
-            track(capability->plugin_key, action->id);
+            track(capability->plugin_key, action->id());
             m_sink->upsert(std::move(action));
         }
     }
 }
 
-std::shared_ptr<AppAction> ScriptActionSource::make_action(const std::string& plugin_key,
-                                                            const std::string& capability,
-                                                            const std::string& source) const
+std::unique_ptr<AppAction> ScriptActionSource::make_action(const std::string& plugin_key,
+                                                           const std::string& capability,
+                                                           const std::string& source) const
 {
     PluginLoader& loader = PluginManager::instance().get_loader();
     if (!loader.is_plugin_loaded(plugin_key))
@@ -121,7 +121,7 @@ std::shared_ptr<AppAction> ScriptActionSource::make_action(const std::string& pl
     if (!loaded || !loaded->enabled)
         return nullptr;
 
-    return std::make_shared<PluginScriptAction>(plugin_key, capability, source);
+    return std::make_unique<PluginScriptAction>(plugin_key, capability, source);
 }
 
 void ScriptActionSource::refresh_capability(const std::string& plugin_key, const std::string& capability,
@@ -169,7 +169,7 @@ void ScriptActionSource::refresh_source(const std::string& plugin_key, ActionCha
         if (!capability || !capability->enabled)
             continue;
         if (auto action = make_action(plugin_key, capability->name, source_name)) {
-            track(plugin_key, action->id);
+            track(plugin_key, action->id());
             m_sink->upsert(std::move(action));
         }
     }

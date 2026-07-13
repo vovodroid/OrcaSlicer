@@ -255,7 +255,7 @@ private:
         if (!a)
             return;
         const bool        ask    = reg.should_ask(id);
-        const std::string atitle = a->title;   // capture before Dismiss; `a` may not outlive it
+        const std::string atitle = a->title(); // capture before Dismiss; `a` may not outlive it
         Dismiss(); // launcher gone before the modal / the script's own UI
 
         if (ask) {
