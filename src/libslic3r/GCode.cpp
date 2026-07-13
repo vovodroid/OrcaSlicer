@@ -1274,6 +1274,12 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
         check_add_eol(toolchange_unretract_str);
 
         gcodegen.placeholder_parser().set("current_extruder", new_filament_id);
+        gcodegen.placeholder_parser().set("current_filament_id", new_filament_id);
+        gcodegen.placeholder_parser().set("current_extruder_id", new_extruder_id);
+        gcodegen.placeholder_parser().set("current_nozzle_id",
+            nozzle_id_for_gcode_placeholder(group_result, new_filament_id, new_extruder_id, m_layer_idx));
+        gcodegen.placeholder_parser().set("current_hotend",
+            hotend_id_for_gcode_placeholder(gcodegen.m_config, group_result, new_filament_id, new_extruder_id, m_layer_idx));
         {
             size_t fi = gcodegen.get_filament_config_index(new_filament_id);
             gcodegen.placeholder_parser().set("retraction_distance_when_cut", gcodegen.m_config.retraction_distances_when_cut.get_at(fi));
@@ -3145,6 +3151,10 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     this->placeholder_parser().set("current_extruder", initial_extruder_id);
     this->placeholder_parser().set("current_hotend",
         first_hotend_id_for_gcode_placeholder(m_config, group_result, (int) initial_extruder_id, extruder_id));
+    this->placeholder_parser().set("current_filament_id", (int) initial_extruder_id);
+    this->placeholder_parser().set("current_extruder_id", extruder_id);
+    this->placeholder_parser().set("current_nozzle_id",
+        first_nozzle_id_for_gcode_placeholder(group_result, (int) initial_extruder_id, extruder_id));
     // Initial filament/nozzle vocabulary
     this->placeholder_parser().set("initial_filament_id", (int) initial_extruder_id);
     this->placeholder_parser().set("initial_no_support_filament_id", (int) initial_non_support_extruder_id);
@@ -5401,10 +5411,6 @@ LayerResult GCode::process_layer(
         config.set_key_value("most_used_physical_extruder_id", new ConfigOptionInt(m_config.physical_extruder_map.get_at(most_used_extruder)));
         config.set_key_value("layer_num", new ConfigOptionInt(m_layer_index));
         config.set_key_value("layer_z",   new ConfigOptionFloat(print_z));
-        // Orca: expose the current filament/nozzle ids (matching the toolchange contexts) so a
-        // layer_change_gcode may index per-filament / per-nozzle arrays — e.g. X2D's
-        // close_additional_fan_first_x_layers[current_filament_id] and
-        // nozzle_diameter_at_nozzle_id[current_nozzle_id]. Inert if unreferenced.
         {
             const int  cur_filament_id = (int) m_writer.filament()->id();
             const auto group_result    = m_print->get_layered_nozzle_group_result();
@@ -8639,6 +8645,11 @@ std::string GCode::set_extruder(unsigned int new_filament_id, double print_z, bo
     // if we are running a single-extruder setup, just set the extruder and return nothing
     if (!m_writer.multiple_extruders) {
         this->placeholder_parser().set("current_extruder", new_filament_id);
+        // Orca: keep the global current-tool identity coherent even on the single-extruder path (see append_tcr).
+        this->placeholder_parser().set("current_filament_id", (int) new_filament_id);
+        this->placeholder_parser().set("current_extruder_id", new_extruder_id);
+        this->placeholder_parser().set("current_nozzle_id",
+            nozzle_id_for_gcode_placeholder(m_print->get_layered_nozzle_group_result(), (int) new_filament_id, new_extruder_id, m_layer_index));
         {
             size_t fi = get_filament_config_index(new_filament_id);
             this->placeholder_parser().set("retraction_distance_when_ec", m_config.retraction_distances_when_ec.get_at(fi));
@@ -8986,6 +8997,10 @@ std::string GCode::set_extruder(unsigned int new_filament_id, double print_z, bo
     this->placeholder_parser().set("current_extruder", new_filament_id);
     this->placeholder_parser().set("current_hotend",
         hotend_id_for_gcode_placeholder(m_config, group_result, (int) new_filament_id, new_extruder_id, m_layer_index));
+    // Orca: keep the global current-tool identity coherent for later contexts (see append_tcr).
+    this->placeholder_parser().set("current_filament_id", (int) new_filament_id);
+    this->placeholder_parser().set("current_extruder_id", new_extruder_id);
+    this->placeholder_parser().set("current_nozzle_id", next_nozzle_id);
     {
         size_t fi = get_filament_config_index(new_filament_id);
         this->placeholder_parser().set("retraction_distance_when_cut", m_config.retraction_distances_when_cut.get_at(fi));
