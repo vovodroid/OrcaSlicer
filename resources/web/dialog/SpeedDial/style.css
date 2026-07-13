@@ -211,7 +211,7 @@ kbd {
 }
 .star svg { display: block; }
 .row:hover .star:not(.on),
-.row.sel .star:not(.on) { opacity: .8; }
+.row.sel .star:not(.on) { opacity: .5; }
 .star.on { opacity: 1; color: var(--main-color, var(--orca-accent, #009688)); }
 .star:hover { background: rgba(127,127,127,.18); }
 .dial-empty {
