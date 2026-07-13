@@ -7514,11 +7514,11 @@ wxSizer* Tab::compatible_widget_create(wxWindow* parent, PresetDependencies &dep
         }
 
         if(deps.type == Preset::TYPE_PRINTER){
-            deps.dialog_title = "Compatible printers";
-            deps.dialog_label = "Select printers";
+            deps.dialog_title = _L("Compatible printers");
+            deps.dialog_label = _L("Select printers");
         }else{
-            deps.dialog_title = "Compatible process profiles";
-            deps.dialog_label = "Select profiles";
+            deps.dialog_title = _L("Compatible process profiles");
+            deps.dialog_label = _L("Select profiles");
         }
 
         MultiChoiceDialog dlg(parent, deps.dialog_label, deps.dialog_title, presets);
@@ -7805,6 +7805,11 @@ void Tab::update_extruder_variants(int extruder_id, bool reload)
         auto    nozzle_volumes = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
         int extruder_nums = m_preset_bundle->get_printer_extruder_count();
         nozzle_volumes->values.resize(extruder_nums);
+
+        // Orca: update `m_actual_nozzle_volumes` to current selected ones
+        m_actual_nozzle_volumes.resize(extruder_nums, NozzleVolumeType::nvtStandard);
+        for (int i = 0; i < extruder_nums; i++) m_actual_nozzle_volumes[i] = (NozzleVolumeType)nozzle_volumes->values[i];
+
         if (extruder_nums == 2) {
             auto options = generate_extruder_options();
             m_extruder_switch->SetOptions(options);
