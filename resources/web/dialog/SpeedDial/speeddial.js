@@ -1,5 +1,5 @@
 // Speed Dial launcher page. Static-safe module: no DOM access at load time so a
-// node vm can exercise the pure helpers (filterActions / parseId / nextSel).
+// node vm can exercise the pure helpers (filterActions / actionLabel / nextSel).
 
 // ---- state (populated by the C++ bridge via window.HandleStudio) ----
 var ACTIONS = [];        // [{id,title,source,shortcut}], already frecency-sorted by C++
@@ -36,13 +36,6 @@ function filterActions(actions, query) {
   return out;
 }
 
-// why: ids are "script:<key>::<cap>"; C++ keys off <key> for dont-ask scoping.
-function parseId(id) {
-  var body = id.slice(id.indexOf(":") + 1);   // strip "script:"
-  var sep = body.indexOf("::");
-  return { key: body.slice(0, sep), cap: body.slice(sep + 2) };
-}
-
 function visibleFavourites(favourites, actions) {
   // why: a fav whose id has no live action (plugin unloaded/disabled) renders a dead
   //      monogram tile whose click run()s to a silent no-op; drop it from the quick-bar.
@@ -55,6 +48,10 @@ function visibleFavourites(favourites, actions) {
 
 function resultCountText(total, shown, query) {
   return (query || "").trim() ? "Showing " + shown + " of " + total + " actions" : total + " actions";
+}
+
+function shouldRenderActionList(query) {
+  return !!(query || "").trim();
 }
 
 // Resolve the selection cursor {zone,i} to the action id it points at: fav zone indexes the
@@ -73,8 +70,8 @@ function prettySource(source) {
   return String(source || "").toLowerCase().replace(/\b\w/g, function (c) { return c.toUpperCase(); });
 }
 
-// Accessible label "Title from Pretty Source", disambiguated with the plugin key when another action
-// shares the same title+source (case/separator-insensitive) - so two rows never read out identically.
+// Accessible label "Title from Pretty Source", disambiguated with the opaque action id when another
+// action shares the same title+source (case/separator-insensitive) - so two rows never read out identically.
 function actionLabel(action, actions) {
   var label = action.title + " from " + prettySource(action.source);
   if (actions && actions.length) {
@@ -83,7 +80,7 @@ function actionLabel(action, actions) {
       return o.id !== action.id && foldLabel(o.title) + "|" + foldLabel(o.source) === mine;
     });
     if (clash)
-      label += " (" + parseId(action.id).key + ")";
+      label += " (" + action.id + ")";
   }
   return label;
 }
@@ -327,7 +324,7 @@ function renderList() {
   listEl.innerHTML = "";
   // why: search-first - the list stays blank until the user types; only a
   // non-empty query with zero hits earns the "No actions match" message.
-  if (!q) {
+  if (!shouldRenderActionList(query)) {
     listEl.className = "dial-list empty";
     if (countEl) countEl.hidden = true;
     return;
