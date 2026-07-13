@@ -2,7 +2,7 @@
 // node vm can exercise the pure helpers (filterActions / parseId / nextSel).
 
 // ---- state (populated by the C++ bridge via window.HandleStudio) ----
-var ACTIONS = [];        // [{id,title,pkg,shortcut}], already frecency-sorted by C++
+var ACTIONS = [];        // [{id,title,source,shortcut}], already frecency-sorted by C++
 var FAVS = [];           // [id...]
 var query = "";
 var sel = { zone: "list", i: 0 };   // zone: 'list' | 'fav'
@@ -27,10 +27,10 @@ function filterActions(actions, query) {
   for (var i = 0; i < list.length; i++) {
     var a = list[i];
     var titleMatch = FuzzyRanges(a.title, q, false);
-    var pkgMatch = FuzzyRanges(a.pkg, q, false);
-    if (!titleMatch && !pkgMatch)
+    var sourceMatch = FuzzyRanges(a.source, q, false);
+    if (!titleMatch && !sourceMatch)
       continue;
-    matchIndex[a.id] = { title: titleMatch, pkg: pkgMatch, useTitle: !!titleMatch };
+    matchIndex[a.id] = { title: titleMatch, source: sourceMatch, useTitle: !!titleMatch };
     out.push(a);
   }
   return out;
@@ -68,19 +68,19 @@ function selectedActionId(sel, actions, favIds) {
 
 function foldLabel(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, ""); }
 
-// Title-case a package for display: "GCODE OPTIMIZER"/"iRoNiNg pRo" -> "Gcode Optimizer"/"Ironing Pro".
-function prettyPkg(pkg) {
-  return String(pkg || "").toLowerCase().replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+// Title-case a source for display: "GCODE OPTIMIZER"/"iRoNiNg pRo" -> "Gcode Optimizer"/"Ironing Pro".
+function prettySource(source) {
+  return String(source || "").toLowerCase().replace(/\b\w/g, function (c) { return c.toUpperCase(); });
 }
 
-// Accessible label "Title from Pretty Pkg", disambiguated with the plugin key when another action
-// shares the same title+pkg (case/separator-insensitive) - so two rows never read out identically.
+// Accessible label "Title from Pretty Source", disambiguated with the plugin key when another action
+// shares the same title+source (case/separator-insensitive) - so two rows never read out identically.
 function actionLabel(action, actions) {
-  var label = action.title + " from " + prettyPkg(action.pkg);
+  var label = action.title + " from " + prettySource(action.source);
   if (actions && actions.length) {
-    var mine = foldLabel(action.title) + "|" + foldLabel(action.pkg);
+    var mine = foldLabel(action.title) + "|" + foldLabel(action.source);
     var clash = actions.some(function (o) {
-      return o.id !== action.id && foldLabel(o.title) + "|" + foldLabel(o.pkg) === mine;
+      return o.id !== action.id && foldLabel(o.title) + "|" + foldLabel(o.source) === mine;
     });
     if (clash)
       label += " (" + parseId(action.id).key + ")";
@@ -88,7 +88,7 @@ function actionLabel(action, actions) {
   return label;
 }
 
-// Monogram code for a tile: title initial, escalated on collision by PREPENDING the pkg
+// Monogram code for a tile: title initial, escalated on collision by PREPENDING the source
 // initial (pi+ti, e.g. "GC"), then a 1-based ordinal - so same-titled actions stay distinct.
 // why: ordinal is assigned by id, not by ACTIONS order - ACTIONS is frecency-sorted and
 // reshuffles as usage changes, which would otherwise flip who's "1" and who's "2" across runs.
@@ -98,13 +98,13 @@ function tileCode(action, actions) {
   var sameTitle = list.filter(function (o) { return (o.title || " ").charAt(0).toUpperCase() === ti; });
   if (sameTitle.length <= 1)
     return ti;
-  var pi = (action.pkg || " ").charAt(0).toUpperCase();
-  var samePkg = sameTitle.filter(function (o) { return (o.pkg || " ").charAt(0).toUpperCase() === pi; });
-  if (samePkg.length <= 1)
+  var pi = (action.source || " ").charAt(0).toUpperCase();
+  var sameSource = sameTitle.filter(function (o) { return (o.source || " ").charAt(0).toUpperCase() === pi; });
+  if (sameSource.length <= 1)
     return pi + ti;
-  samePkg.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
-  for (var i = 0; i < samePkg.length; i++)
-    if (samePkg[i].id === action.id)
+  sameSource.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+  for (var i = 0; i < sameSource.length; i++)
+    if (sameSource[i].id === action.id)
       return pi + ti + (i + 1);
   return pi + ti;
 }
@@ -203,7 +203,7 @@ function hue(id) {
 }
 
 // Build a <div class=className> with the search-match ranges wrapped in <mark>. Used for both the
-// title and the pkg eyebrow. Pure (only touches the document factory), so the node-vm test never
+// title and the source eyebrow. Pure (only touches the document factory), so the node-vm test never
 // calls it and load-time stays DOM-free.
 function markedText(className, text, match) {
   var node = document.createElement("div");
@@ -359,7 +359,7 @@ function renderList() {
     var left = document.createElement("div");
     left.className = "row-left";
     var mi = matchIndex[a.id];
-    var pkg = markedText("row-eyebrow", a.pkg, mi ? mi.pkg : null);
+    var sourceEl = markedText("row-eyebrow", a.source, mi ? mi.source : null);
     var line = document.createElement("div");
     line.className = "row-line";
     var name = markedText("row-name", a.title, mi ? mi.title : null);
@@ -374,7 +374,7 @@ function renderList() {
       });
       line.appendChild(sc);
     }
-    left.appendChild(pkg);
+    left.appendChild(sourceEl);
     left.appendChild(line);
     row.appendChild(tile);
     row.appendChild(left);

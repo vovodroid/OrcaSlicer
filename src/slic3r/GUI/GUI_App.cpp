@@ -142,6 +142,7 @@
 
 #include "PluginsDialog.hpp"
 #include "SpeedDialDialog.hpp"
+#include "ScriptActionSource.hpp"
 #include "TerminalDialog.hpp"
 
 //#ifdef WIN32
@@ -3171,32 +3172,6 @@ bool GUI_App::on_init_inner()
             refresh_plugins_dialog();
         });
 
-    // why: keep the speed-dial ActionRegistry always-clean. Each loader callback marshals
-    // a TARGETED refresh onto the UI thread (the callback may fire on a worker thread, so
-    // it must not touch the registry's vector directly). No custom event - CallAfter is
-    // the pubsub channel.
-    auto refresh_pkg = [](const std::string& key, ActionChange change) {
-        if (!wxTheApp || wxGetApp().is_closing())
-            return;
-        wxGetApp().CallAfter([key, change] {
-            if (!wxGetApp().is_closing())
-                wxGetApp().action_registry().refresh_package(key, change);
-        });
-    };
-    auto refresh_cap = [](const PluginCapabilityIdentifier& cap, ActionChange change) {
-        if (cap.type != PluginCapabilityType::Script || !wxTheApp || wxGetApp().is_closing())
-            return;
-        const std::string key = cap.plugin_key, name = cap.name;
-        wxGetApp().CallAfter([key, name, change] {
-            if (!wxGetApp().is_closing())
-                wxGetApp().action_registry().refresh_capability(key, name, change);
-        });
-    };
-    plugin_mgr.get_loader().subscribe_on_load_callback([refresh_pkg](const std::string& key) { refresh_pkg(key, ActionChange::Added); });
-    plugin_mgr.get_loader().subscribe_on_unload_callback([refresh_pkg](const std::string& key) { refresh_pkg(key, ActionChange::Removed); });
-    plugin_mgr.get_loader().subscribe_on_capability_load_callback([refresh_cap](const PluginCapabilityIdentifier& c) { refresh_cap(c, ActionChange::Added); });
-    plugin_mgr.get_loader().subscribe_on_capability_unload_callback([refresh_cap](const PluginCapabilityIdentifier& c) { refresh_cap(c, ActionChange::Removed); });
-
     for (const std::string& plugin_key : plugin_mgr.get_catalog().get_enabled_plugin_keys()) {
         if (!plugin_mgr.get_loader().is_plugin_loaded(plugin_key)) {
             plugin_mgr.get_loader().load_plugin(plugin_mgr.get_catalog(), plugin_key, false);
@@ -3204,10 +3179,8 @@ bool GUI_App::on_init_inner()
         }
     }
 
-    // why: seed the registry once on the UI thread after startup auto-load. The deferred
-    // per-plugin callbacks above are idempotent (upsert by id), so re-processing the same
-    // packages is harmless; this guarantees a populated set even before any callback lands.
-    m_action_registry.build();
+    m_action_registry.add_source(std::make_unique<ScriptActionSource>());
+    m_action_registry.init();
 
     if (m_agent)
         plugin_mgr.set_cloud_agent(std::dynamic_pointer_cast<OrcaCloudServiceAgent>(m_agent->get_cloud_agent()));

@@ -122,6 +122,9 @@ set(SLIC3R_GUI_SOURCES
     GUI/SpeedDialDialog.hpp
     GUI/ActionRegistry.cpp
     GUI/ActionRegistry.hpp
+    GUI/IActionSource.hpp
+    GUI/ScriptActionSource.cpp
+    GUI/ScriptActionSource.hpp
     GUI/SpeedDialActionId.hpp
     GUI/ProcessRunner.cpp
     GUI/ProcessRunner.hpp

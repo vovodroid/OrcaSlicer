@@ -1,6 +1,7 @@
 get_filename_component(_TEST_NAME ${CMAKE_CURRENT_LIST_DIR} NAME)
 add_executable(${_TEST_NAME}_tests
     ${_TEST_NAME}_tests_main.cpp
+    test_action_source.cpp
     test_plugin_host_api.cpp
     test_plugin_capability_identifier.cpp
     test_plugin_install.cpp

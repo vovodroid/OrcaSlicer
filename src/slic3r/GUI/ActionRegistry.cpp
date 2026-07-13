@@ -1,20 +1,14 @@
 #include "ActionRegistry.hpp"
 
 #include "GUI_App.hpp"
-#include "SpeedDialActionId.hpp"
-#include "slic3r/plugin/PluginManager.hpp"
 
 #include <libslic3r/AppConfig.hpp>
-
-#include <slic3r/plugin/PluginLoader.hpp>
-#include <slic3r/plugin/PythonPluginInterface.hpp>
 
 #include <wx/thread.h>
 
 #include <algorithm>
 #include <cmath>
 #include <ctime>
-#include <unordered_map>
 
 namespace Slic3r { namespace GUI {
 
@@ -58,51 +52,41 @@ double frecency_score(int count, long long last, long long now)
     return count * std::pow(2.0, -age / HALF_LIFE_DAYS);
 }
 
-std::string find_loaded_package_name(PluginLoader& loader, const std::string& plugin_key)
-{
-    for (const PluginDescriptor& desc : loader.get_all_loaded_plugin_descriptors())
-        if (desc.plugin_key == plugin_key)
-            return desc.name.empty() ? plugin_key : desc.name;
-    return plugin_key;
-}
-
 } // namespace
 
-PluginScriptAction::PluginScriptAction(std::string plugin_key, std::string capability, std::string package_name)
-    : AppAction(speed_dial_action_id(plugin_key, capability),          // id
-                capability.empty() ? plugin_key : capability,       // title
-                std::move(package_name)),                          // pkg = source (package name)
-      plugin_key(std::move(plugin_key)), capability(std::move(capability))
-{}
-
-AppActionRunResult PluginScriptAction::run() const
+void ActionRegistry::init()
 {
-    ScriptRunOutcome o = run_script_plugin_capability(plugin_key, capability);
-    AppActionRunResult::Level level = AppActionRunResult::Level::Info;
-    switch (o.level) {
-        case ScriptRunOutcome::Level::Success: level = AppActionRunResult::Level::Success; break;
-        case ScriptRunOutcome::Level::Error:   level = AppActionRunResult::Level::Error;   break;
-        case ScriptRunOutcome::Level::Busy:    level = AppActionRunResult::Level::Busy;    break;
-        case ScriptRunOutcome::Level::Info:    break;
-    }
-    return { level, o.message };
+    assert(wxThread::IsMain());
+    for (auto& source : m_sources)
+        source->start(*this);
 }
 
-// ---- build / enumeration ----------------------------------------------------
-
-std::shared_ptr<AppAction> ActionRegistry::make_action(const std::string& plugin_key, const std::string& capability,
-                                                       const std::function<std::string(const std::string&)>& package_name_for) const
+void ActionRegistry::add_source(std::unique_ptr<IActionSource> source)
 {
-    PluginLoader& loader = PluginManager::instance().get_loader();
-    if (!loader.is_plugin_loaded(plugin_key))
-        return nullptr;
-    auto cap = loader.get_plugin_capability_by_name(plugin_key, PluginCapabilityType::Script, capability);
-    if (!cap || !cap->enabled)
-        return nullptr;
+    assert(wxThread::IsMain());
+    if (source)
+        m_sources.push_back(std::move(source));
+}
 
-    auto a = std::make_shared<PluginScriptAction>(plugin_key, capability, package_name_for(plugin_key));
-    seed_state(*a);
-    return a;
+void ActionRegistry::upsert(std::shared_ptr<AppAction> action)
+{
+    assert(wxThread::IsMain());
+    if (!action)
+        return;
+
+    seed_state(*action);
+    auto existing = std::find_if(m_actions.begin(), m_actions.end(),
+                                 [&](const auto& current) { return current->id == action->id; });
+    if (existing == m_actions.end())
+        m_actions.push_back(std::move(action));
+    else
+        *existing = std::move(action);
+}
+
+void ActionRegistry::remove(const std::string& id)
+{
+    assert(wxThread::IsMain());
+    erase_id(id);
 }
 
 void ActionRegistry::seed_state(AppAction& a) const
@@ -118,32 +102,6 @@ void ActionRegistry::seed_state(AppAction& a) const
     } else {
         a.count = 0;
         a.last  = 0;
-    }
-}
-
-void ActionRegistry::build()
-{
-    assert(wxThread::IsMain()); // why: UI-thread only; m_actions is unguarded (confinement)
-    m_actions.clear();
-    PluginLoader& loader = PluginManager::instance().get_loader();
-
-    std::unordered_map<std::string, std::string> package_names;
-    for (const PluginDescriptor& desc : loader.get_all_loaded_plugin_descriptors())
-        if (!desc.name.empty())
-            package_names.emplace(desc.plugin_key, desc.name);
-
-    // why: build sees many capabilities, so package display names are indexed once instead of
-    // scanning the loaded descriptors for every capability.
-    auto package_name_for = [&package_names](const std::string& plugin_key) {
-        auto it = package_names.find(plugin_key);
-        return it == package_names.end() ? plugin_key : it->second;
-    };
-
-    for (const auto& cap : loader.get_plugin_capabilities_by_type(PluginCapabilityType::Script)) {
-        if (!cap || !cap->enabled)
-            continue;
-        if (auto a = make_action(cap->plugin_key, cap->name, package_name_for))
-            m_actions.push_back(std::move(a));
     }
 }
 
@@ -168,63 +126,6 @@ void ActionRegistry::erase_id(const std::string& id)
                     m_actions.end());
 }
 
-// ---- incremental maintenance (UI thread, via CallAfter) ---------------------
-
-void ActionRegistry::refresh_capability(const std::string& plugin_key, const std::string& capability, ActionChange change)
-{
-    assert(wxThread::IsMain());
-    const std::string id = speed_dial_action_id(plugin_key, capability);
-    if (change == ActionChange::Removed) {
-        erase_id(id);
-        return;
-    }
-    PluginLoader& loader = PluginManager::instance().get_loader();
-    const std::string package_name = find_loaded_package_name(loader, plugin_key);
-    // why: make_action only ever resolves this single plugin_key here, unlike build()'s
-    // multi-plugin lookup, so the callback can just return the already-resolved name.
-    auto package_name_for = [&package_name](const std::string&) { return package_name; };
-
-    auto a = make_action(plugin_key, capability, package_name_for);
-    if (!a) { // why: disabled/unloaded capabilities leave the dial.
-        erase_id(id);
-        return;
-    }
-    auto it = std::find_if(m_actions.begin(), m_actions.end(), [&](const auto& e) { return e->id == id; });
-    if (it != m_actions.end())
-        *it = std::move(a);
-    else
-        m_actions.push_back(std::move(a));
-}
-
-void ActionRegistry::refresh_package(const std::string& plugin_key, ActionChange change)
-{
-    assert(wxThread::IsMain());
-    // Drop every action of this package, then (on add/update) re-add its current script caps.
-    // why: this is the producer path (loader-driven), so it legitimately knows it deals with
-    // PluginScriptAction - the one type it builds; the cast is not the dispatch-time switch
-    // that run() polymorphism removed.
-    m_actions.erase(std::remove_if(m_actions.begin(), m_actions.end(),
-                                   [&](const auto& a) {
-                                       auto* p = dynamic_cast<PluginScriptAction*>(a.get());
-                                       return p && p->plugin_key == plugin_key;
-                                   }),
-                    m_actions.end());
-    if (change == ActionChange::Removed)
-        return;
-    PluginLoader& loader = PluginManager::instance().get_loader();
-    const std::string package_name = find_loaded_package_name(loader, plugin_key);
-    // why: every capability iterated below belongs to this single plugin_key, so the
-    // callback can just return the already-resolved name (see refresh_capability).
-    auto package_name_for = [&package_name](const std::string&) { return package_name; };
-
-    for (const auto& cap : loader.get_plugin_capabilities_by_type(plugin_key, PluginCapabilityType::Script)) {
-        if (!cap || !cap->enabled)
-            continue;
-        if (auto a = make_action(plugin_key, cap->name, package_name_for))
-            m_actions.push_back(std::move(a));
-    }
-}
-
 // ---- dispatch + write-through ----------------------------------------------
 
 AppActionRunResult ActionRegistry::run(const std::string& id)
@@ -233,10 +134,9 @@ AppActionRunResult ActionRegistry::run(const std::string& id)
     auto it = std::find_if(m_actions.begin(), m_actions.end(), [&](const auto& e) { return e->id == id; });
     if (it == m_actions.end())
         return {}; // default Info, empty message
-    // why: hold a shared_ptr keep-alive, never a bare vector element. The script runner pumps
-    // a nested event loop (plugin modal UI); a queued refresh_* landing during that loop may
-    // erase this action from m_actions - the keep-alive keeps the heap object valid until run
-    // returns. (Replaces the old stack-copy; an abstract AppAction cannot be sliced.)
+    // why: hold a shared_ptr keep-alive, never a bare vector element. A runner may pump
+    // a nested event loop; a queued source refresh can erase this action from m_actions,
+    // while the keep-alive preserves the object until run returns.
     std::shared_ptr<AppAction> keep = *it;
     AppActionRunResult o = keep->run();
     if (o.level == AppActionRunResult::Level::Busy)
@@ -326,7 +226,7 @@ nlohmann::json ActionRegistry::snapshot() const
     for (const AppAction* a : sorted)
         actions.push_back({{"id", a->id},
                            {"title", a->title},
-                           {"pkg", a->pkg},
+                           {"source", a->source},
                            {"shortcut", ""}});
     // why: favourites is the ORDERED pin list - it must come from favourite_actions
     // as stored, not be re-derived from the frecency-sorted actions (that would
