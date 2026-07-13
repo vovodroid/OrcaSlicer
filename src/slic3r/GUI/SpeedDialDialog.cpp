@@ -270,10 +270,14 @@ private:
         }
         // why: value-capture only. Script execution may outlive this popup if the app is closing.
         wxGetApp().CallAfter([id] {
+            // why: the queue may drain during shutdown, after MainFrame/Plater teardown;
+            //      skip like the ScriptActionSource callbacks do instead of running into it.
+            if (wxGetApp().is_closing())
+                return;
             AppActionRunResult o = wxGetApp().action_registry().run(id);
             if (o.level == AppActionRunResult::Level::Busy)
                 return;
-            if (!o.message.IsEmpty())
+            if (!o.message.IsEmpty() && wxGetApp().plater())
                 wxGetApp().plater()->get_notification_manager()->push_notification(
                     NotificationType::CustomNotification,
                     o.level == AppActionRunResult::Level::Error ? NotificationManager::NotificationLevel::ErrorNotificationLevel :
