@@ -75,18 +75,14 @@ void ActionRegistry::upsert(std::shared_ptr<AppAction> action)
         return;
 
     seed_state(*action);
-    auto existing = std::find_if(m_actions.begin(), m_actions.end(),
-                                 [&](const auto& current) { return current->id == action->id; });
-    if (existing == m_actions.end())
-        m_actions.push_back(std::move(action));
-    else
-        *existing = std::move(action);
+    std::string id = action->id;
+    m_actions.insert_or_assign(std::move(id), std::move(action));
 }
 
 void ActionRegistry::remove(const std::string& id)
 {
     assert(wxThread::IsMain());
-    erase_id(id);
+    m_actions.erase(id);
 }
 
 void ActionRegistry::seed_state(AppAction& a) const
@@ -110,8 +106,8 @@ void ActionRegistry::seed_state(AppAction& a) const
 const AppAction* ActionRegistry::by_id(const std::string& id) const
 {
     assert(wxThread::IsMain());
-    auto it = std::find_if(m_actions.begin(), m_actions.end(), [&](const auto& a) { return a->id == id; });
-    return it == m_actions.end() ? nullptr : it->get();
+    auto it = m_actions.find(id);
+    return it == m_actions.end() ? nullptr : it->second.get();
 }
 
 AppAction* ActionRegistry::find(const std::string& id)
@@ -119,25 +115,18 @@ AppAction* ActionRegistry::find(const std::string& id)
     return const_cast<AppAction*>(by_id(id));
 }
 
-void ActionRegistry::erase_id(const std::string& id)
-{
-    m_actions.erase(std::remove_if(m_actions.begin(), m_actions.end(),
-                                   [&](const auto& a) { return a->id == id; }),
-                    m_actions.end());
-}
-
 // ---- dispatch + write-through ----------------------------------------------
 
 AppActionRunResult ActionRegistry::run(const std::string& id)
 {
     assert(wxThread::IsMain());
-    auto it = std::find_if(m_actions.begin(), m_actions.end(), [&](const auto& e) { return e->id == id; });
+    auto it = m_actions.find(id);
     if (it == m_actions.end())
         return {}; // default Info, empty message
-    // why: hold a shared_ptr keep-alive, never a bare vector element. A runner may pump
-    // a nested event loop; a queued source refresh can erase this action from m_actions,
-    // while the keep-alive preserves the object until run returns.
-    std::shared_ptr<AppAction> keep = *it;
+    // why: hold a shared_ptr keep-alive, never a bare map entry. A runner may pump a
+    // nested event loop; a queued source refresh can erase the entry while the
+    // keep-alive preserves the action until run returns.
+    std::shared_ptr<AppAction> keep = it->second;
     AppActionRunResult o = keep->run();
     if (o.level == AppActionRunResult::Level::Busy)
         return o;
@@ -210,16 +199,20 @@ nlohmann::json ActionRegistry::snapshot() const
     assert(wxThread::IsMain());
     std::vector<const AppAction*> sorted;
     sorted.reserve(m_actions.size());
-    for (const auto& a : m_actions)
-        sorted.push_back(a.get());
+    for (const auto& entry : m_actions)
+        sorted.push_back(entry.second.get());
 
     const long long now = (long long) std::time(nullptr);
-    std::stable_sort(sorted.begin(), sorted.end(), [&](const AppAction* a, const AppAction* b) {
+    std::sort(sorted.begin(), sorted.end(), [&](const AppAction* a, const AppAction* b) {
         double sa = frecency_score(a->count, a->last, now);
         double sb = frecency_score(b->count, b->last, now);
         if (sa != sb)
             return sa > sb;
-        return a->title < b->title; // ties alphabetical
+        if (a->title != b->title)
+            return a->title < b->title;
+        if (a->source != b->source)
+            return a->source < b->source;
+        return a->id < b->id;
     });
 
     nlohmann::json actions = nlohmann::json::array();

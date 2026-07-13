@@ -10,6 +10,7 @@
 #include <cassert>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -81,7 +82,6 @@ public:
     void remove(const std::string& id);
 
     // Always-clean read surface. UI thread only.
-    const std::vector<std::shared_ptr<AppAction>>& all() const { assert(wxThread::IsMain()); return m_actions; }
     const AppAction*                               by_id(const std::string& id) const;
 
     // Dispatch + write-through (registry is the only thing that touches AppConfig).
@@ -99,15 +99,9 @@ public:
 private:
     void         seed_state(AppAction& a) const;               // favourite/stats from config
     AppAction*      find(const std::string& id);
-    void         erase_id(const std::string& id);
 
-    // why: vector storage favors the popup path, which snapshots by iterating, sorting, and
-    // serializing small action sets. Id lookups are event-driven and initialization is startup-only, so
-    // a persistent map would add hashing/allocation cost without helping render.
-    // shared_ptr: AppAction is abstract (stored by pointer), and run() takes a keep-alive
-    // copy so a queued source refresh cannot erase the object mid-run.
     std::vector<std::unique_ptr<IActionSource>> m_sources;
-    std::vector<std::shared_ptr<AppAction>> m_actions;  // UI-thread confined; no lock
+    std::unordered_map<std::string, std::shared_ptr<AppAction>> m_actions;  // UI-thread confined; no lock
 };
 
 }} // namespace Slic3r::GUI
