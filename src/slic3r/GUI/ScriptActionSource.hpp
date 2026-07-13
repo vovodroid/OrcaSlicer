@@ -26,7 +26,6 @@ public:
     void start(ActionRegistry& sink) override;
 
 private:
-    void enumerate();
     void refresh_source(const std::string& plugin_key, ActionChange change);
     void refresh_capability(const std::string& plugin_key, const std::string& capability, ActionChange change);
     std::shared_ptr<AppAction> make_action(const std::string& plugin_key, const std::string& capability,

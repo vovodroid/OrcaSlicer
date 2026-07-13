@@ -3172,15 +3172,23 @@ bool GUI_App::on_init_inner()
             refresh_plugins_dialog();
         });
 
+    // Register all AppAction sources
+    m_action_registry.add_source(std::make_unique<ScriptActionSource>());
+    // m_action_registry.add_source(std::make_unique<AnotherActionSource>());
+    // m_action_registry.add_source(std::make_unique<YetAnotherActionSource>());
+    // ...
+
+    // Initialize with all added sources
+    // - register callbacks,
+    // - then enumerate: upsert all actions into registry
+    m_action_registry.init();
+
     for (const std::string& plugin_key : plugin_mgr.get_catalog().get_enabled_plugin_keys()) {
         if (!plugin_mgr.get_loader().is_plugin_loaded(plugin_key)) {
             plugin_mgr.get_loader().load_plugin(plugin_mgr.get_catalog(), plugin_key, false);
             BOOST_LOG_TRIVIAL(info) << "Auto-loading plugin on startup: " << plugin_key;
         }
     }
-
-    m_action_registry.add_source(std::make_unique<ScriptActionSource>());
-    m_action_registry.init();
 
     if (m_agent)
         plugin_mgr.set_cloud_agent(std::dynamic_pointer_cast<OrcaCloudServiceAgent>(m_agent->get_cloud_agent()));

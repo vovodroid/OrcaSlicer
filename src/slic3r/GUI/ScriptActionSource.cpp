@@ -91,15 +91,7 @@ void ScriptActionSource::start(ActionRegistry& sink)
             refresh_capability(capability, ActionChange::Removed);
         });
 
-    enumerate();
-}
-
-void ScriptActionSource::enumerate()
-{
-    assert(wxThread::IsMain());
-    assert(m_sink != nullptr);
-
-    PluginLoader& loader = PluginManager::instance().get_loader();
+    // enumerate
     std::unordered_map<std::string, std::string> source_names;
     for (const PluginDescriptor& desc : loader.get_all_loaded_plugin_descriptors())
         if (!desc.name.empty())
