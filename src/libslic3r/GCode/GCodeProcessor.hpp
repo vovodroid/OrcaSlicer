@@ -1197,6 +1197,11 @@ class Print;
     public:
         GCodeProcessor();
         void init_filament_maps_and_nozzle_type_when_import_only_gcode();
+        // Reprocessing an already-generated g-code (from-previous / imported g-code) does not rebuild
+        // the per-filament nozzle grouping the multi-nozzle device GUI needs. Surface it onto the
+        // result: keep an already-seeded grouping (from initialize_from_context), otherwise synthesize
+        // a default one from the filament map so the result is never left without it.
+        void ensure_nozzle_group_result(int min_filament_count);
         // check whether the gcode path meets the filament_map grouping requirements
         bool check_multi_extruder_gcode_valid(const int                         extruder_size,
                                               const Pointfs                     plate_printable_area,

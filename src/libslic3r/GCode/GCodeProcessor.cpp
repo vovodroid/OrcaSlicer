@@ -3452,6 +3452,13 @@ void GCodeProcessor::apply_config(const DynamicPrintConfig& config)
     const ConfigOptionFloat* z_offset = config.option<ConfigOptionFloat>("z_offset");
     if (z_offset != nullptr)
         m_z_offset = z_offset->value;
+
+    // Reprocessing an existing g-code (from-previous reload / imported g-code) reaches apply_config
+    // through this DynamicPrintConfig overload; rebuild the per-filament nozzle grouping onto the
+    // result so the multi-nozzle device GUI can map filaments to physical nozzles. The normal
+    // streaming export uses the PrintConfig overload and hands the live grouping over separately, so
+    // it is intentionally not touched here.
+    ensure_nozzle_group_result(static_cast<int>(m_result.filaments_count));
 }
 
 void GCodeProcessor::enable_stealth_time_estimator(bool enabled)
@@ -6572,6 +6579,75 @@ void GCodeProcessor::init_filament_maps_and_nozzle_type_when_import_only_gcode()
     }
     if (m_result.nozzle_type.empty()) {
         m_result.nozzle_type.assign((int) EnforcerBlockerType::ExtruderMax, NozzleType::ntUndefine);
+    }
+}
+
+// Surface a per-filament nozzle grouping onto m_result when reprocessing an already-generated g-code
+// (from-previous reload / imported g-code) — process_file does not otherwise rebuild it, so the
+// multi-nozzle device GUI would find nozzle_group_result == NULL and the rack print-dispatch mapping
+// request fails with code -1. Only invoked from the DynamicPrintConfig apply_config (the reprocess /
+// import path); the normal streaming export keeps handing the live grouping over separately.
+void GCodeProcessor::ensure_nozzle_group_result(int min_filament_count)
+{
+    if (m_nozzle_group_result) {
+        // A grouping was already seeded from the reloaded result (initialize_from_context). Publish it
+        // onto m_result so extract_result() carries it. (The reference relies on the streaming-export
+        // handover for this and returns early here; the reprocess path has no such handover.)
+        m_result.nozzle_group_result = m_nozzle_group_result;
+        return;
+    }
+
+    int filament_count = std::max(1, min_filament_count);
+    filament_count = std::max(filament_count, static_cast<int>(m_filament_maps.size()));
+
+    std::vector<int> filament_map = m_filament_maps;
+    if (filament_map.empty()) {
+        filament_map.assign(filament_count, 0);
+    } else if (static_cast<int>(filament_map.size()) < filament_count) {
+        filament_map.resize(filament_count, filament_map.front());
+    }
+
+    int min_value = *std::min_element(filament_map.begin(), filament_map.end());
+    if (min_value >= 1) {
+        for (int &value : filament_map) {
+            value -= 1;
+        }
+    }
+
+    for (int &value : filament_map) {
+        value = std::max(0, value);
+    }
+
+    int max_extruder_id = *std::max_element(filament_map.begin(), filament_map.end());
+    max_extruder_id = std::max(0, max_extruder_id);
+
+    std::string nozzle_diameter = format_diameter_to_str(DEFAULT_TOOLPATH_WIDTH);
+    std::vector<MultiNozzleUtils::NozzleInfo> nozzle_list;
+    nozzle_list.reserve(static_cast<size_t>(max_extruder_id + 1));
+    for (int extruder_id = 0; extruder_id <= max_extruder_id; ++extruder_id) {
+        MultiNozzleUtils::NozzleInfo info;
+        info.diameter    = nozzle_diameter;
+        info.volume_type = NozzleVolumeType::nvtStandard;
+        info.extruder_id = extruder_id;
+        info.group_id    = extruder_id;
+        nozzle_list.emplace_back(std::move(info));
+    }
+
+    std::vector<int> filament_nozzle_map(filament_count, 0);
+    for (int i = 0; i < filament_count; ++i) {
+        filament_nozzle_map[i] = filament_map[i];
+    }
+
+    std::vector<unsigned int> used_filaments;
+    used_filaments.reserve(filament_count);
+    for (int i = 0; i < filament_count; ++i) {
+        used_filaments.push_back(static_cast<unsigned int>(i));
+    }
+
+    auto result = MultiNozzleUtils::LayeredNozzleGroupResult::create(filament_nozzle_map, nozzle_list, used_filaments);
+    if (result) {
+        m_nozzle_group_result        = std::make_shared<MultiNozzleUtils::LayeredNozzleGroupResult>(*result);
+        m_result.nozzle_group_result = m_nozzle_group_result;
     }
 }
 

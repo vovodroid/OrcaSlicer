@@ -4260,13 +4260,19 @@ void Print::export_gcode_from_previous_file(const std::string& file, GCodeProces
         const Vec3d origin = this->get_plate_origin();
         processor.set_xy_offset(origin(0), origin(1));
         // Reloaded sliced projects re-estimate with the same nozzle-grouping slot context as the
-        // original export; harmless when the result carries none (slot 0).
+        // original export; process_file re-derives the device-side nozzle grouping onto the result
+        // (via ensure_nozzle_group_result), so the multi-nozzle send/monitor mapping survives here.
         if (result != nullptr && result->nozzle_group_result)
             processor.initialize_from_context(result->nozzle_group_result);
         //processor.enable_producers(true);
         processor.process_file(file);
 
+        // filament seq is loaded from file, processor result will override the value
+        auto filament_seq_loaded = result->filament_change_sequence;
+        auto nozzle_seq_loaded   = result->nozzle_change_sequence;
         *result = std::move(processor.extract_result());
+        result->filament_change_sequence = filament_seq_loaded;
+        result->nozzle_change_sequence   = nozzle_seq_loaded;
     } catch (std::exception & /* ex */) {
         BOOST_LOG_TRIVIAL(error) << __FUNCTION__ <<  boost::format(": found errors when process gcode file %1%") %file.c_str();
         throw Slic3r::RuntimeError(
