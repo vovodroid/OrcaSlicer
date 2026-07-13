@@ -5401,6 +5401,17 @@ LayerResult GCode::process_layer(
         config.set_key_value("most_used_physical_extruder_id", new ConfigOptionInt(m_config.physical_extruder_map.get_at(most_used_extruder)));
         config.set_key_value("layer_num", new ConfigOptionInt(m_layer_index));
         config.set_key_value("layer_z",   new ConfigOptionFloat(print_z));
+        // Orca: expose the current filament/nozzle ids (matching the toolchange contexts) so a
+        // layer_change_gcode may index per-filament / per-nozzle arrays — e.g. X2D's
+        // close_additional_fan_first_x_layers[current_filament_id] and
+        // nozzle_diameter_at_nozzle_id[current_nozzle_id]. Inert if unreferenced.
+        {
+            const int  cur_filament_id = (int) m_writer.filament()->id();
+            const auto group_result    = m_print->get_layered_nozzle_group_result();
+            config.set_key_value("current_filament_id", new ConfigOptionInt(cur_filament_id));
+            config.set_key_value("current_nozzle_id", new ConfigOptionInt(
+                nozzle_id_for_gcode_placeholder(group_result, cur_filament_id, (int) m_writer.filament()->extruder_id(), m_layer_index)));
+        }
 
         // Bedslinger mass model. Compute the running printed mass at this layer (same weight calc as
         // DoExport::update_print_stats_and_format_filament_stats) and the Y acceleration limit it implies.
