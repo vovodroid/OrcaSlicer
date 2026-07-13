@@ -991,6 +991,15 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
             config.set_key_value("next_nozzle_id", new ConfigOptionInt(next_nozzle_id));
             config.set_key_value("current_filament_id", new ConfigOptionInt(old_filament_id));
             config.set_key_value("next_filament_id", new ConfigOptionInt(new_filament_id));
+            // Orca: nozzle-volume variant of the old/new extruder (e.g. "Direct Drive TPU High Flow"),
+            // consumed by H2D's variant-aware change_filament_gcode. Null-safe: old_extruder_id may be -1.
+            {
+                const auto &extruder_variants = m_print_config->printer_extruder_variant.values;
+                config.set_key_value("old_extruder_variant", new ConfigOptionString(
+                    (old_extruder_id >= 0 && old_extruder_id < (int) extruder_variants.size()) ? extruder_variants[old_extruder_id] : std::string()));
+                config.set_key_value("new_extruder_variant", new ConfigOptionString(
+                    (new_extruder_id >= 0 && new_extruder_id < (int) extruder_variants.size()) ? extruder_variants[new_extruder_id] : std::string()));
+            }
             config.set_key_value("nozzle_diameter_at_nozzle_id", new ConfigOptionFloats(get_nozzle_diameters_by_nozzle_id(group_result.get())));
             config.set_key_value("nozzle_volume_types", new ConfigOptionStrings(get_nozzle_volume_types_by_nozzle_id(group_result.get())));
             config.set_key_value("layer_num", new ConfigOptionInt(gcodegen.m_layer_index));
@@ -8792,6 +8801,14 @@ std::string GCode::set_extruder(unsigned int new_filament_id, double print_z, bo
     dyn_config.set_key_value("next_nozzle_id", new ConfigOptionInt(next_nozzle_id));
     dyn_config.set_key_value("current_filament_id", new ConfigOptionInt(old_filament_id));
     dyn_config.set_key_value("next_filament_id", new ConfigOptionInt((int)new_filament_id));
+    // Orca: nozzle-volume variant of the old/new extruder (see append_tcr). Null-safe: old_extruder_id may be -1.
+    {
+        const auto &extruder_variants = m_config.printer_extruder_variant.values;
+        dyn_config.set_key_value("old_extruder_variant", new ConfigOptionString(
+            (old_extruder_id >= 0 && old_extruder_id < (int) extruder_variants.size()) ? extruder_variants[old_extruder_id] : std::string()));
+        dyn_config.set_key_value("new_extruder_variant", new ConfigOptionString(
+            (new_extruder_id >= 0 && new_extruder_id < (int) extruder_variants.size()) ? extruder_variants[new_extruder_id] : std::string()));
+    }
     dyn_config.set_key_value("nozzle_diameter_at_nozzle_id", new ConfigOptionFloats(get_nozzle_diameters_by_nozzle_id(group_result.get())));
     dyn_config.set_key_value("nozzle_volume_types", new ConfigOptionStrings(get_nozzle_volume_types_by_nozzle_id(group_result.get())));
     // Old filament's nozzle-change retract length (filament_retract_length_nc; nil/-1 -> 0).
