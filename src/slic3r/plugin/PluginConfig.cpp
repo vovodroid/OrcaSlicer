@@ -1,10 +1,14 @@
 #include "PluginConfig.hpp"
 
+#include <algorithm>
 #include <boost/format.hpp>
 #include <boost/log/trivial.hpp>
 #include <boost/nowide/fstream.hpp>
 
+#include <libslic3r/PresetBundle.hpp>
+#include <libslic3r/PrintConfig.hpp>
 #include <slic3r/GUI/GUI.hpp>
+#include <slic3r/GUI/GUI_App.hpp>
 #include <slic3r/GUI/I18N.hpp>
 #include <slic3r/GUI/format.hpp>
 #include <slic3r/plugin/PluginLoader.hpp>
@@ -14,11 +18,43 @@
 #include <slic3r/plugin/PythonPluginInterface.hpp>
 #include <stdexcept>
 
+#include <wx/app.h>
 #include <wx/utils.h>
 
 namespace Slic3r {
 
 namespace {
+
+constexpr const char* KEY_PLUGIN     = "plugin_key";
+constexpr const char* KEY_CAPABILITY = "capability";
+constexpr const char* KEY_VERSION    = "plugin_version";
+constexpr const char* KEY_CAP_CONFIG = "cap_config";
+
+std::string string_field(const nlohmann::json& entry, const char* key)
+{
+    const auto it = entry.find(key);
+    return it != entry.end() && it->is_string() ? it->get<std::string>() : std::string();
+}
+
+bool is_recognized_entry(const nlohmann::json& entry, CapabilityConfigId& id)
+{
+    if (!entry.is_object())
+        return false;
+
+    id.plugin_key = string_field(entry, KEY_PLUGIN);
+    id.capability = string_field(entry, KEY_CAPABILITY);
+    return !id.plugin_key.empty() && !id.capability.empty();
+}
+
+CapabilityConfigEntry decode_entry(const CapabilityConfigId& id, const nlohmann::json& entry)
+{
+    CapabilityConfigEntry result;
+    result.id             = id;
+    result.plugin_version = string_field(entry, KEY_VERSION);
+    const auto cap_it     = entry.find(KEY_CAP_CONFIG);
+    result.cap_config     = cap_it != entry.end() ? *cap_it : nlohmann::json::object();
+    return result;
+}
 
 // PluginDescriptor::version is overwritten with the latest cloud version on a cloud merge, so it can
 // name a version that is not the one on disk; installed_version is what actually loaded.
@@ -28,6 +64,19 @@ std::string running_plugin_version(const std::string& plugin_key)
     if (!PluginManager::instance().get_catalog().try_get_valid_plugin_descriptor(plugin_key, descriptor))
         return {};
     return descriptor.installed_version.empty() ? descriptor.version : descriptor.installed_version;
+}
+
+CapabilityConfigId make_id(const PluginCapabilityIdentifier& id)
+{
+    return CapabilityConfigId{id.plugin_key, id.name};
+}
+
+// Null wherever the plugin host runs without the GUI app (the unit tests). wxGetApp() dereferences
+// the app unconditionally, so ask wxWidgets instead.
+const PresetBundle* active_preset_bundle()
+{
+    const auto* app = dynamic_cast<const GUI::GUI_App*>(wxApp::GetInstance());
+    return app == nullptr ? nullptr : app->preset_bundle;
 }
 
 // PluginLoader stamps both halves onto the instance when it materializes the capability, so the
@@ -42,11 +91,8 @@ std::pair<std::string, std::string> capability_identity(const PluginCapabilityIn
     return id;
 }
 
-// The identity above plus the type, which decides which preset may override the capability (see
-// preset_type_for_capability). Taken from the instance, not the loader's registry: a capability
-// calling get_config() from on_load() is not registered yet and must still see its preset's config.
-// A raising get_type() costs it only the preset layer — Unknown names no preset, so the base config
-// answers.
+// The capability type identifies the preset that owns its override. If a plugin raises while
+// reporting its type, resolve against the base config instead of failing the capability config API.
 PluginCapabilityIdentifier capability_full_identity(const PluginCapabilityInterface& capability, const char* api_name)
 {
     const auto [plugin_key, capability_name] = capability_identity(capability, api_name);
@@ -62,6 +108,88 @@ PluginCapabilityIdentifier capability_full_identity(const PluginCapabilityInterf
 }
 
 } // namespace
+
+CapabilityConfigDocument CapabilityConfigDocument::from_entries(const nlohmann::json& entries)
+{
+    CapabilityConfigDocument document;
+    if (!entries.is_array())
+        return document;
+
+    for (const nlohmann::json& entry : entries) {
+        CapabilityConfigId id;
+        if (is_recognized_entry(entry, id))
+            document.m_entries[id] = entry;
+        else
+            document.m_opaque_entries.push_back(entry);
+    }
+
+    return document;
+}
+
+CapabilityConfigDocument CapabilityConfigDocument::from_root_json(const nlohmann::json& root)
+{
+    const auto entries = root.find(KeyEntries);
+    return entries != root.end() ? from_entries(*entries) : CapabilityConfigDocument();
+}
+
+std::optional<CapabilityConfigEntry> CapabilityConfigDocument::find(const CapabilityConfigId& id) const
+{
+    const auto it = m_entries.find(id);
+    if (it == m_entries.end())
+        return std::nullopt;
+    return decode_entry(it->first, it->second);
+}
+
+bool CapabilityConfigDocument::contains(const CapabilityConfigId& id) const
+{
+    return m_entries.find(id) != m_entries.end();
+}
+
+bool CapabilityConfigDocument::upsert(CapabilityConfigEntry entry)
+{
+    if (entry.id.plugin_key.empty() || entry.id.capability.empty())
+        return false;
+
+    nlohmann::json serialized = nlohmann::json::object();
+    const auto existing       = m_entries.find(entry.id);
+    if (existing != m_entries.end() && existing->second.is_object())
+        serialized = existing->second;
+
+    serialized[KEY_PLUGIN]     = entry.id.plugin_key;
+    serialized[KEY_CAPABILITY] = entry.id.capability;
+    serialized[KEY_VERSION]    = entry.plugin_version;
+    serialized[KEY_CAP_CONFIG] = entry.cap_config;
+
+    m_entries[entry.id] = std::move(serialized);
+    return true;
+}
+
+bool CapabilityConfigDocument::erase(const CapabilityConfigId& id)
+{
+    return m_entries.erase(id) != 0;
+}
+
+bool CapabilityConfigDocument::empty() const
+{
+    return m_entries.empty() && m_opaque_entries.empty();
+}
+
+nlohmann::json CapabilityConfigDocument::serialize_entries() const
+{
+    nlohmann::json result = nlohmann::json::array();
+    for (const auto& item : m_entries)
+        result.push_back(item.second);
+    for (const nlohmann::json& entry : m_opaque_entries)
+        result.push_back(entry);
+    return result;
+}
+
+nlohmann::json CapabilityConfigDocument::root_json() const
+{
+    nlohmann::json root = nlohmann::json::object();
+    root[KeyEntries] = serialize_entries();
+    return root;
+}
 
 void PluginConfig::load()
 {
@@ -192,6 +320,139 @@ bool PluginConfig::dirty() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_dirty;
+}
+
+std::string plugin_overrides_of(const Preset& preset)
+{
+    const auto* opt = dynamic_cast<const ConfigOptionString*>(preset.config.option(PLUGIN_OVERRIDES_OPTION_KEY));
+    return opt == nullptr ? std::string() : opt->value;
+}
+
+bool parse_plugin_overrides(const std::string& raw, CapabilityConfigDocument& document, std::string& error)
+{
+    document = CapabilityConfigDocument();
+    error.clear();
+
+    if (raw.empty())
+        return true;
+
+    const nlohmann::json parsed = nlohmann::json::parse(raw, nullptr, /* allow_exceptions */ false);
+    if (parsed.is_discarded()) {
+        error = "The preset stores invalid plugin capability configuration JSON.";
+        return false;
+    }
+    if (!parsed.is_array()) {
+        error = "The preset's plugin capability configuration is not an array and cannot be edited.";
+        return false;
+    }
+
+    document = CapabilityConfigDocument::from_entries(parsed);
+    return true;
+}
+
+std::string serialize_plugin_overrides(const CapabilityConfigDocument& document)
+{
+    return document.empty() ? std::string() : document.serialize_entries().dump();
+}
+
+EffectiveCapabilityConfig PresetPluginConfigService::get_effective_config(const CapabilityConfigDocument&   overrides,
+                                                                         const PluginCapabilityIdentifier& id) const
+{
+    EffectiveCapabilityConfig result;
+    result.id                     = make_id(id);
+    result.running_plugin_version = running_plugin_version(id.plugin_key);
+
+    const BaseConfig base  = PluginManager::instance().get_config().get_config(id.plugin_key, id.name);
+    result.has_base_config = !base.empty();
+
+    if (const auto entry = overrides.find(result.id)) {
+        result.has_preset_override   = true;
+        result.config                = entry->cap_config;
+        result.stored_plugin_version = entry->plugin_version;
+        return result;
+    }
+
+    if (result.has_base_config) {
+        result.config                = base.config;
+        result.stored_plugin_version = base.plugin_version;
+    }
+    return result;
+}
+
+MutationResult PresetPluginConfigService::set_preset_override(CapabilityConfigDocument&         overrides,
+                                                              const PluginCapabilityIdentifier& id,
+                                                              const nlohmann::json&             value) const
+{
+    MutationResult           result;
+    const CapabilityConfigId config_id = make_id(id);
+    const std::string        version   = running_plugin_version(id.plugin_key);
+
+    // A no-op is a successful unchanged result: re-saving the displayed value must not mark the
+    // preset dirty.
+    const auto existing = overrides.find(config_id);
+    if (existing && existing->cap_config == value && existing->plugin_version == version) {
+        result.ok        = true;
+        result.effective = get_effective_config(overrides, id);
+        return result;
+    }
+
+    overrides.upsert({config_id, version, value});
+
+    result.ok        = true;
+    result.changed   = true;
+    result.effective = get_effective_config(overrides, id);
+    return result;
+}
+
+MutationResult PresetPluginConfigService::remove_preset_override(CapabilityConfigDocument&         overrides,
+                                                                 const PluginCapabilityIdentifier& id) const
+{
+    MutationResult result;
+    result.ok        = true;
+    result.changed   = overrides.erase(make_id(id));
+    result.effective = get_effective_config(overrides, id);
+    return result;
+}
+
+EffectiveCapabilityConfig active_capability_config(const PluginCapabilityIdentifier& id)
+{
+    const PresetPluginConfigService service;
+
+    CapabilityConfigDocument overrides;
+
+    const PresetBundle* bundle = active_preset_bundle();
+    const Preset* preset       = nullptr;
+
+    if (bundle != nullptr) {
+        const std::string type_key = plugin_capability_type_to_string(id.type);
+        for (const auto& [key, def] : print_config_def.options) {
+            if (def.plugin_type != type_key)
+                continue;
+
+            const auto& print_options = Preset::print_options();
+            if (std::find(print_options.begin(), print_options.end(), key) != print_options.end()) {
+                preset = &bundle->prints.get_edited_preset();
+                break;
+            }
+
+            const auto& printer_options = Preset::printer_options();
+            if (std::find(printer_options.begin(), printer_options.end(), key) != printer_options.end()) {
+                preset = &bundle->printers.get_edited_preset();
+                break;
+            }
+        }
+    }
+
+    if (preset != nullptr) {
+        std::string error;
+        if (!parse_plugin_overrides(plugin_overrides_of(*preset), overrides, error)) {
+            // Text we cannot read is not an override: log it and resolve against the base config.
+            BOOST_LOG_TRIVIAL(error) << "Preset \"" << preset->name << "\": " << error;
+            overrides = CapabilityConfigDocument();
+        }
+    }
+
+    return service.get_effective_config(overrides, id);
 }
 
 nlohmann::json capability_get_config(const PluginCapabilityInterface& capability)

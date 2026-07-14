@@ -63,10 +63,8 @@ public:
 };
 
 // The same resolution against the preset that is active right now, rather than a document the caller
-// holds: this is what a running capability reads through the Python config API. Only one preset type
-// can reference a given capability type (preset_type_for_capability), so there is exactly one preset
-// to consult. Falls back to the base config for filament capabilities (see active_preset_for) and in
-// a host with no preset bundle (the plugin unit tests).
+// holds: this is what a running capability reads through the Python config API. It falls back to the
+// base config when no active preset bundle is available.
 EffectiveCapabilityConfig active_capability_config(const PluginCapabilityIdentifier& id);
 
 } // namespace Slic3r

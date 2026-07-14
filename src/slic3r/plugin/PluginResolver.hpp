@@ -80,13 +80,6 @@ std::string resolve_recovery_url(const PluginCapabilityRef& ref);
 std::vector<PluginCapabilityRef> referenced_capabilities(Preset::Type type, const Preset& preset);
 std::vector<PluginCapabilityIdentifier> capabilities_in_use(Preset::Type type, const Preset& preset);
 
-// The preset type whose presets can reference capabilities of `type` and therefore carry their
-// overrides. Derived from the ConfigDef rather than hardcoded: a plugin-backed option names the
-// capability type it accepts (ConfigOptionDef::plugin_type) and belongs to exactly one preset type,
-// so declaring the option is all it takes to map a new capability type. TYPE_INVALID when no option
-// accepts the type — nothing can reference it, so no preset owns it.
-Preset::Type preset_type_for_capability(PluginCapabilityType type);
-
 // The referenced capabilities of the active preset(s) of `type` that are loaded right now: the set
 // that can actually be configured. Missing and broken refs are absent, having no instance to ask for
 // a config UI or defaults. A loaded-but-disabled capability IS listed — it still has stored config
