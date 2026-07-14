@@ -26,8 +26,8 @@ std::string running_plugin_version(const std::string& plugin_key)
     return descriptor.installed_version.empty() ? descriptor.version : descriptor.installed_version;
 }
 
-// Null wherever the plugin host runs without the GUI app (the unit tests): there are no presets
-// then, only the base config. wxGetApp() dereferences the app unconditionally, so ask wxWidgets.
+// Null wherever the plugin host runs without the GUI app (the unit tests). wxGetApp() dereferences
+// the app unconditionally, so ask wxWidgets instead.
 const PresetBundle* active_preset_bundle()
 {
     const auto* app = dynamic_cast<const GUI::GUI_App*>(wxApp::GetInstance());
@@ -46,22 +46,15 @@ const Preset* active_preset_for(Preset::Type type)
     case Preset::TYPE_PRINT: return &bundle->prints.get_edited_preset();
     case Preset::TYPE_PRINTER: return &bundle->printers.get_edited_preset();
 
-    // Deliberately unimplemented, not forgotten.
-    //
-    // There is no single active filament preset: one is selected per extruder, and a capability
-    // calls get_config() without saying which extruder it is running for, so we cannot tell which
-    // of them owns the config. Guessing (first override wins, or extruder 0) would hand a plugin
-    // another extruder's settings and look like a plugin bug, so it reads the base config instead —
-    // the value it had before presets could override anything.
-    //
-    // Nothing reaches this today: preset_type_for_capability only names TYPE_FILAMENT once a
-    // filament option declares a plugin_type, and none does (the two plugin-backed options are
-    // print and printer ones). Solve it with the first filament-backed capability, by pushing the
-    // extruder onto the plugin call context the trampoline already maintains
-    // (ScopedPluginAuditContext) along with the override text snapshotted off the preset, and
-    // resolving the preset here from that instead of from the bundle. The extruder must be optional:
-    // whole slicing steps (posSlice, psGCodePostProcess) span every extruder and have no current
-    // filament, and this fallback is the honest answer for them.
+    // Deliberately unimplemented, not forgotten. There is no single active filament preset — one is
+    // selected per extruder, and get_config() does not say which extruder the capability runs for —
+    // so guessing (extruder 0, or first override wins) would hand a plugin another extruder's
+    // settings. Filament capabilities read the base config instead. Nothing reaches this today:
+    // preset_type_for_capability only names TYPE_FILAMENT once a filament option declares a
+    // plugin_type, and none does. To lift it, push the extruder onto the plugin call context the
+    // trampoline already maintains (ScopedPluginAuditContext) and resolve the preset from that. The
+    // extruder must be optional: whole slicing steps (posSlice, psGCodePostProcess) span every
+    // extruder and have no current filament, and this fallback is the honest answer for them.
     case Preset::TYPE_FILAMENT: return nullptr;
 
     default: return nullptr;
@@ -146,8 +139,8 @@ MutationResult PresetPluginConfigService::set_preset_override(CapabilityConfigDo
     const CapabilityConfigId config_id = make_id(id);
     const std::string        version   = running_plugin_version(id.plugin_key);
 
-    // A no-op is a successful unchanged result, not a reason to rewrite the preset: re-saving the
-    // displayed value must not be able to mark it dirty.
+    // A no-op is a successful unchanged result: re-saving the displayed value must not mark the
+    // preset dirty.
     const auto existing = overrides.find(config_id);
     if (existing && existing->cap_config == value && existing->plugin_version == version) {
         result.ok        = true;
@@ -169,7 +162,6 @@ MutationResult PresetPluginConfigService::remove_preset_override(CapabilityConfi
     MutationResult result;
     result.ok      = true;
     result.changed = overrides.erase(make_id(id));
-    // Reads back as the base value now that the override is gone.
     result.effective = get_effective_config(overrides, id);
     return result;
 }
@@ -182,8 +174,7 @@ EffectiveCapabilityConfig active_capability_config(const PluginCapabilityIdentif
     if (const Preset* preset = active_preset_for(preset_type_for_capability(id.type))) {
         std::string error;
         if (!parse_plugin_overrides(plugin_overrides_of(*preset), overrides, error)) {
-            // Text we cannot read is not an override. Say so and resolve against the base config,
-            // which is what the capability ran with before anything was written into the preset.
+            // Text we cannot read is not an override: log it and resolve against the base config.
             BOOST_LOG_TRIVIAL(error) << "Preset \"" << preset->name << "\": " << error;
             overrides = CapabilityConfigDocument();
         }

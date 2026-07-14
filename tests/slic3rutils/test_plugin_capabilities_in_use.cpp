@@ -12,8 +12,7 @@ using namespace Slic3r;
 
 namespace {
 
-// A print preset carrying a "plugins" manifest and the one plugin-backed print option
-// (slicing_pipeline_plugin, a coStrings vector).
+// A print preset carrying a "plugins" manifest and the one plugin-backed print option.
 Preset make_print_preset(const std::vector<std::string>& manifest, const std::vector<std::string>& pipeline)
 {
     Preset preset(Preset::TYPE_PRINT, "test-print");
@@ -76,16 +75,15 @@ TEST_CASE("referenced_capabilities skips malformed manifest entries", "[PluginRe
 
 TEST_CASE("preset_type_for_capability names the preset type whose options reference the capability", "[PluginResolver]")
 {
-    // Read out of the ConfigDef: slicing_pipeline_plugin is a print option, printer_agent a printer
-    // one. Declaring a plugin_type on an option is what puts its capability type on this map.
+    // Read out of the ConfigDef: declaring a plugin_type on an option is what puts its capability
+    // type on this map.
     CHECK(preset_type_for_capability(PluginCapabilityType::SlicingPipeline) == Preset::TYPE_PRINT);
     CHECK(preset_type_for_capability(PluginCapabilityType::PrinterConnection) == Preset::TYPE_PRINTER);
 }
 
 TEST_CASE("preset_type_for_capability leaves capability types no option accepts unowned", "[PluginResolver]")
 {
-    // Nothing can reference these from a preset, so no preset can override them either: they read
-    // their config from the base config.json alone.
+    // No option accepts them, so no preset can override them: they read config.json alone.
     CHECK(preset_type_for_capability(PluginCapabilityType::Automation) == Preset::TYPE_INVALID);
     CHECK(preset_type_for_capability(PluginCapabilityType::Unknown) == Preset::TYPE_INVALID);
 }

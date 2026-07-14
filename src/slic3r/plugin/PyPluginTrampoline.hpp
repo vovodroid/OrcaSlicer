@@ -12,17 +12,14 @@
 #include "PythonJsonUtils.hpp"
 #include "PluginAuditManager.hpp"
 
-// Trampoline variants of pybind11's override macros. Every C++->Python plugin call
-// crosses through a trampoline method, so this single boundary is where we (1) log the
-// full Python traceback (to sys.stderr -> session log) and rethrow the exception intact,
-// and (2) open the plugin's filesystem audit scope for the duration of the call.
-// We catch ONLY error_already_set (a Python-side raise); other pybind11_fail/runtime_error
-// like a pure-virtual-missing failure must keep their own path and are deliberately not
-// caught here.
+// Trampoline variants of pybind11's override macros. Every C++->Python plugin call crosses a
+// trampoline method, so this single boundary is where we (1) log the full Python traceback and
+// rethrow the exception intact, and (2) open the plugin's filesystem audit scope for the call.
+// We catch ONLY error_already_set (a Python-side raise); other pybind11_fail/runtime_error, such as
+// a pure-virtual-missing failure, must keep their own path and are deliberately not caught here.
 
-// Logs (and rethrows) a Python exception from a pybind11 override call, preserving the
-// traceback. Internal helper shared by the public macros below and by trampolines that
-// manage their own audit scope (e.g. the G-code plugin).
+// Shared by the macros below and by trampolines that manage their own audit scope (e.g. the G-code
+// plugin).
 #define ORCA_PY_LOGGED_OVERRIDE_BODY(override_call)                                       \
     try {                                                                                 \
         override_call;                                                                    \
@@ -31,10 +28,9 @@
         throw;                                                                            \
     }
 
-// Opens the plugin's filesystem audit scope for the duration of a C++ -> Python call
-// when this trampoline instance carries a non-empty audit plugin key. Also publishes the
-// calling capability's name, so host APIs invoked from Python can tell which capability
-// they are serving. Declares a local `_orca_audit_scope`.
+// Opens the plugin's filesystem audit scope for the duration of a C++ -> Python call, and publishes
+// the calling capability's name so host APIs invoked from Python can tell which capability they are
+// serving. No-op without an audit plugin key. Declares a local `_orca_audit_scope`.
 #define ORCA_PY_AUDIT_SCOPE(mode)                                                         \
     std::optional<::Slic3r::ScopedPluginAuditContext> _orca_audit_scope;                  \
     if (const std::string& _orca_audit_key = this->audit_plugin_key();                    \
@@ -68,9 +64,8 @@ public:
     }
 
     // Config UI hooks. Available on every capability type, so they live here rather than in
-    // PyPluginInterfaceTrampoline. Audited like any other C++ -> Python call; a Python
-    // exception is logged with its traceback and rethrown, and the caller (PluginLoader at
-    // load time, PluginsDialog when opening the Config tab) decides the fallback.
+    // PyPluginInterfaceTrampoline. A Python exception is rethrown and the caller decides the
+    // fallback.
     bool has_config_ui() const override
     {
         ORCA_PY_OVERRIDE_AUDITED(
@@ -95,15 +90,11 @@ public:
 
     // Hand-rolled rather than PYBIND11_OVERRIDE: the macro casts the Python result to the return
     // type, and nlohmann::json has no pybind caster (config crosses this boundary through the
-    // explicit py_to_json/json_to_py helpers instead). Otherwise identical — same audit scope, and
-    // a Python exception is logged with its traceback and rethrown for the caller to handle.
+    // explicit py_to_json/json_to_py helpers). Otherwise identical — same audit scope, same rethrow.
     //
-    // The hook is optional, and "not implemented" must mean an EMPTY config, never a null or a
-    // stray scalar landing in cap_config. Two ways to not implement it, both resolved here:
-    //   - no override at all                     -> the base's empty object
-    //   - an override that returns None, or any  -> likewise. `def get_default_config(self): pass`
-    //     non-object (a list, a string, a number)   is the easy mistake, and it must not be able to
-    //                                               write `"cap_config": null` to config.json.
+    // The hook is optional, and "not implemented" must mean an EMPTY config: no override, or an
+    // override returning None or any non-object (`def get_default_config(self): pass` is the easy
+    // mistake), both fall back to the base's empty object rather than writing `"cap_config": null`.
     nlohmann::json get_default_config() const override
     {
         ORCA_PY_AUDIT_SCOPE(::Slic3r::PluginAuditManager::AuditMode::Loading);
@@ -127,7 +118,6 @@ public:
         }
     }
 
-    // All plugins may define their own on_load/unload functions.
     void on_load() override
     {
         ORCA_PY_OVERRIDE_AUDITED(
@@ -155,8 +145,6 @@ class PyPluginInterfaceTrampoline : public PyPluginCommonTrampoline<PluginCapabi
 {
 public:
     using PyPluginCommonTrampoline<PluginCapabilityInterface>::PyPluginCommonTrampoline;
-
-    // get_name is implemented in PyPluginCommonTrampoline (PYBIND11_OVERRIDE_PURE).
 
     PluginCapabilityType get_type() const override
     {

@@ -23,7 +23,7 @@ std::string plugin_overrides_of(const Preset& preset);
 bool parse_plugin_overrides(const std::string& raw, CapabilityConfigDocument& document, std::string& error);
 
 // The document as compact JSON text, and "" once it holds no entries. Empty text — rather than a
-// removed option — is what records "cleared here" against an inheriting parent that has overrides.
+// removed option — records "cleared here" against an inheriting parent that has overrides.
 std::string serialize_plugin_overrides(const CapabilityConfigDocument& document);
 
 struct EffectiveCapabilityConfig
@@ -49,12 +49,10 @@ struct MutationResult
 std::string plugin_config_source_to_string(PluginConfigSource source);
 
 // Resolves a capability's effective config as `preset override -> base config -> none`, and mutates
-// the override layer.
-//
-// It works on a CapabilityConfigDocument the caller owns, never on a Preset and never on the base
-// config file. That is what keeps the two layers from writing to each other: PluginConfigField holds
-// the document, and feeds the edited text back through the normal field/dirty pipeline, so the
-// preset is written exactly the way every other setting is.
+// the override layer. It works on a CapabilityConfigDocument the caller owns, never on a Preset and
+// never on the base config file, which is what keeps the two layers from writing to each other:
+// PluginConfigField holds the document and feeds the edited text back through the normal field/dirty
+// pipeline, so the preset is written the way every other setting is.
 class PresetPluginConfigService
 {
 public:
@@ -67,15 +65,11 @@ public:
                                                      const PluginCapabilityIdentifier& id) const;
 };
 
-// The same `preset override -> base config -> none` resolution, against the preset that is active
-// right now instead of a document the caller holds: this is what a running capability reads through
-// the Python config API, so a preset that overrides a capability configures the slice it drives.
-//
-// Only one preset type can reference a given capability type (preset_type_for_capability), so there
-// is exactly one preset to consult. Filament capabilities are the exception and are not supported:
-// the active filament preset is per-extruder and a capability does not say which extruder it runs
-// for, so they read the base config. See active_preset_for() for why, and for what it will take to
-// lift that. Base config also in a host with no preset bundle (the plugin unit tests).
+// The same resolution against the preset that is active right now, rather than a document the caller
+// holds: this is what a running capability reads through the Python config API. Only one preset type
+// can reference a given capability type (preset_type_for_capability), so there is exactly one preset
+// to consult. Falls back to the base config for filament capabilities (see active_preset_for) and in
+// a host with no preset bundle (the plugin unit tests).
 EffectiveCapabilityConfig active_capability_config(const PluginCapabilityIdentifier& id);
 
 } // namespace Slic3r

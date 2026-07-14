@@ -105,41 +105,33 @@ public:
     // Optional APIs
     virtual PluginCapabilityType get_type() const { return PluginCapabilityType::Unknown; }
 
-    // Every capability is configurable: it always appears in the Plugins dialog's Config
-    // sidebar and always has the host's default JSON editor over its stored config. The only
-    // question a capability answers is whether it supplies its own UI to edit that config
-    // *instead of* the JSON editor.
-    //
-    // True when the capability ships a custom configuration UI. get_config_ui() is called
-    // only when this returns true.
+    // Every capability is configurable and always gets the host's default JSON editor over its
+    // stored config; this only says whether it supplies its own UI *instead of* that editor.
+    // get_config_ui() is called only when it returns true.
     virtual bool has_config_ui() const { return false; }
-    // An HTML snippet for the custom configuration UI. An empty or throwing result is
-    // treated as "no custom UI" and falls back to the default JSON editor.
+    // An HTML snippet for the custom configuration UI. An empty or throwing result is treated as
+    // "no custom UI" and falls back to the default JSON editor.
     virtual std::string get_config_ui() const { return ""; }
 
-    // The config the Config tab's "Restore defaults" action writes back. Optional.
-    //
-    // Not overridden -> an empty object, which is the right answer for a capability that keeps
-    // its stored config sparse and applies its own defaults on read: clearing the overrides
-    // *is* restoring the defaults, and it keeps a later release free to change them.
-    // Override it to write an explicit starting config instead (e.g. to seed a form UI with
-    // every field present). The host neither invents nor validates this value; it only stores
-    // whatever comes back, so a throwing override leaves the stored config untouched.
+    // The config the "Restore defaults" action writes back. Not overridden -> an empty object, which
+    // is right for a capability that keeps its stored config sparse and applies its own defaults on
+    // read. Override it to write an explicit starting config instead (e.g. to seed a form UI with
+    // every field present). The host neither invents nor validates this value, so a throwing override
+    // leaves the stored config untouched.
     virtual nlohmann::json get_default_config() const { return nlohmann::json::object(); }
 
     virtual void on_load() {}
     virtual void on_unload() {}
 
-    // C++-only audit identity (never exposed to Python). Set by PluginLoader after
-    // plugin capture so trampoline calls can scope filesystem enforcement to this
-    // plugin. This is PluginDescriptor::plugin_key, the canonical runtime id.
+    // C++-only audit identity (never exposed to Python), set by PluginLoader after plugin capture so
+    // trampoline calls can scope filesystem enforcement to this plugin. PluginDescriptor::plugin_key.
     void set_audit_plugin_key(std::string key) { m_audit_plugin_key = std::move(key); }
     const std::string& audit_plugin_key() const { return m_audit_plugin_key; }
 
-    // The cached get_name() captured at load, paired with the audit plugin key to identify
-    // which capability a trampoline call belongs to. Cached rather than read live: get_name()
-    // is itself a trampoline call, so calling it from inside a trampoline would recurse.
-    // Empty until PluginLoader materializes the capability.
+    // get_name() cached at load, paired with the audit plugin key to identify which capability a
+    // trampoline call belongs to. Cached rather than read live: get_name() is itself a trampoline
+    // call, so calling it from inside a trampoline would recurse. Empty until PluginLoader
+    // materializes the capability.
     void set_audit_capability_name(std::string name) { m_audit_capability_name = std::move(name); }
     const std::string& audit_capability_name() const { return m_audit_capability_name; }
 

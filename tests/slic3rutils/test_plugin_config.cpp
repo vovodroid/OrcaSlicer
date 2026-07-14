@@ -65,8 +65,7 @@ TEST_CASE("PluginConfig updates only the target capability's cap_config", "[Plug
     ScopedDataDir data_dir_guard("plugin-config-isolation");
 
     PluginConfig config;
-    // Two capabilities in one plugin, plus a same-named capability in a different plugin: the
-    // identity is the (plugin_key, capability) pair, so all three are separate records.
+    // The identity is the (plugin_key, capability) pair, so all three below are separate records.
     REQUIRE(config.store_capability_config("plugin_a", "cap_a", json{{"value", 1}}));
     REQUIRE(config.store_capability_config("plugin_a", "cap_b", json{{"value", 2}}));
     REQUIRE(config.store_capability_config("plugin_b", "cap_a", json{{"value", 3}}));
@@ -116,9 +115,8 @@ TEST_CASE("PluginConfig keeps a capability's config after its plugin goes away",
         REQUIRE(config.store_capability_config("plugin_a", "cap_a", json{{"token", "keep me"}}));
     }
 
-    // Nothing here installs, uninstalls or unsubscribes a plugin: config.json is deliberately not
-    // keyed to installed plugins, so a record outlives the plugin and is still there when the user
-    // reinstalls or resubscribes. This asserts no cleanup path silently drops it.
+    // config.json is deliberately not keyed to installed plugins: a record outlives its plugin and is
+    // still there on reinstall. Asserts no cleanup path silently drops it.
     PluginConfig after_removal;
     after_removal.load();
     CHECK(after_removal.get_config("plugin_a", "cap_a").config == json{{"token", "keep me"}});

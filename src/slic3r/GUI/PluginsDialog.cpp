@@ -66,10 +66,8 @@ struct PluginCapabilityView
     bool enabled    = false;
     bool can_toggle = false;
     bool can_run    = false;
-    // Whether the capability supplies its own config UI, cached on the loaded capability at load
-    // time. False for the descriptor-only rows shown for a plugin that is not loaded: its
-    // capabilities have not been materialized yet, so there is nothing to configure until it is
-    // activated. Every real capability is configurable; this only picks the editor.
+    // Whether the capability supplies its own config UI; every capability is configurable, this only
+    // picks the editor. False for descriptor-only rows: an unloaded plugin has no capabilities yet.
     bool has_config_ui = false;
 };
 
@@ -83,7 +81,6 @@ struct PluginChangelogView
 // View-model for one plugin row in the dialog
 struct PluginDialogItem
 {
-    // Identity and display text
     std::string plugin_key;
     std::string plugin_id;
     std::string display_name;
@@ -100,7 +97,6 @@ struct PluginDialogItem
     std::vector<std::string> type_labels;
     std::vector<PluginChangelogView> changelog;
 
-    // Derived UI state
     PluginSource source              = PluginSource::Local;
     PluginStatus status              = PluginStatus::Inactive;
     PluginUpdateStatus update_status = PluginUpdateStatus::Normal;
@@ -109,7 +105,6 @@ struct PluginDialogItem
     bool is_loaded    = false;
     bool loading   = false;
 
-    // Installation and capability flags
     bool is_cloud_plugin       = false;
     bool has_local_package     = false;
     bool unauthorized          = false;
@@ -119,7 +114,6 @@ struct PluginDialogItem
     // Runtime capabilities in registration order, or descriptor-only type rows when unloaded.
     std::vector<PluginCapabilityView> capabilities;
 
-    // Row-level actions
     PluginAvailableActions available_actions;
 };
 
@@ -154,9 +148,8 @@ PluginDescriptor as_cloud_only_descriptor(PluginDescriptor descriptor)
     return descriptor;
 }
 
-// rescan_plugins() clears the whole catalog and rediscovers only local packages. When
-// callers do not need fresh cloud data, reuse the current cloud rows after the local
-// rescan so cloud-only rows and cloud-derived UI state do not disappear.
+// rescan_plugins() clears the whole catalog and rediscovers only local packages, so when no fresh cloud
+// data is needed, restore the current cloud rows afterwards or cloud-only rows would disappear.
 void refresh_plugin_catalog_blocking(bool fetch_cloud)
 {
     PluginManager& manager = PluginManager::instance();
@@ -220,10 +213,9 @@ nlohmann::json build_plugin_payload_item(const PluginDialogItem& dialog_item)
     }
     payload_item["capabilities"] = std::move(caps);
 
-    // The Config tab's sidebar, built by the shared builder so it stays identical to
-    // PluginsConfigDialog's. Deliberately not the `capabilities` array above: that one is the list
-    // tab's, carrying enable/run state and descriptor-only rows for plugins that are not activated
-    // yet — neither of which the config view has any use for.
+    // The Config tab's sidebar, built by the shared builder so it stays identical to PluginsConfigDialog's.
+    // Not the `capabilities` array above: that is the list tab's, with enable/run state and descriptor-only
+    // rows the config view has no use for.
     std::vector<PluginCapabilityIdentifier> config_ids;
     for (const PluginCapabilityView& capability : dialog_item.capabilities)
         if (!capability.name.empty())
@@ -329,20 +321,17 @@ PluginDialogItem build_plugin_dialog_item(const PluginDescriptor& descriptor)
                                  (descriptor.description.empty() ? "No description." : descriptor.description);
     item.author            = descriptor.author;
     item.version           = descriptor.version;
-    // Installed version: the cloud merge overwrites `version` with the latest cloud version, so prefer
-    // the preserved local version, falling back to `version` for local-only / pre-merge descriptors.
+    // The cloud merge overwrites `version` with the latest cloud version, so prefer the preserved local
+    // one, falling back to `version` for local-only / pre-merge descriptors.
     item.installed_version = descriptor.has_local_package() ?
                                  (descriptor.installed_version.empty() ? descriptor.version : descriptor.installed_version) :
                                  std::string{};
     item.latest_version    = descriptor.latest_available_version();
-    // why: sort by the same version the row displays (GetDisplayVersion in index.js) - installed when
-    //   installed, otherwise latest - so the Version sort matches what the user sees.
     item.sort_version      = item.installed_version.empty() ? item.latest_version : item.installed_version;
     item.type_label        = descriptor.type_label();
     item.type_key          = plugin_capability_type_to_string(descriptor.primary_capability_type());
-    // "types" is the display-only compatibility list. Cloud plugins show the raw labels the
-    // service returned (which may not map to real capability types); local plugins derive them
-    // from the capabilities actually discovered/loaded.
+    // "types" is display-only: cloud plugins show the raw labels the service returned (which may not map
+    // to real capability types); local plugins derive them from the capabilities actually discovered.
     if (descriptor.is_cloud_plugin() && !descriptor.display_types.empty()) {
         for (const std::string& label : descriptor.display_types)
             if (std::find(item.type_labels.begin(), item.type_labels.end(), label) == item.type_labels.end())
@@ -506,10 +495,8 @@ void PluginsDialog::on_script_message(const nlohmann::json& payload)
 
     const std::string command = payload.value("command", "");
     if (command == "request_plugins") {
-        // The web page finished loading and is asking for the current catalog. Plugin
-        // discovery already runs at startup and on login, so the shared catalog is up to
-        // date by the time the dialog opens. Just render it here - no blocking fetch on
-        // open. The Refresh button (refresh_plugins) is what triggers a fresh discovery.
+        // Discovery already runs at startup and on login, so the shared catalog is up to date by the
+        // time the dialog opens: render it without a blocking fetch. Refresh is what rediscovers.
         send_plugins();
     } else if (command == "refresh_plugins") {
         refresh_plugins();
@@ -588,7 +575,6 @@ nlohmann::json PluginsDialog::build_plugins_payload() const
     for (const PluginDescriptor& row : invalid)
         items.push_back(build_plugin_dialog_item(row));
 
-    // In-place sort
     sort_plugin_items_for_dialog(items, m_plugin_sort_key, m_plugin_sort_order);
 
     for (const PluginDialogItem& item : items)
@@ -635,9 +621,7 @@ void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
 
     PluginDescriptor row_data;
     if (!get_descriptor(plugin_key, row_data)) {
-        // The row no longer maps to a catalog entry (the catalog changed under the UI).
-        // Toggling is a local action, so just re-render from the current catalog; a cloud
-        // fetch (or clearing rescan) adds nothing here.
+        // The catalog changed under the UI. Toggling is local, so just re-render from it.
         send_plugins();
         return;
     }
@@ -663,7 +647,6 @@ void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
         return;
     }
 
-    // Check for capabilities that are currently in use
     auto loaded_capabilities = manager.get_loader().get_loaded_plugin_capabilities(plugin_key);
 
     if (!available_actions.can_toggle) {
@@ -684,8 +667,7 @@ void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
         }
 
         BOOST_LOG_TRIVIAL(info) << "Cloud plugin installed locally from Plugins dialog: " << plugin_key;
-        // download_and_install_cloud_plugin updates the descriptor with the installed
-        // local package state, so no rescan or cloud fetch is needed before loading.
+        // download_and_install_cloud_plugin already updated the descriptor, so no rescan is needed here.
         if (!get_descriptor(plugin_key, row_data)) {
             send_plugins();
             return;
@@ -731,9 +713,7 @@ void PluginsDialog::toggle_plugin_capability(const std::string& plugin_key, Plug
 
     PluginDescriptor row_data;
     if (!get_descriptor(plugin_key, row_data)) {
-        // The row no longer maps to a catalog entry (the catalog changed under the UI).
-        // Toggling is a local action, so just re-render from the current catalog; a cloud
-        // fetch (or clearing rescan) adds nothing here.
+        // The catalog changed under the UI. Toggling is local, so just re-render from it.
         send_plugins();
         return;
     }
@@ -950,9 +930,8 @@ void PluginsDialog::restore_capability_config(const std::string& plugin_key,
                                               PluginCapabilityType type,
                                               const std::string& capability_name)
 {
-    // Discards whatever the user had stored, so confirm first — same as the other destructive
-    // actions in this dialog. The confirmation stays here rather than in PluginConfig: it needs a
-    // parent window, and it is the dialog's business to ask.
+    // Destructive, so confirm first. The confirmation stays here rather than in PluginConfig: it needs
+    // a parent window.
     const int rc = wxMessageBox(wxString::Format(_L("Restore the default configuration for \"%s\"?\n\n"
                                                     "This discards the settings currently saved for this capability."),
                                                  from_u8(capability_name)),
@@ -1013,8 +992,8 @@ void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::
 
         send_plugins();
 
-        // The row now shows an "Error" status and the Diagnostics tab holds the full text, so surface
-        // the outcome in the footer status bar instead of a modal box (prefer the friendlier override).
+        // The row already shows "Error" and the Diagnostics tab holds the full text, so report in the
+        // footer status bar instead of a modal box.
         const wxString message = status_message.empty() ? from_u8(normalized_error) : status_message;
         show_status(message, "error");
     };
@@ -1063,13 +1042,11 @@ void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::
     std::string error;
     ExecutionResult result;
 
-    // Script plugins run on the main/UI thread (not a worker). They hold live, non-owning
-    // ModelObject*/ModelVolume*/ModelInstance* aliases into host data and can mint ObjectIDs,
-    // which libslic3r requires on the main thread (ObjectID.hpp's non-atomic s_last_id). Running
-    // here makes those reads/instantiations legal and means nothing mutates the model underneath
-    // a run. The trade-off is that a slow execute() freezes the UI, so the contract is to keep
-    // execute() quick and offload heavy work to the plugin's own threading.Thread. orca.host.ui
-    // calls already no-op their main-thread marshaling here.
+    // Script plugins run on the main/UI thread, not a worker: they hold live, non-owning
+    // ModelObject*/ModelVolume*/ModelInstance* aliases into host data and can mint ObjectIDs, which
+    // libslic3r requires on the main thread (ObjectID.hpp's non-atomic s_last_id). The trade-off is that
+    // a slow execute() freezes the UI, so plugins must keep execute() quick and offload heavy work to
+    // their own threading.Thread.
     {
         wxBusyCursor busy;
         try {
@@ -1098,7 +1075,6 @@ void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::
     if (failed) {
         plugin.reset();
         cap.reset();
-        // complete_with_error normalizes an empty message to "Script plugin failed." and reports via the status bar.
         complete_with_error(result.message, wxString());
         return;
     }
@@ -1122,9 +1098,8 @@ void PluginsDialog::update_plugin(const std::string& plugin_key)
     PluginDescriptor descriptor;
     const wxString name = get_descriptor(plugin_key, descriptor) ? from_u8(descriptor.name) : from_u8(plugin_key);
 
-    // update_cloud_plugin unloads the old plugin, deletes its local package, then downloads and
-    // reinstalls the latest version. Each of those steps already runs off the main thread in the
-    // delete/install paths, so run the whole operation on the worker and pump a progress dialog.
+    // update_cloud_plugin unloads the old plugin, deletes its local package and reinstalls the latest
+    // version; all of that is off-main-thread work, so run it on the worker behind a progress dialog.
     std::string error;
     bool updated = false;
     try {
@@ -1144,8 +1119,7 @@ void PluginsDialog::update_plugin(const std::string& plugin_key)
         return;
     }
 
-    // update_cloud_plugin installs the package and updates the in-memory descriptor
-    // (installed=true, update_available=false) on success.
+    // update_cloud_plugin already updated the in-memory descriptor, so a UI refresh is enough here.
     send_plugins();
     show_status(wxString::Format(_L("Updated \"%s\"."), name), "success");
 }
@@ -1332,10 +1306,8 @@ void PluginsDialog::delete_mine_local_and_cloud_plugin(const std::string& plugin
         return;
     }
 
-    // delete_mine_local_and_cloud_plugin already updated the in-memory catalog
-    // (finalize_cloud_plugin_removal removes the row and, when a local package existed,
-    // re-syncs the cloud list itself), so a UI refresh is sufficient here - an extra
-    // clearing rescan + cloud fetch would be redundant.
+    // delete_mine_local_and_cloud_plugin already updated the in-memory catalog (see
+    // finalize_cloud_plugin_removal), so a UI refresh is sufficient here.
     send_plugins();
     show_status(wxString::Format(_L("Deleted \"%s\"."), plugin_name), "success");
 }

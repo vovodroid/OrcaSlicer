@@ -1996,8 +1996,6 @@ void Choice::msw_rescale()
 
 void PluginField::BUILD()
 {
-    // Wrap the dynamic rows in a single container panel so the field is a proper window-field
-    // (getWindow() != null). The panel owns m_main_sizer; all row controls are children of it.
     auto* panel = new wxPanel(m_parent, wxID_ANY);
     wxGetApp().UpdateDarkUI(panel);
     window = panel;
@@ -2005,7 +2003,6 @@ void PluginField::BUILD()
     m_main_sizer = new wxBoxSizer(wxVERTICAL);
     panel->SetSizer(m_main_sizer);
 
-    // Initialize with default values or empty
     if (m_opt.type == coStrings) {
         const ConfigOptionStrings* vec = m_opt.get_default_value<ConfigOptionStrings>();
         if (vec != nullptr && !vec->values.empty()) {
@@ -2096,13 +2093,11 @@ void PluginField::add_plugin_row(const wxString& value, bool is_last)
     const auto button_size = wxSize(def_width_thinner() * m_em_unit, -1);
     auto row_sizer = new wxBoxSizer(wxHORIZONTAL);
 
-    // Select button with search icon
     ScalableButton* select_btn = new ScalableButton(window, wxID_ANY, "search", wxEmptyString,
         button_size, wxDefaultPosition, wxBU_EXACTFIT | wxNO_BORDER, true, 16);
     wxGetApp().UpdateDarkUI(select_btn);
     select_btn->SetToolTip(_L("Select plugin"));
 
-    // Display text control
     wxTextCtrl* display = new wxTextCtrl(window, wxID_ANY, value,
         wxDefaultPosition, wxSize(def_width_wider() * m_em_unit, wxDefaultCoord),
         wxTE_READONLY);
@@ -2118,7 +2113,6 @@ void PluginField::add_plugin_row(const wxString& value, bool is_last)
         remove_btn->SetToolTip(_L("Remove plugin"));
     }
 
-    // Add button (only on last row)
     ScalableButton* add_btn = nullptr;
     if (is_last && !m_opt.readonly) {
         add_btn = new ScalableButton(window, wxID_ANY, "param_add", wxEmptyString,
@@ -2239,7 +2233,6 @@ void PluginField::set_value(const boost::any& value, bool change_event)
 {
     m_disable_change_event = !change_event;
 
-    // Handle different input types
     if (value.empty()) {
         m_values.clear();
     } else if (value.type() == typeid(std::vector<std::string>)) {
@@ -2312,9 +2305,7 @@ void PluginField::msw_rescale()
 
 namespace {
 
-// The stored text as a document, or an empty array when it is absent or unparseable. Used to compare
-// two versions of the value semantically: re-serializing an unchanged document can reorder keys or
-// drop whitespace, and that alone must not be allowed to mark the preset dirty.
+// The stored text as a document, or an empty array when it is absent or unparseable.
 nlohmann::json plugin_overrides_as_json(const std::string& text)
 {
     if (text.empty())
@@ -2326,12 +2317,8 @@ nlohmann::json plugin_overrides_as_json(const std::string& text)
 
 void PluginConfigField::BUILD()
 {
-    // The button *is* the field's window (the ColourPicker idiom). Wrapping it in a panel would make
-    // this a container that OG_CustomCtrl sizes but never lays out, leaving the button unsized — and
-    // a zero-height row collapses its whole option group out of the page.
     m_button = new ::Button(m_parent, _L("Configure"));
-    // ButtonType::Parameter is the style for a button sitting next to parameter boxes: it is what
-    // gives the button the same height as the fields above it, which a bare wxButton does not.
+    // ButtonType::Parameter gives the button the same height as the parameter fields above it.
     m_button->SetStyle(ButtonStyle::Regular, ButtonType::Parameter);
 
     wxSize size(def_width_wider() * m_em_unit, m_button->GetMinSize().GetHeight());
@@ -2360,8 +2347,6 @@ void PluginConfigField::update_button_label()
     const nlohmann::json entries = plugin_overrides_as_json(m_json);
     const size_t         count   = entries.is_array() ? entries.size() : 0;
 
-    // The count is the whole state this row can show: which capabilities they belong to, and what
-    // they hold, is the dialog's job.
     m_button->SetLabel(count == 0 ? _L("Configure")
                                   : wxString::Format(_L("Configure (%d)"), int(count)));
 }
@@ -2379,16 +2364,14 @@ void PluginConfigField::open_dialog()
         edited = dlg.overrides_json();
     }
 
-    // Only a semantic change is a change: reopening the dialog and closing it must not dirty the
-    // preset just because the document round-tripped through the serializer.
+    // Compare semantically: a round-trip through the serializer can reorder keys or drop whitespace,
+    // and that alone must not dirty the preset.
     if (plugin_overrides_as_json(m_json) == plugin_overrides_as_json(edited))
         return;
 
     m_json  = edited;
     m_value = m_json;
     update_button_label();
-    // The one call that makes this behave like every other setting: it drives change_opt_value into
-    // the preset config, Tab::update_dirty(), and the revert arrow.
     on_change_field();
 }
 

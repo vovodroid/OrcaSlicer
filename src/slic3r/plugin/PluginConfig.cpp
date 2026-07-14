@@ -20,9 +20,8 @@ namespace Slic3r {
 
 namespace {
 
-// The version of the plugin package currently running. PluginDescriptor::version is
-// overwritten with the latest cloud version when a cloud merge happens, so it can name a
-// version that is not the one on disk; installed_version is what actually loaded.
+// PluginDescriptor::version is overwritten with the latest cloud version on a cloud merge, so it can
+// name a version that is not the one on disk; installed_version is what actually loaded.
 std::string running_plugin_version(const std::string& plugin_key)
 {
     PluginDescriptor descriptor;
@@ -31,10 +30,9 @@ std::string running_plugin_version(const std::string& plugin_key)
     return descriptor.installed_version.empty() ? descriptor.version : descriptor.installed_version;
 }
 
-// The identity a capability is allowed to address: its own. PluginLoader stamps both halves
-// onto the instance when it materializes the capability, so the caller never supplies them
-// and cannot name another capability's entry. Empty means the instance was never materialized
-// (so it has no config to address) and we refuse rather than read or clobber a wrong entry.
+// PluginLoader stamps both halves onto the instance when it materializes the capability, so the
+// caller never supplies them and cannot name another capability's entry. Empty means the instance
+// was never materialized: refuse rather than read or clobber a wrong entry.
 std::pair<std::string, std::string> capability_identity(const PluginCapabilityInterface& capability, const char* api_name)
 {
     std::pair<std::string, std::string> id{capability.audit_plugin_key(), capability.audit_capability_name()};
@@ -44,11 +42,11 @@ std::pair<std::string, std::string> capability_identity(const PluginCapabilityIn
     return id;
 }
 
-// The identity above, completed with the type, which decides which preset may override the
-// capability (see preset_type_for_capability). Taken from the instance rather than from the loader's
-// registry: a capability calling get_config() from on_load() is not registered yet, and it must
-// still see its preset's config. get_type() is the plugin's own method, so a raising one costs it
-// only the preset layer — Unknown names no preset, and the base config answers as it always did.
+// The identity above plus the type, which decides which preset may override the capability (see
+// preset_type_for_capability). Taken from the instance, not the loader's registry: a capability
+// calling get_config() from on_load() is not registered yet and must still see its preset's config.
+// A raising get_type() costs it only the preset layer — Unknown names no preset, so the base config
+// answers.
 PluginCapabilityIdentifier capability_full_identity(const PluginCapabilityInterface& capability, const char* api_name)
 {
     const auto [plugin_key, capability_name] = capability_identity(capability, api_name);
@@ -113,8 +111,8 @@ bool PluginConfig::save()
         return false;
     }
 
-    // Write to a PID-suffixed file and rename it into place, so a crash mid-write cannot
-    // truncate an existing config. Same approach as AppConfig::save().
+    // Write to a PID-suffixed file and rename it into place, so a crash mid-write cannot truncate an
+    // existing config. Same approach as AppConfig::save().
     const std::string path_pid = (boost::format("%1%.%2%") % path % get_current_pid()).str();
 
     boost::nowide::ofstream file;
@@ -198,18 +196,16 @@ bool PluginConfig::dirty() const
 
 nlohmann::json capability_get_config(const PluginCapabilityInterface& capability)
 {
-    // The active preset's override, when it has one, is the config this run must use: it is what the
-    // user attached to the preset being sliced, and config.json is the fallback. The resolution is
-    // shared with the dialogs, so a capability reads back exactly the config its UI showed as
-    // effective. Stored in neither layer: an empty object, so a plugin can index it unconditionally.
+    // Shares its resolution with the dialogs, so a capability reads back exactly the config its UI
+    // showed as effective. Stored in neither layer: an empty object, so a plugin can index it
+    // unconditionally.
     return active_capability_config(capability_full_identity(capability, "get_config")).config;
 }
 
 std::string capability_get_config_version(const PluginCapabilityInterface& capability)
 {
-    // The version that wrote the config get_config() just handed out, whichever layer that was: the
-    // two must come from the same layer, or a plugin would migrate one layer's config by another's
-    // version stamp.
+    // Must resolve through the same layer as get_config(), or a plugin would migrate one layer's
+    // config by another's version stamp.
     return active_capability_config(capability_full_identity(capability, "get_config_version")).stored_plugin_version;
 }
 
@@ -226,8 +222,7 @@ nlohmann::json PluginConfig::capabilities_payload(const std::vector<PluginCapabi
 
     nlohmann::json payload = nlohmann::json::array();
     for (const PluginCapabilityIdentifier& id : caps) {
-        // Read has_config_ui off the live capability rather than trusting the caller's copy: a
-        // capability that has been unloaded since the list was built has nothing to configure.
+        // A capability unloaded since the list was built has nothing to configure.
         const auto capability = loader.get_plugin_capability_by_name(id);
         if (!capability)
             continue;
@@ -243,9 +238,8 @@ nlohmann::json PluginConfig::capabilities_payload(const std::vector<PluginCapabi
     return payload;
 }
 
-// Replies with one capability's stored config, plus the custom HTML UI when the capability provides
-// one. Config is sent as a JSON value, not text: the default editor pretty-prints it into its
-// textarea, and a custom UI receives it as-is through window.orca.
+// Config is sent as a JSON value, not text: the default editor pretty-prints it into its textarea,
+// and a custom UI receives it as-is through window.orca.
 nlohmann::json PluginConfig::get_config_response(const PluginCapabilityIdentifier& id)
 {
     nlohmann::json response;
@@ -258,7 +252,7 @@ nlohmann::json PluginConfig::get_config_response(const PluginCapabilityIdentifie
     response["error"]           = "";
 
     // Scoped to the full identity, so a stale request from a page that has not caught up with a
-    // refresh cannot read a different plugin's config — it just misses.
+    // refresh misses rather than reading a different plugin's config.
     const auto cap = PluginManager::instance().get_loader().get_plugin_capability_by_name(id);
     if (!cap) {
         BOOST_LOG_TRIVIAL(warning) << "Ignoring config request for a capability that is no longer loaded. plugin_key="
@@ -270,9 +264,8 @@ nlohmann::json PluginConfig::get_config_response(const PluginCapabilityIdentifie
     response["config"] = PluginManager::instance().get_config().get_config(id.plugin_key, id.name).config;
 
     if (cap->has_config_ui) {
-        // Plugin-authored HTML. A raising or empty get_config_ui() costs the capability only its
-        // custom UI: we report the failure and let the page fall back to the default JSON editor,
-        // which edits the very same stored config.
+        // A raising or empty get_config_ui() costs the capability only its custom UI: report the
+        // failure and let the page fall back to the default JSON editor over the same stored config.
         std::string html;
         std::string error;
         {
@@ -324,8 +317,8 @@ nlohmann::json PluginConfig::save_config_response(const PluginCapabilityIdentifi
 
     nlohmann::json parsed = config;
     if (config.is_string()) {
-        // The page validates as the user types, but it is not the authority: re-parse here so a
-        // malformed document is rejected before it can reach config.json.
+        // The page validates as the user types, but it is not the authority: re-parse so a malformed
+        // document is rejected before it can reach config.json.
         parsed = nlohmann::json::parse(config.get<std::string>(), nullptr, /* allow_exceptions */ false);
         if (parsed.is_discarded()) {
             response["error"] = GUI::into_u8(_L("The configuration is not valid JSON. Your changes were not saved."));
@@ -342,15 +335,14 @@ nlohmann::json PluginConfig::save_config_response(const PluginCapabilityIdentifi
 
     BOOST_LOG_TRIVIAL(info) << "Saved plugin capability config. plugin_key=" << id.plugin_key << " capability_name=" << id.name;
 
-    // Echo the persisted value back so the editor reloads from what is actually stored rather than
-    // from what the user typed.
+    // Echo back what was persisted, not what the user typed, so the editor reloads from the store.
     response["ok"]     = true;
     response["config"] = PluginManager::instance().get_config().get_config(id.plugin_key, id.name).config;
     return response;
 }
 
-// The host does not invent the default: a capability that does not override get_default_config()
-// restores an empty config, which is exactly right for one that applies its own defaults on read.
+// The host never invents the default: a capability that does not override get_default_config()
+// restores an empty config, which is right for one that applies its own defaults on read.
 nlohmann::json PluginConfig::restore_config_response(const PluginCapabilityIdentifier& id)
 {
     nlohmann::json response;
@@ -383,8 +375,8 @@ nlohmann::json PluginConfig::restore_config_response(const PluginCapabilityIdent
         }
     }
 
-    // A raising hook leaves the stored config exactly as it was: better to restore nothing than to
-    // wipe the user's settings on the strength of a broken plugin.
+    // A raising hook leaves the stored config as it was: better to restore nothing than to wipe the
+    // user's settings on the strength of a broken plugin.
     if (!error.empty()) {
         BOOST_LOG_TRIVIAL(error) << "Plugin capability get_default_config() failed. plugin_key=" << id.plugin_key
                                  << " capability_name=" << id.name << " error=" << error;
@@ -404,7 +396,6 @@ nlohmann::json PluginConfig::restore_config_response(const PluginCapabilityIdent
     BOOST_LOG_TRIVIAL(info) << "Restored default plugin capability config. plugin_key=" << id.plugin_key
                             << " capability_name=" << id.name;
 
-    // Reuses the saved reply, so both editors reload from what was actually persisted.
     response["ok"]     = true;
     response["config"] = PluginManager::instance().get_config().get_config(id.plugin_key, id.name).config;
     return response;

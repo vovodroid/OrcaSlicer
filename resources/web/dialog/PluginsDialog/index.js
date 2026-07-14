@@ -12,22 +12,18 @@ const pluginInstallActions = {
 
 let expandedPluginIds = new Set();
 
-// why: transient per-search override on top of expandedPluginIds. A search
-//      auto-expands rows whose capabilities match, display-only. This lets a
-//      triangle click during search collapse/reopen such a row without touching
-//      the base (id -> bool).
+// why: transient per-search override (id -> bool) on top of expandedPluginIds. A search auto-expands
+//      matching rows, so a triangle click during search must not touch the base expand state.
 let searchExpandOverride = new Map();
 let selectedPluginId = "";
 let contextPluginId = "";
 let activeDetailTab = "plugin-info";
 let selectedInstallAction = "explore";
-// Config tab: the capability whose config is currently shown, scoped to selectedPluginId. Name and
-// type together address the capability on the native side. Cleared whenever the plugin changes.
+// Config tab: the capability whose config is shown. Name and type together address it natively.
 let selectedCapabilityName = "";
 let selectedCapabilityType = "";
-// The plugin the capability selection above belongs to. Capability names are only unique within a
-// plugin, so two plugins can each expose e.g. a "main" script capability; without remembering the
-// owner, selecting the second plugin would keep the selection and show the first plugin's config.
+// The plugin that selection belongs to. Capability names are only unique within a plugin, so
+// without the owner, selecting another plugin could keep the selection and show the wrong config.
 let configPluginId = "";
 
 let pluginList = null;
@@ -73,15 +69,14 @@ function OnInit() {
   document.getElementById("configRestoreBtn")?.addEventListener("click", RestoreCapabilityConfig);
 
   const configText = document.getElementById("configText");
-  // why: common.js installs a document-level onkeydown that cancels the default action of every key
-  //      (returnValue=false) to block webview shortcuts; on the way up it also swallows typing. Stop
-  //      the editor's keydowns from bubbling to it so the textarea stays editable, leaving the global
-  //      guard intact. Same treatment as the search field (see plugin-search.js).
+  // why: common.js cancels every key at the document level (returnValue=false) to block webview
+  //      shortcuts, which also swallows typing; don't bubble to it, so the textarea stays editable.
+  //      Same treatment as the search field (see plugin-search.js).
   configText?.addEventListener("keydown", (event) => event.stopPropagation());
   configText?.addEventListener("input", ValidateConfigText);
-  // The custom capability UI is sandboxed into an opaque origin, so it reaches us only through
-  // postMessage. Match on the frame's own contentWindow rather than the origin (which is "null"
-  // for a sandboxed frame) and ignore anything else on the channel.
+  // The custom UI is sandboxed into an opaque origin, so postMessage is its only channel.
+  // OnCustomConfigMessage matches on the frame's contentWindow, not the origin ("null" when
+  // sandboxed), and ignores anything else.
   window.addEventListener("message", OnCustomConfigMessage);
 
   document.addEventListener("click", (event) => {
@@ -258,8 +253,7 @@ function HandleStudio(value) {
   }
 }
 
-// Renders the latest plugin/capability operation result in the footer status bar. The result
-// persists until the next operation replaces it; the native side already localizes the text.
+// Footer status bar for the latest operation result; the native side already localizes the text.
 function ShowStatusMessage(message, level) {
   const bar = document.getElementById("statusBar");
   const text = document.getElementById("statusText");
@@ -333,7 +327,6 @@ function SyncPluginListHeaderGutter() {
 }
 
 // why: paint matched-character ranges as <mark> without an innerHTML build
-// note: if no ranges -> return the plain text node
 function ApplyHighlight(container, text, ranges) {
   if (!ranges || !ranges.length) {
     container.appendChild(document.createTextNode(text));
@@ -369,7 +362,7 @@ function RenderPlugins() {
   }
 
   // why: stable filter over the existing C++ sort order - no scoring, no reorder. The empty query
-  //      short-circuits (searching=false), leaving every existing render path untouched.
+  //      short-circuits, leaving every existing render path untouched.
   const searching = typeof PluginSearchActive === "function" && PluginSearchActive();
   let shown = 0;
 
@@ -381,10 +374,8 @@ function RenderPlugins() {
       continue;
     shown++;
 
-    // why: transient override wins. Otherwise while searching start collapsed and auto-expand only
-    //      capability matches (the persistent expand state is ignored so unrelated caps don't clutter
-    //      results); when not searching use the persistent state. The base is never written while
-    //      searching, so clearing the search restores exactly what the user had.
+    // why: the transient override wins; while searching, auto-expand only capability matches. The
+    //      base is never written while searching, so clearing it restores exactly what the user had.
     const open = searchExpandOverride.has(pluginKey)
       ? searchExpandOverride.get(pluginKey)
       : (searching ? match.hasCapMatch : expandedPluginIds.has(pluginKey));
@@ -455,7 +446,6 @@ function GetLatestVersion(plugin) {
   return String(plugin?.latest_version || plugin?.version || "");
 }
 
-// Primary version shown in the row: the installed version once installed, otherwise the latest available.
 function GetDisplayVersion(plugin) {
   const installed = GetInstalledVersion(plugin);
   if (IsPluginInstalled(plugin) && installed)
@@ -570,7 +560,6 @@ function LabelCell(plugin, isExpanded = false, capabilityCount = 0, nameRanges =
   const labelCell = document.createElement("span");
   labelCell.className = "label-cell";
 
-  // Add hyperlink
   const hasCloudLink = plugin.source === "mine" || plugin.source === "subscribed";
   const pluginLabelText = plugin.label || plugin.name || plugin.plugin_id || "";
   const canExpand = capabilityCount > 0;
@@ -816,19 +805,12 @@ function RenderDetails() {
   RenderConfig(plugin);
 }
 
-// ---------------------------------------------------------------------------
-// Config tab
-//
-// The sidebar lists the selected plugin's configurable capabilities; the right side shows either
-// the host's JSON editor or, when the capability ships one, its own HTML UI in a sandboxed frame.
-// Both edit the same stored config: the page holds no config state of its own, it renders what the
-// native side sends and sends back what the user saves.
-// ---------------------------------------------------------------------------
+// Config tab: the sidebar lists the selected plugin's configurable capabilities; the view shows the
+// host's JSON editor or, when the capability ships one, its own HTML UI in a sandboxed frame. Both
+// edit the same stored config; the page renders what the native side sends.
 
-// The config sidebar's rows, built natively by PluginConfig::capabilities_payload and shared with
-// PluginsConfigDialog. Only loaded, addressable capabilities appear: the descriptor-only rows the
-// list tab shows for a plugin that is not activated carry no capability name, so there is nothing to
-// configure and nothing to address on the native side.
+// Rows built natively by PluginConfig::capabilities_payload. Only loaded, addressable capabilities
+// appear: the descriptor-only rows of an inactive plugin carry no name, so nothing to address.
 function GetConfigurableCapabilities(plugin) {
   return Array.isArray(plugin?.config_capabilities) ? plugin.config_capabilities : [];
 }
@@ -843,8 +825,7 @@ function RenderConfig(plugin) {
   const capabilities = plugin ? GetConfigurableCapabilities(plugin) : [];
   const pluginKey = String(plugin?.plugin_key || "");
 
-  // A different plugin than the one the current selection belongs to: drop the selection outright
-  // rather than trusting the name to mean the same thing here.
+  // A different plugin: drop the selection rather than trusting the name to mean the same here.
   if (pluginKey !== configPluginId) {
     configPluginId = pluginKey;
     selectedCapabilityName = "";
@@ -853,8 +834,8 @@ function RenderConfig(plugin) {
   }
 
   if (!plugin || capabilities.length === 0) {
-    // Capabilities are only materialized once the plugin is activated, so an inactive plugin has
-    // nothing to configure yet — say that, rather than claiming it has no capabilities.
+    // Capabilities only exist once the plugin is activated: say that, rather than claiming it has
+    // none to configure.
     empty.textContent = !plugin
       ? "Select a plugin to configure its capabilities"
       : (IsPluginLoading(plugin)
@@ -874,8 +855,7 @@ function RenderConfig(plugin) {
   empty.hidden = true;
   layout.hidden = false;
 
-  // Keep the selection across a refresh when the capability is still there; otherwise fall back to
-  // the first one, which is also the initial selection for a newly selected plugin.
+  // Keep the selection across a refresh if the capability is still there, else select the first.
   const stillPresent = capabilities.some((capability) =>
     capability.name === selectedCapabilityName && String(capability.type_key || "") === selectedCapabilityType);
   if (!stillPresent) {
@@ -927,8 +907,7 @@ function OnConfigSidebarClick(event) {
   selectedCapabilityName = name;
   selectedCapabilityType = typeKey;
 
-  // Drop the outgoing capability's view immediately: the native reply is asynchronous and its
-  // content must never appear under the newly selected capability.
+  // The native reply is async: clear now so the old config cannot appear under the new selection.
   ClearCapabilityConfigView();
   RequestCapabilityConfig();
   RenderConfig(pluginsById.get(selectedPluginId));
@@ -945,9 +924,8 @@ function RequestCapabilityConfig() {
   });
 }
 
-// Empties both editors, so nothing from the previously selected capability can linger while the
-// next one is still in flight. The footer goes with them: until a config has actually loaded there
-// is nothing to save or restore.
+// Empties both editors and the footer, so nothing from the previous capability lingers while the
+// next one is in flight.
 function ClearCapabilityConfigView() {
   const editor = document.getElementById("configEditor");
   const custom = document.getElementById("configCustom");
@@ -972,8 +950,8 @@ function ClearCapabilityConfigView() {
   SetConfigValidation("");
 }
 
-// True when a native reply still matches what the user has selected. A reply for a capability the
-// user has already navigated away from is dropped rather than rendered into the current view.
+// Replies are async: one for a capability the user has navigated away from is dropped, never
+// rendered into the current view.
 function IsCurrentCapability(payload) {
   return String(payload?.plugin_key || "") === selectedPluginId &&
     String(payload?.capability_name || "") === selectedCapabilityName;
@@ -997,12 +975,10 @@ function ApplyCapabilityConfig(payload) {
   const config = (payload && typeof payload.config === "object" && payload.config !== null) ? payload.config : {};
   const html = String(payload?.custom_html || "");
 
-  // Restore is host chrome and applies to either editor; Save and the validation message belong to
-  // the JSON editor, since a custom UI saves through its own controls via the bridge.
+  // Restore applies to either editor; Save and validation belong to the JSON editor only.
   ShowConfigFooter(!html);
 
   if (html) {
-    // A capability with its own UI: hand it the config through the bridge, never the raw file.
     if (custom) {
       custom.hidden = false;
       custom.srcdoc = BuildCustomConfigDocument(html, config);
@@ -1012,8 +988,7 @@ function ApplyCapabilityConfig(payload) {
     return;
   }
 
-  // Default editor. The native side already reported why a custom UI is unavailable (if it was
-  // meant to have one) in payload.error, and we fall back to editing the same config here.
+  // Default editor: any reason a custom UI is unavailable already arrived in payload.error.
   if (custom) {
     custom.hidden = true;
     custom.removeAttribute("srcdoc");
@@ -1025,8 +1000,7 @@ function ApplyCapabilityConfig(payload) {
   SetConfigValidation("");
 }
 
-// Reveals the footer for the loaded capability. `withEditorControls` is false for a custom UI,
-// leaving Restore on its own.
+// withEditorControls is false for a custom UI, which saves through its own controls.
 function ShowConfigFooter(withEditorControls) {
   const footer = document.getElementById("configFooter");
   const save = document.getElementById("configSaveBtn");
@@ -1047,8 +1021,7 @@ function SetConfigValidation(message) {
     node.textContent = message;
     node.classList.toggle("invalid", message !== "");
   }
-  // Invalid JSON can never be saved: the button is the only way to persist, and it is disabled
-  // while the text does not parse. The native side re-validates regardless.
+  // Invalid JSON is never saved: Save is the only way to persist. The native side re-validates.
   if (save)
     save.disabled = message !== "";
 }
@@ -1084,10 +1057,8 @@ function SaveCapabilityConfig() {
   });
 }
 
-// Asks the native side to write the capability's default config over whatever is stored. The
-// defaults come from the capability's get_default_config(), never from this page — the host does not
-// know what a given plugin considers default. The native side confirms before discarding anything,
-// and replies with the same "saved" payload, so both editors reload from what was persisted.
+// Writes the capability's own get_default_config() over whatever is stored — the host does not know
+// what a plugin considers default. The native side confirms first, then replies as if it were a save.
 function RestoreCapabilityConfig() {
   if (!selectedPluginId || !selectedCapabilityName)
     return;
@@ -1112,8 +1083,7 @@ function ApplyCapabilityConfigSaved(payload) {
   if (payload?.ok !== true)
     return;
 
-  // Reload from what was actually persisted, so both editors show the stored state rather than
-  // whatever was typed.
+  // Reload from what was persisted, not from what was typed.
   const config = (payload && typeof payload.config === "object" && payload.config !== null) ? payload.config : {};
   const custom = document.getElementById("configCustom");
   const text = document.getElementById("configText");
@@ -1126,13 +1096,11 @@ function ApplyCapabilityConfigSaved(payload) {
   SetConfigValidation("");
 }
 
-// The whole host surface a custom config UI gets: read the config it was opened with, save a new
-// one, and be told when a save lands. Everything else about the dialog stays out of reach — the
-// frame is sandboxed into an opaque origin, so this bridge is its only way to talk to the host.
+// The whole host surface a custom config UI gets: read the config, save one, be told when a save
+// lands. The frame is sandboxed into an opaque origin, so this bridge is its only channel.
 function BuildCustomConfigDocument(html, config) {
-  // The config is inlined into a <script>, so a stored string containing "</script>" would
-  // otherwise close the tag early and inject the rest as markup. Escaping "<" keeps the literal
-  // valid JSON while making that impossible.
+  // Inlined into a <script>: a stored "</script>" would close the tag early, so escape "<" — the
+  // literal stays valid JSON.
   const seed = JSON.stringify(config).replace(/</g, "\\u003c");
   const bridge = `<script>
 (function () {
@@ -1171,8 +1139,6 @@ function OnCustomConfigMessage(event) {
   if (!selectedPluginId || !selectedCapabilityName)
     return;
 
-  // The custom UI persists through the same native command as the JSON editor, so there is one
-  // stored config and one code path that writes it.
   SendMessage("save_capability_config", {
     plugin_key: selectedPluginId,
     capability_name: selectedCapabilityName,
@@ -1203,8 +1169,8 @@ function RenderDescription(plugin) {
 
   node.replaceChildren();
 
-  // Descriptions come only from the plugin's Python header (local/installed plugins). A cloud plugin
-  // that is not installed yet has no header, so show a link to view it on OrcaCloud instead.
+  // Descriptions come from the plugin's Python header; a cloud plugin that is not installed yet has
+  // no header, so link to OrcaCloud instead.
   const description = String(plugin?.description || "").trim();
   if (description && description !== "No description.") {
     node.textContent = description;
@@ -1275,8 +1241,8 @@ function SetText(id, text) {
 function ApplyDetailUpdateBadge(node, plugin) {
   node.className = "version-update-badge";
 
-  // The "update_available" state is represented by the actionable Update button next to the
-  // version, so the detail panel only shows the passive badge for the unauthorized warning.
+  // "update_available" is already the actionable Update button, so the badge only warns about
+  // unauthorized.
   const updateStatus = plugin ? GetUpdateStatus(plugin) : "normal";
   if (updateStatus === "unauthorized") {
     node.hidden = false;
@@ -1376,9 +1342,8 @@ function OnPluginListClick(event) {
 
     const pluginKey = String(block.dataset.pluginKey || "");
     selectedPluginId = pluginKey;
-    // why: during a search the triangle writes to the transient override (read from the on-screen open
-    //      state), so an auto-expanded row collapses without touching the saved layout. With no search
-    //      active, toggle the persistent base exactly as before.
+    // why: during a search the triangle writes to the transient override (read from the on-screen
+    //      open state), so an auto-expanded row collapses without touching the saved layout.
     if (typeof PluginSearchActive === "function" && PluginSearchActive())
       searchExpandOverride.set(pluginKey, !block.classList.contains("expanded"));
     else if (expandedPluginIds.has(pluginKey))

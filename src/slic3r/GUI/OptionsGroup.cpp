@@ -127,9 +127,8 @@ const t_field& OptionsGroup::build_field(const t_config_option_key& id, const Co
         });
     }
 
-    // The dialog behind the button edits one preset's overrides, so it has to know which preset. The
-    // group already carries its Tab's type, and fields are built lazily on activate() — too late for
-    // the Tab to reach in and set it afterwards.
+    // The dialog behind the button edits one preset's overrides, so it has to know which preset. Set
+    // here because fields are built lazily on activate() — too late for the Tab to reach in afterwards.
     if (auto plugin_config_field = dynamic_cast<PluginConfigField*>(field.get()))
         if (auto config_group = dynamic_cast<ConfigOptionsGroup*>(this))
             plugin_config_field->set_preset_type(config_group->config_type());
@@ -717,9 +716,8 @@ std::string OptionsGroup::pick_plugin(const ConfigOptionDef& opt)
     if (selection.plugin_key.empty() || selection.name.empty())
         return {};
 
-    // Validate that the selected capability's plugin is resolvable, but only the bare capability
-    // name is stored in the option; the full "name;uuid;capability" reference is derived lazily
-    // when the preset is serialized (see ConfigBase::save_plugin_collection).
+    // Only the bare capability name is stored; the full "name;uuid;capability" reference is derived when
+    // the preset is serialized (see ConfigBase::save_plugin_collection). Resolve here to reject bad picks.
     Slic3r::PluginDescriptor descriptor;
     if (!manager.get_catalog().try_get_plugin_descriptor(selection.plugin_key, descriptor) || descriptor.name.empty())
         return {};

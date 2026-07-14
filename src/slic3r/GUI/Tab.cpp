@@ -1790,9 +1790,8 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
         return;
     }
 
-    // Keep this preset's "plugins" manifest in sync when a plugin picker changes, so the edited preset
-    // always carries resolved "name;uuid;capability" references that full_config() and save_to_json()
-    // then pass downstream as-is -- no separate rebuild anywhere else.
+    // Keep this preset's "plugins" manifest in sync when a plugin picker changes, so full_config() and
+    // save_to_json() always find resolved "name;uuid;capability" references and rebuild it nowhere else.
     if (const ConfigOptionDef* opt_def = m_config->def()->get(opt_key);
         opt_def && opt_def->is_plugin_backed())
         m_config->update_plugin_manifest();
@@ -3086,10 +3085,8 @@ void TabPrint::build()
         option.opt.full_width = true;
         optgroup->append_single_option_line(option, "others_settings_plugin_picker");
 
-        // Its own group rather than the one above: that one hides its labels, and this row needs its
-        // label — and so the revert arrow beside it — to show. No label-width override either: a 0
-        // there means "no label column", which is what the neighbouring full-width groups want and
-        // what would collapse this one.
+        // Its own group: the one above hides its labels, and this row needs its label — and the revert
+        // arrow beside it — to show. No label-width override either, as a 0 there means "no label column".
         optgroup = page->new_optgroup(L("Plugin Preferences"), L"param_gcode");
         optgroup->append_single_option_line("plugin_preference_overrides");
 

@@ -1,10 +1,8 @@
-// The capabilities the active preset uses, as sent by PluginsConfigDialog::send_capabilities.
-// Each row is {plugin_key, name, type, type_key, has_config_ui} — the shape
-// PluginConfig::capabilities_payload emits, shared with the Plugins dialog's Config tab.
+// Capability rows the active preset uses, as PluginConfig::capabilities_payload emits them:
+// {plugin_key, name, type, type_key, has_config_ui}.
 let capabilities = [];
 
-// The selected row's full identity. plugin_key is part of it because this list spans plugins,
-// unlike the Plugins dialog's config tab where every row belongs to the one selected plugin.
+// The selected row's identity; plugin_key is part of it because this list spans plugins.
 let selectedPluginKey = "";
 let selectedCapabilityName = "";
 let selectedCapabilityType = "";
@@ -105,8 +103,7 @@ function RenderCapabilities() {
   empty.hidden = true;
   layout.hidden = false;
 
-  // Keep the selection across a refresh when the capability is still there; otherwise fall back to
-  // the first one, which is also the initial selection.
+  // Keep the selection across a refresh if the capability is still there, else select the first.
   if (!capabilities.some(IsSameCapability)) {
     selectedPluginKey = String(capabilities[0].plugin_key || "");
     selectedCapabilityName = String(capabilities[0].name || "");
@@ -158,26 +155,17 @@ function OnConfigSidebarClick(event) {
   selectedCapabilityName = name;
   selectedCapabilityType = typeKey;
 
-  // Drop the outgoing capability's view immediately: the native reply is asynchronous and its
-  // content must never appear under the newly selected capability.
+  // The native reply is async: clear now so the old config cannot appear under the new selection.
   ClearCapabilityConfigView();
   RequestCapabilityConfig();
   RenderCapabilities();
 }
 
-// ---------------------------------------------------------------------------
-// Config editor
-//
-// The right side shows either the host's JSON editor or, when the capability ships one, its own
-// HTML UI in a sandboxed frame. Both edit the same stored config: the page holds no config state
-// of its own, it renders what the native side sends and sends back what the user saves. Ported
-// from PluginsDialog/index.js, whose config tab lives inside a single selected plugin (it reads
-// selectedPluginId from a page-global); this list spans plugins, so every row carries its own
-// plugin_key and the page tracks selectedPluginKey instead.
-// ---------------------------------------------------------------------------
+// Config editor: the host's JSON editor, or the capability's own HTML UI in a sandboxed frame.
+// Both edit the same stored config; the page renders what the native side sends.
 
-// A reply is only applied when it still matches the selected row. The native side is asynchronous,
-// and unlike the Plugins dialog this list spans plugins, so plugin_key is part of the match.
+// Replies are async: apply one only if it still matches the selected row (plugin_key included,
+// since this list spans plugins), so a stale reply never lands under another capability.
 function IsCurrentCapability(payload) {
   return String(payload?.plugin_key || "") === selectedPluginKey
     && String(payload?.capability_name || "") === selectedCapabilityName
@@ -195,9 +183,8 @@ function RequestCapabilityConfig() {
   });
 }
 
-// Empties both editors, so nothing from the previously selected capability can linger while the
-// next one is still in flight. The footer goes with them: until a config has actually loaded there
-// is nothing to save or restore.
+// Empties both editors and the footer, so nothing from the previous capability lingers while the
+// next one is in flight.
 function ClearCapabilityConfigView() {
   const editor = document.getElementById("configEditor");
   const custom = document.getElementById("configCustom");
@@ -243,7 +230,6 @@ function UpdateConfigMeta(payload) {
     (source === "base" ? "Inherited from global configuration" : "No saved configuration");
   if (save)
     save.disabled = selectedReadOnly;
-  // There is nothing to discard when the preset holds no override of its own.
   if (restore)
     restore.disabled = selectedReadOnly || !selectedHasPresetOverride;
   meta.hidden = false;
@@ -268,12 +254,10 @@ function ApplyCapabilityConfig(payload) {
   const html = String(payload?.custom_html || "");
   UpdateConfigMeta(payload);
 
-  // Restore is host chrome and applies to either editor; Save and the validation message belong to
-  // the JSON editor, since a custom UI saves through its own controls via the bridge.
+  // Restore applies to either editor; Save and validation belong to the JSON editor only.
   ShowConfigFooter(!html);
 
   if (html) {
-    // A capability with its own UI: hand it the config through the bridge, never the raw file.
     if (custom) {
       custom.hidden = false;
       custom.srcdoc = BuildCustomConfigDocument(html, config);
@@ -283,8 +267,7 @@ function ApplyCapabilityConfig(payload) {
     return;
   }
 
-  // Default editor. The native side already reported why a custom UI is unavailable (if it was
-  // meant to have one) in payload.error, and we fall back to editing the same config here.
+  // Default editor: any reason a custom UI is unavailable already arrived in payload.error.
   if (custom) {
     custom.hidden = true;
     custom.removeAttribute("srcdoc");
@@ -296,8 +279,7 @@ function ApplyCapabilityConfig(payload) {
   SetConfigValidation("");
 }
 
-// Reveals the footer for the loaded capability. `withEditorControls` is false for a custom UI,
-// leaving Restore on its own.
+// withEditorControls is false for a custom UI, which saves through its own controls.
 function ShowConfigFooter(withEditorControls) {
   const footer = document.getElementById("configFooter");
   const save = document.getElementById("configSaveBtn");
@@ -318,8 +300,7 @@ function SetConfigValidation(message) {
     node.textContent = message;
     node.classList.toggle("invalid", message !== "");
   }
-  // Invalid JSON can never be saved: the button is the only way to persist, and it is disabled
-  // while the text does not parse. The native side re-validates regardless.
+  // Invalid JSON is never saved: Save is the only way to persist. The native side re-validates.
   if (save)
     save.disabled = selectedReadOnly || message !== "";
 }
@@ -359,10 +340,8 @@ function SaveCapabilityConfig() {
   });
 }
 
-// Drops the preset's override, which is what "default" means here: the capability falls back to the
-// global configuration, the same as a preset that was never overridden. The native side confirms
-// before discarding it and then re-sends the capability's config, so the editors reload from what is
-// now effective rather than from what was typed.
+// "Restore defaults" here drops the preset's override, so the capability falls back to the global
+// configuration. The native side confirms, then re-sends the config that is now effective.
 function RestoreCapabilityConfig() {
   if (!selectedPluginKey || !selectedCapabilityName || !selectedHasPresetOverride)
     return;
@@ -387,8 +366,7 @@ function ApplyCapabilityConfigSaved(payload) {
   if (payload?.ok !== true)
     return;
 
-  // Reload from what was actually persisted, so both editors show the stored state rather than
-  // whatever was typed.
+  // Reload from what was persisted, not from what was typed.
   const config = payload && Object.prototype.hasOwnProperty.call(payload, "config") ? payload.config : {};
   const custom = document.getElementById("configCustom");
   const text = document.getElementById("configText");
@@ -401,13 +379,11 @@ function ApplyCapabilityConfigSaved(payload) {
   SetConfigValidation("");
 }
 
-// The whole host surface a custom config UI gets: read the config it was opened with, save a new
-// one, and be told when a save lands. Everything else about the dialog stays out of reach — the
-// frame is sandboxed into an opaque origin, so this bridge is its only way to talk to the host.
+// The whole host surface a custom config UI gets: read the config, save one, be told when a save
+// lands. The frame is sandboxed into an opaque origin, so this bridge is its only channel.
 function BuildCustomConfigDocument(html, config) {
-  // The config is inlined into a <script>, so a stored string containing "</script>" would
-  // otherwise close the tag early and inject the rest as markup. Escaping "<" keeps the literal
-  // valid JSON while making that impossible.
+  // Inlined into a <script>: a stored "</script>" would close the tag early, so escape "<" — the
+  // literal stays valid JSON.
   const seed = JSON.stringify(config).replace(/</g, "\\u003c");
   const bridge = `<script>
 (function () {
@@ -446,8 +422,6 @@ function OnCustomConfigMessage(event) {
   if (!selectedPluginKey || !selectedCapabilityName)
     return;
 
-  // The custom UI persists through the same native command as the JSON editor, so there is one
-  // stored config and one code path that writes it.
   SendMessage("save_capability_config", {
     plugin_key: selectedPluginKey,
     capability_name: selectedCapabilityName,
@@ -473,9 +447,9 @@ document.addEventListener("DOMContentLoaded", () => {
   if (text)
     text.addEventListener("input", ValidateConfigText);
 
-  // The custom capability UI is sandboxed into an opaque origin, so it reaches us only through
-  // postMessage. OnCustomConfigMessage matches on the frame's own contentWindow rather than the
-  // origin (which is "null" for a sandboxed frame) and ignores anything else on the channel.
+  // The custom UI is sandboxed into an opaque origin, so postMessage is its only channel.
+  // OnCustomConfigMessage matches on the frame's contentWindow, not the origin ("null" when
+  // sandboxed), and ignores anything else.
   window.addEventListener("message", OnCustomConfigMessage);
 
   SendMessage("request_capabilities");

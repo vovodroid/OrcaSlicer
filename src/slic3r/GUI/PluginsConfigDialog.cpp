@@ -33,8 +33,8 @@ PluginsConfigDialog::PluginsConfigDialog(wxWindow* parent, Preset::Type type, co
     : WebViewHostDialog(parent, wxID_ANY, preset_type_title(type))
     , m_type(type)
 {
-    // Unparseable text is kept, not replaced: parse_plugin_overrides leaves the document empty and
-    // every row goes read-only, so a preset we cannot understand is never silently overwritten.
+    // On failure the document stays empty and every row goes read-only (see m_parse_error), so a preset
+    // we cannot understand is never silently overwritten.
     if (!parse_plugin_overrides(overrides_json, m_overrides, m_parse_error))
         BOOST_LOG_TRIVIAL(error) << "Plugins Config dialog: " << m_parse_error;
 
@@ -103,9 +103,8 @@ void PluginsConfigDialog::on_script_message(const nlohmann::json& payload)
         send_capability_config(id);
         show_status(_L("Configuration updated. Save the preset to persist it."), "success");
     } else if (command == "remove_preset_override") {
-        // "Restore defaults" for a preset means holding no override at all: the capability goes back
-        // to the global configuration, which is where an untouched preset takes its values from. The
-        // plugin's own get_default_config() is the global config's default, not the preset's.
+        // "Restore defaults" for a preset means holding no override at all: the capability falls back
+        // to the global configuration, not to the plugin's own get_default_config().
         if (!m_parse_error.empty()) {
             send_save_error(id, m_parse_error);
             return;

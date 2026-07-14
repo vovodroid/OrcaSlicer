@@ -8,16 +8,12 @@
 
 namespace Slic3r { namespace GUI {
 
-// The config half of the Plugins dialog, scoped to one preset instead of one plugin: it lists the
-// capabilities the edited preset of `m_type` actually uses (see capabilities_in_use) and edits each
-// one's stored config, falling back to the global config where the preset has no override.
+// Lists the plugin capabilities the edited preset of `m_type` uses (see capabilities_in_use) and edits
+// each one's config, falling back to the global config where the preset has no override.
 //
-// It is a pure editor over a JSON document: it never writes to the preset and never writes to the
-// base config file. The caller seeds it with the preset's raw override text and reads the edited
-// text back from overrides_json(). PluginConfigField, which owns the value, then feeds that through
-// the normal field/dirty pipeline — which is what makes the revert arrow behave like any other
-// setting. The capability list and config payloads are shared with PluginsDialog's Config tab
-// through PluginConfig's statics.
+// A pure editor over a JSON document: it never writes to the preset and never writes to the base config
+// file. The caller seeds it with the preset's raw override text and reads the edited text back from
+// overrides_json(); PluginConfigField owns the value and feeds it through the normal field/dirty pipeline.
 class PluginsConfigDialog : public WebViewHostDialog
 {
 public:

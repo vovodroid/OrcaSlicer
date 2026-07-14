@@ -828,9 +828,8 @@ void PrintConfigDef::init_common_params()
     def->tooltip = L("Select the network agent implementation for printer communication.");
     def->mode = comAdvanced;
     def->cli = ConfigOptionDef::nocli;
-    // Plugin-backed like the pickers, but edited via a dedicated Choice widget rather than a
-    // plugin_picker field. plugin_type marks it plugin-backed and names its capability type, so its
-    // "plugins" manifest reference is derived generically (see ConfigOptionDef::is_plugin_backed).
+    // Plugin-backed (see ConfigOptionDef::is_plugin_backed), but edited through the Choice widget above
+    // rather than a plugin_picker field.
     def->plugin_type = "printer-connection";
     def->set_default_value(new ConfigOptionString(""));
 
