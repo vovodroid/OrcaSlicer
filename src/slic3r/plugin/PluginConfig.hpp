@@ -89,8 +89,8 @@ public:
     // through PluginManager's store, not through any one PluginConfig instance. The caller owns the
     // UI: it confirms destructive restores and shows status toasts.
 
-    // The config sidebar's rows, in the order given. Capabilities that are no longer loaded are
-    // skipped — the sidebar only offers what can actually be configured.
+    // The config sidebar's rows, in the order given. Capabilities no longer loaded are skipped — the
+    // sidebar only offers what can actually be configured.
     static nlohmann::json capabilities_payload(const std::vector<PluginCapabilityIdentifier>& caps);
 
     // One capability's stored config, plus its custom HTML UI when it provides one.

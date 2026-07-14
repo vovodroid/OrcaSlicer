@@ -116,8 +116,7 @@ public:
     // The config the "Restore defaults" action writes back. Not overridden -> an empty object, which
     // is right for a capability that keeps its stored config sparse and applies its own defaults on
     // read. Override it to write an explicit starting config instead (e.g. to seed a form UI with
-    // every field present). The host neither invents nor validates this value, so a throwing override
-    // leaves the stored config untouched.
+    // every field present). The host neither invents nor validates this value.
     virtual nlohmann::json get_default_config() const { return nlohmann::json::object(); }
 
     virtual void on_load() {}

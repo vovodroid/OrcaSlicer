@@ -197,8 +197,7 @@ bool PluginConfig::dirty() const
 nlohmann::json capability_get_config(const PluginCapabilityInterface& capability)
 {
     // Shares its resolution with the dialogs, so a capability reads back exactly the config its UI
-    // showed as effective. Stored in neither layer: an empty object, so a plugin can index it
-    // unconditionally.
+    // showed as effective. Stored in neither layer: an empty object, indexable unconditionally.
     return active_capability_config(capability_full_identity(capability, "get_config")).config;
 }
 

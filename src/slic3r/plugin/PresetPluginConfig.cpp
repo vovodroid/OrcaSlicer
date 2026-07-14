@@ -46,15 +46,10 @@ const Preset* active_preset_for(Preset::Type type)
     case Preset::TYPE_PRINT: return &bundle->prints.get_edited_preset();
     case Preset::TYPE_PRINTER: return &bundle->printers.get_edited_preset();
 
-    // Deliberately unimplemented, not forgotten. There is no single active filament preset — one is
-    // selected per extruder, and get_config() does not say which extruder the capability runs for —
-    // so guessing (extruder 0, or first override wins) would hand a plugin another extruder's
-    // settings. Filament capabilities read the base config instead. Nothing reaches this today:
-    // preset_type_for_capability only names TYPE_FILAMENT once a filament option declares a
-    // plugin_type, and none does. To lift it, push the extruder onto the plugin call context the
-    // trampoline already maintains (ScopedPluginAuditContext) and resolve the preset from that. The
-    // extruder must be optional: whole slicing steps (posSlice, psGCodePostProcess) span every
-    // extruder and have no current filament, and this fallback is the honest answer for them.
+
+    // Deliberately unimplemented. We currently don't support any filament-based 
+    // plugin capabilities. We will defer this to when we have filament-based plugins
+    // capabilities to have a clearer understanding on how to implement this.
     case Preset::TYPE_FILAMENT: return nullptr;
 
     default: return nullptr;

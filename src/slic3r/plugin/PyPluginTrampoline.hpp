@@ -51,7 +51,6 @@ template<class Base> class PyPluginCommonTrampoline : public Base
 public:
     using Base::Base;
 
-    // get_name is required on all capabilities — Python subclass must implement it.
     std::string get_name() const override
     {
         ORCA_PY_OVERRIDE_AUDITED(
@@ -64,8 +63,7 @@ public:
     }
 
     // Config UI hooks. Available on every capability type, so they live here rather than in
-    // PyPluginInterfaceTrampoline. A Python exception is rethrown and the caller decides the
-    // fallback.
+    // PyPluginInterfaceTrampoline. A Python exception is rethrown; the caller decides the fallback.
     bool has_config_ui() const override
     {
         ORCA_PY_OVERRIDE_AUDITED(

@@ -50,7 +50,7 @@ std::string plugin_config_source_to_string(PluginConfigSource source);
 
 // Resolves a capability's effective config as `preset override -> base config -> none`, and mutates
 // the override layer. It works on a CapabilityConfigDocument the caller owns, never on a Preset and
-// never on the base config file, which is what keeps the two layers from writing to each other:
+// never on the base config file, which keeps the two layers from writing to each other:
 // PluginConfigField holds the document and feeds the edited text back through the normal field/dirty
 // pipeline, so the preset is written the way every other setting is.
 class PresetPluginConfigService
