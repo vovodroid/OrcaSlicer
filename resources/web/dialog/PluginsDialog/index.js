@@ -31,6 +31,16 @@ let ctxMenu = null;
 let exploreMenu = null;
 let exploreMenuButton = null;
 
+// Split pane. The ratio is the list's share of the content height, so it survives a dialog resize.
+const SPLIT_STORAGE_KEY = "orca.plugins.split_ratio";
+const SPLIT_DEFAULT_RATIO = 0.62;
+const SPLIT_MIN_LIST_PX = 180;
+const SPLIT_MIN_DETAILS_PX = 160;
+
+let contentPane = null;
+let paneSplitter = null;
+let splitRatio = SPLIT_DEFAULT_RATIO;
+
 function OnInit() {
   pluginList = document.getElementById("pluginList");
   ctxMenu = document.getElementById("ctxMenu");
@@ -64,6 +74,8 @@ function OnInit() {
   pluginList?.addEventListener("contextmenu", OnPluginContextMenu);
   ctxMenu?.addEventListener("click", OnContextMenuClick);
 
+  InitPaneSplitter();
+
   document.getElementById("configSidebar")?.addEventListener("click", OnConfigSidebarClick);
   document.getElementById("configSaveBtn")?.addEventListener("click", SaveCapabilityConfig);
   document.getElementById("configRestoreBtn")?.addEventListener("click", RestoreCapabilityConfig);
@@ -95,6 +107,87 @@ function OnInit() {
   ActivateDetailTab(activeDetailTab);
   SetSelectedInstallAction(selectedInstallAction, false);
   RequestPlugins();
+}
+
+function InitPaneSplitter() {
+  contentPane = document.querySelector(".content");
+  paneSplitter = document.getElementById("paneSplitter");
+  if (!contentPane || !paneSplitter)
+    return;
+
+  ApplySplitRatio(ReadStoredSplitRatio());
+
+  paneSplitter.addEventListener("pointerdown", OnSplitterPointerDown);
+  paneSplitter.addEventListener("dblclick", () => {
+    ApplySplitRatio(SPLIT_DEFAULT_RATIO);
+    StoreSplitRatio(splitRatio);
+  });
+  // A resized dialog changes what the ratio is a ratio *of*, so re-clamp it against the new height
+  // rather than letting a pane fall below its minimum.
+  window.addEventListener("resize", () => ApplySplitRatio(splitRatio));
+}
+
+// Clamped so neither pane drops below its minimum. When the dialog is too short to honor both, the
+// panes just split what there is.
+function ApplySplitRatio(ratio) {
+  const available = contentPane.clientHeight;
+  const sash = paneSplitter.offsetHeight;
+  let next = Number.isFinite(ratio) ? ratio : SPLIT_DEFAULT_RATIO;
+
+  if (available > 0) {
+    const min = SPLIT_MIN_LIST_PX / available;
+    const max = (available - sash - SPLIT_MIN_DETAILS_PX) / available;
+    next = min > max ? 0.5 : Math.min(Math.max(next, min), max);
+  }
+
+  splitRatio = next;
+  contentPane.style.setProperty("--plugin-list-height", `${(next * 100).toFixed(2)}%`);
+}
+
+function OnSplitterPointerDown(event) {
+  if (event.button !== 0)
+    return;
+
+  const bounds = contentPane.getBoundingClientRect();
+  // Offset of the grab point inside the strip, so the splitter does not jump under the cursor.
+  const grabOffset = event.clientY - paneSplitter.getBoundingClientRect().top;
+
+  const onMove = (moveEvent) => {
+    ApplySplitRatio((moveEvent.clientY - bounds.top - grabOffset) / bounds.height);
+  };
+  const onUp = (upEvent) => {
+    paneSplitter.releasePointerCapture(upEvent.pointerId);
+    paneSplitter.removeEventListener("pointermove", onMove);
+    paneSplitter.removeEventListener("pointerup", onUp);
+    paneSplitter.classList.remove("dragging");
+    document.body.classList.remove("pane-resizing");
+    StoreSplitRatio(splitRatio);
+  };
+
+  // Captured, so the drag keeps tracking once the pointer leaves the strip (which it does at once).
+  paneSplitter.setPointerCapture(event.pointerId);
+  paneSplitter.addEventListener("pointermove", onMove);
+  paneSplitter.addEventListener("pointerup", onUp);
+  paneSplitter.classList.add("dragging");
+  document.body.classList.add("pane-resizing");
+  event.preventDefault();
+}
+
+function ReadStoredSplitRatio() {
+  try {
+    const stored = Number.parseFloat(window.localStorage.getItem(SPLIT_STORAGE_KEY));
+    return Number.isFinite(stored) ? stored : SPLIT_DEFAULT_RATIO;
+  } catch (err) {
+    return SPLIT_DEFAULT_RATIO; // storage can be unavailable in the webview; the default still works
+  }
+}
+
+function StoreSplitRatio(ratio) {
+  try {
+    window.localStorage.setItem(SPLIT_STORAGE_KEY, String(ratio));
+  } catch (err) {
+    // Persisting the position is a nicety, never a reason to break the drag.
+  }
 }
 
 function NormalizeInstallAction(action) {

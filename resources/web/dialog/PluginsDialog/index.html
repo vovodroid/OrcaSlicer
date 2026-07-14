@@ -80,6 +80,11 @@
         <div id="pluginList" class="body thin-scroll"></div>
       </section>
 
+      <!-- Drag to redistribute the dialog's height between the list and the details pane; the hit
+           area is the whole strip, the visible divider is the line drawn inside it. -->
+      <div id="paneSplitter" class="pane-splitter" role="separator" aria-orientation="horizontal"
+        aria-label="Resize the plugin list" title="Drag to resize; double-click to reset"></div>
+
       <section class="pane details-pane">
         <div class="detail-tabs" role="tablist" aria-label="Plugin details">
           <button id="pluginInfoTab" class="detail-tab active" type="button" role="tab"
