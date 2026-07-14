@@ -91,15 +91,6 @@ std::string serialize_plugin_overrides(const CapabilityConfigDocument& document)
     return document.empty() ? std::string() : document.serialize_entries().dump();
 }
 
-std::string plugin_config_source_to_string(PluginConfigSource source)
-{
-    switch (source) {
-    case PluginConfigSource::Preset: return "preset";
-    case PluginConfigSource::Base: return "base";
-    default: return "none";
-    }
-}
-
 EffectiveCapabilityConfig PresetPluginConfigService::get_effective_config(const CapabilityConfigDocument&   overrides,
                                                                          const PluginCapabilityIdentifier& id) const
 {
@@ -112,14 +103,12 @@ EffectiveCapabilityConfig PresetPluginConfigService::get_effective_config(const 
 
     if (const auto entry = overrides.find(result.id)) {
         result.has_preset_override   = true;
-        result.source                = PluginConfigSource::Preset;
         result.config                = entry->cap_config;
         result.stored_plugin_version = entry->plugin_version;
         return result;
     }
 
     if (result.has_base_config) {
-        result.source                = PluginConfigSource::Base;
         result.config                = base.config;
         result.stored_plugin_version = base.plugin_version;
     }

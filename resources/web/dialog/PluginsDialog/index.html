@@ -157,8 +157,8 @@
                      window.orca bridge. -->
                 <iframe id="configCustom" class="config-custom" title="Plugin configuration"
                   sandbox="allow-scripts" referrerpolicy="no-referrer" hidden></iframe>
-                <!-- Host chrome for both editors: a custom UI needs Restore too, and keeping it here
-                     leaves it off the JS bridge. Save and validation are JSON-editor only. -->
+                <!-- JSON-editor chrome only: a custom UI renders its own save/restore controls and
+                     drives them through the window.orca bridge. -->
                 <div id="configFooter" class="config-view-footer" hidden>
                   <span id="configValidation" class="config-validation" role="status" aria-live="polite"></span>
                   <div class="config-actions">

@@ -136,7 +136,6 @@ void PluginsConfigDialog::send_capabilities()
     nlohmann::json response;
     response["command"]     = "list_capabilities";
     response["preset_type"] = static_cast<int>(m_type);
-    response["title"]       = into_u8(preset_type_title(m_type));
     response["preset_name"] = preset->name;
     response["data"]        = PluginConfig::capabilities_payload(capabilities_in_use(m_type, *preset));
 
@@ -166,7 +165,6 @@ void PluginsConfigDialog::send_capability_config(const PluginCapabilityIdentifie
 
     const EffectiveCapabilityConfig effective = m_service.get_effective_config(m_overrides, id);
     response["config"]                 = effective.config;
-    response["source"]                 = plugin_config_source_to_string(effective.source);
     response["has_preset_override"]    = effective.has_preset_override;
     response["has_base_config"]        = effective.has_base_config;
     response["stored_plugin_version"]  = effective.stored_plugin_version;

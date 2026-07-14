@@ -3094,6 +3094,17 @@ static bool cloud_media_is_image(const nlohmann::json& main_image)
     return lowered(get_json_string_field(main_image, "media_type")) == "image";
 }
 
+// creator_display_name degrades to the creator's username and then to their raw user id when the
+// cloud cannot resolve a profile, so a bare id is dropped rather than shown: the author then falls
+// back to the one the plugin's own manifest declares (see apply_plugin_metadata_fallbacks).
+static std::string parse_cloud_author(const nlohmann::json& item)
+{
+    std::string author = get_json_string_field(item, "creator_display_name");
+    if (author.empty() || is_uuid(author))
+        author = get_json_string_field(item, "creator_username");
+    return is_uuid(author) ? std::string() : author;
+}
+
 int OrcaCloudServiceAgent::fetch_subscribed_manifests_into_descriptors(std::vector<PluginDescriptor>& descriptors,
                                                             std::vector<std::string>& not_found,
                                                             std::vector<std::string>& unauthorized)
@@ -3137,11 +3148,7 @@ int OrcaCloudServiceAgent::fetch_subscribed_manifests_into_descriptors(std::vect
             descriptor.plugin_key  = uuid;
             // Cloud API "description" is intentionally not parsed: descriptions come only from the
             // plugin's Python header once installed. Cloud-only rows show a "View on OrcaCloud" link.
-            descriptor.author      = get_json_string_field(item, "author");
-            if (descriptor.author.empty())
-                descriptor.author = get_json_string_field(item, "creator_display_name");
-            if (descriptor.author.empty())
-                descriptor.author = get_json_string_field(item, "creator_username");
+            descriptor.author      = parse_cloud_author(item);
             descriptor.version    = get_json_string_field(item, "version");
             descriptor.latest_version = descriptor.version;
             // Cloud "type" is cosmetic (see parse_cloud_display_types); real capability_types are
@@ -3239,11 +3246,7 @@ int OrcaCloudServiceAgent::fetch_mine_manifests_into_descriptors(std::vector<Plu
                 descriptor.plugin_key  = uuid;
                 // Cloud API "description" is intentionally not parsed: descriptions come only from the
                 // plugin's Python header once installed. Cloud-only rows show a "View on OrcaCloud" link.
-                descriptor.author      = get_json_string_field(item, "author");
-                if (descriptor.author.empty())
-                    descriptor.author = get_json_string_field(item, "creator_display_name");
-                if (descriptor.author.empty())
-                    descriptor.author = get_json_string_field(item, "creator_username");
+                descriptor.author      = parse_cloud_author(item);
                 descriptor.version    = get_json_string_field(item, "version");
                 descriptor.latest_version = descriptor.version;
                 // Cloud "type" is cosmetic (see parse_cloud_display_types); real capability_types are

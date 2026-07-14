@@ -18,12 +18,6 @@ namespace Slic3r {
 
 class PluginCapabilityInterface;
 
-enum class PluginConfigSource {
-    None,
-    Base,
-    Preset,
-};
-
 /*
 Example config.json shape
 {

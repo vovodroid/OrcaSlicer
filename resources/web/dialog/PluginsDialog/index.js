@@ -975,8 +975,11 @@ function ApplyCapabilityConfig(payload) {
   const config = (payload && typeof payload.config === "object" && payload.config !== null) ? payload.config : {};
   const html = String(payload?.custom_html || "");
 
-  // Restore applies to either editor; Save and validation belong to the JSON editor only.
-  ShowConfigFooter(!html);
+  // The footer belongs to the JSON editor. A custom UI owns its whole surface, including whatever
+  // save/restore controls it wants, and reaches the host through the window.orca bridge.
+  const footer = document.getElementById("configFooter");
+  if (footer)
+    footer.hidden = html !== "";
 
   if (html) {
     if (custom) {
@@ -998,20 +1001,6 @@ function ApplyCapabilityConfig(payload) {
   if (text)
     text.value = JSON.stringify(config, null, 2);
   SetConfigValidation("");
-}
-
-// withEditorControls is false for a custom UI, which saves through its own controls.
-function ShowConfigFooter(withEditorControls) {
-  const footer = document.getElementById("configFooter");
-  const save = document.getElementById("configSaveBtn");
-  const validation = document.getElementById("configValidation");
-
-  if (footer)
-    footer.hidden = false;
-  if (save)
-    save.hidden = !withEditorControls;
-  if (validation)
-    validation.hidden = !withEditorControls;
 }
 
 function SetConfigValidation(message) {
@@ -1096,8 +1085,9 @@ function ApplyCapabilityConfigSaved(payload) {
   SetConfigValidation("");
 }
 
-// The whole host surface a custom config UI gets: read the config, save one, be told when a save
-// lands. The frame is sandboxed into an opaque origin, so this bridge is its only channel.
+// The whole host surface a custom config UI gets: read the config, save one, restore the plugin's
+// defaults, and be told when either lands. The frame is sandboxed into an opaque origin, so this
+// bridge is its only channel.
 function BuildCustomConfigDocument(html, config) {
   // Inlined into a <script>: a stored "</script>" would close the tag early, so escape "<" — the
   // literal stays valid JSON.
@@ -1109,6 +1099,7 @@ function BuildCustomConfigDocument(html, config) {
   window.orca = {
     getConfig: function () { return current; },
     saveConfig: function (cfg) { parent.postMessage({ __orca: "save", config: cfg }, "*"); },
+    restoreDefaults: function () { parent.postMessage({ __orca: "restore" }, "*"); },
     onConfig: function (cb) {
       if (typeof cb !== "function") return;
       handlers.push(cb);
@@ -1134,17 +1125,21 @@ function OnCustomConfigMessage(event) {
     return;
 
   const data = event.data;
-  if (!data || data.__orca !== "save")
-    return;
-  if (!selectedPluginId || !selectedCapabilityName)
+  if (!data || !selectedPluginId || !selectedCapabilityName)
     return;
 
-  SendMessage("save_capability_config", {
-    plugin_key: selectedPluginId,
-    capability_name: selectedCapabilityName,
-    capability_type: selectedCapabilityType,
-    config: data.config === undefined ? {} : data.config
-  });
+  if (data.__orca === "save") {
+    SendMessage("save_capability_config", {
+      plugin_key: selectedPluginId,
+      capability_name: selectedCapabilityName,
+      capability_type: selectedCapabilityType,
+      config: data.config === undefined ? {} : data.config
+    });
+    return;
+  }
+
+  if (data.__orca === "restore")
+    RestoreCapabilityConfig();
 }
 
 function RenderThumbnail(plugin) {

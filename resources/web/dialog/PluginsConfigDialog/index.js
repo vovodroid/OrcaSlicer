@@ -65,13 +65,9 @@ function ShowStatusMessage(message, level) {
 function ApplyCapabilities(payload) {
   capabilities = Array.isArray(payload.data) ? payload.data : [];
 
-  const title = document.getElementById("pageTitle");
-  if (title)
-    title.textContent = String(payload.title || "Plugin configuration");
-
-  const subtitle = document.getElementById("pageSubtitle");
-  if (subtitle)
-    subtitle.textContent = String(payload.preset_name || "");
+  const presetName = document.getElementById("pagePresetName");
+  if (presetName)
+    presetName.textContent = String(payload.preset_name || "");
 
   RenderCapabilities();
 }
@@ -191,7 +187,6 @@ function ClearCapabilityConfigView() {
   const text = document.getElementById("configText");
   const error = document.getElementById("configError");
   const footer = document.getElementById("configFooter");
-  const meta = document.getElementById("configMeta");
 
   if (editor)
     editor.hidden = true;
@@ -207,32 +202,23 @@ function ClearCapabilityConfigView() {
   }
   if (footer)
     footer.hidden = true;
-  if (meta)
-    meta.hidden = true;
   selectedHasPresetOverride = false;
   selectedReadOnly = false;
   SetConfigValidation("");
 }
 
-function UpdateConfigMeta(payload) {
+// A read-only capability cannot be saved, and there is nothing to restore until the preset overrides
+// the global configuration.
+function UpdateConfigActions(payload) {
   selectedHasPresetOverride = payload?.has_preset_override === true;
   selectedReadOnly = payload?.read_only === true;
 
-  const meta = document.getElementById("configMeta");
-  const badge = document.getElementById("configSourceBadge");
   const save = document.getElementById("configSaveBtn");
   const restore = document.getElementById("configRestoreBtn");
-  if (!meta || !badge)
-    return;
-
-  const source = String(payload?.source || "none");
-  badge.textContent = source === "preset" ? "Preset override" :
-    (source === "base" ? "Inherited from global configuration" : "No saved configuration");
   if (save)
     save.disabled = selectedReadOnly;
   if (restore)
     restore.disabled = selectedReadOnly || !selectedHasPresetOverride;
-  meta.hidden = false;
 }
 
 function ApplyCapabilityConfig(payload) {
@@ -252,10 +238,13 @@ function ApplyCapabilityConfig(payload) {
 
   const config = payload && Object.prototype.hasOwnProperty.call(payload, "config") ? payload.config : {};
   const html = String(payload?.custom_html || "");
-  UpdateConfigMeta(payload);
+  UpdateConfigActions(payload);
 
-  // Restore applies to either editor; Save and validation belong to the JSON editor only.
-  ShowConfigFooter(!html);
+  // The footer belongs to the JSON editor. A custom UI owns its whole surface, including whatever
+  // save/restore controls it wants, and reaches the host through the window.orca bridge.
+  const footer = document.getElementById("configFooter");
+  if (footer)
+    footer.hidden = html !== "";
 
   if (html) {
     if (custom) {
@@ -277,20 +266,6 @@ function ApplyCapabilityConfig(payload) {
   if (text)
     text.value = JSON.stringify(config, null, 2);
   SetConfigValidation("");
-}
-
-// withEditorControls is false for a custom UI, which saves through its own controls.
-function ShowConfigFooter(withEditorControls) {
-  const footer = document.getElementById("configFooter");
-  const save = document.getElementById("configSaveBtn");
-  const validation = document.getElementById("configValidation");
-
-  if (footer)
-    footer.hidden = false;
-  if (save)
-    save.hidden = !withEditorControls;
-  if (validation)
-    validation.hidden = !withEditorControls;
 }
 
 function SetConfigValidation(message) {
@@ -379,8 +354,9 @@ function ApplyCapabilityConfigSaved(payload) {
   SetConfigValidation("");
 }
 
-// The whole host surface a custom config UI gets: read the config, save one, be told when a save
-// lands. The frame is sandboxed into an opaque origin, so this bridge is its only channel.
+// The whole host surface a custom config UI gets: read the config, save one, drop the preset's
+// override, and be told when either lands. The frame is sandboxed into an opaque origin, so this
+// bridge is its only channel.
 function BuildCustomConfigDocument(html, config) {
   // Inlined into a <script>: a stored "</script>" would close the tag early, so escape "<" — the
   // literal stays valid JSON.
@@ -392,6 +368,7 @@ function BuildCustomConfigDocument(html, config) {
   window.orca = {
     getConfig: function () { return current; },
     saveConfig: function (cfg) { parent.postMessage({ __orca: "save", config: cfg }, "*"); },
+    restoreDefaults: function () { parent.postMessage({ __orca: "restore" }, "*"); },
     onConfig: function (cb) {
       if (typeof cb !== "function") return;
       handlers.push(cb);
@@ -417,17 +394,21 @@ function OnCustomConfigMessage(event) {
     return;
 
   const data = event.data;
-  if (!data || data.__orca !== "save")
-    return;
-  if (!selectedPluginKey || !selectedCapabilityName)
+  if (!data || !selectedPluginKey || !selectedCapabilityName)
     return;
 
-  SendMessage("save_capability_config", {
-    plugin_key: selectedPluginKey,
-    capability_name: selectedCapabilityName,
-    capability_type: selectedCapabilityType,
-    config: data.config === undefined ? {} : data.config
-  });
+  if (data.__orca === "save") {
+    SendMessage("save_capability_config", {
+      plugin_key: selectedPluginKey,
+      capability_name: selectedCapabilityName,
+      capability_type: selectedCapabilityType,
+      config: data.config === undefined ? {} : data.config
+    });
+    return;
+  }
+
+  if (data.__orca === "restore")
+    RestoreCapabilityConfig();
 }
 
 document.addEventListener("DOMContentLoaded", () => {

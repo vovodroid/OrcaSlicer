@@ -30,7 +30,6 @@ struct EffectiveCapabilityConfig
 {
     CapabilityConfigId id;
     nlohmann::json     config = nlohmann::json::object();
-    PluginConfigSource source = PluginConfigSource::None;
 
     bool        has_preset_override = false;
     bool        has_base_config     = false;
@@ -45,8 +44,6 @@ struct MutationResult
     std::string               error;
     EffectiveCapabilityConfig effective;
 };
-
-std::string plugin_config_source_to_string(PluginConfigSource source);
 
 // Resolves a capability's effective config as `preset override -> base config -> none`, and mutates
 // the override layer. It works on a CapabilityConfigDocument the caller owns, never on a Preset and
