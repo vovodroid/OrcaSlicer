@@ -313,6 +313,14 @@ static t_config_enum_values s_keys_map_WallDirection{
 };
 CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(WallDirection)
 
+//Orca
+static t_config_enum_values s_keys_map_SurfaceFillOrder{
+    { "default",  int(SurfaceFillOrder::Default) },
+    { "outward",  int(SurfaceFillOrder::Outward) },
+    { "inward",   int(SurfaceFillOrder::Inward) },
+};
+CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(SurfaceFillOrder)
+
 //BBS
 static t_config_enum_values s_keys_map_PrintSequence {
     { "by layer",     int(PrintSequence::ByLayer) },
@@ -2321,6 +2329,40 @@ void PrintConfigDef::init_fff_params()
     def->min      = 10;
     def->max      = 100;
     def->set_default_value(new ConfigOptionPercent(100));
+
+    auto def_top_fill_order = def = this->add("top_surface_fill_order", coEnum);
+    def->label = L("Top surface fill order");
+    def->category = L("Strength");
+    def->tooltip = L("Direction in which top surfaces are filled when using a center-based pattern "
+                     "(Concentric, Archimedean Chords, Octagram Spiral).\n"
+                     "Outward starts at the center of the surface, so any excess material is pushed "
+                     "towards the edge where it is least visible. Inward starts at the edge and ends "
+                     "with the tight curves at the center.\n"
+                     "Default uses shortest-path ordering, which may run in either direction.");
+    def->enum_keys_map = &ConfigOptionEnum<SurfaceFillOrder>::get_enum_values();
+    def->enum_values.push_back("default");
+    def->enum_values.push_back("outward");
+    def->enum_values.push_back("inward");
+    def->enum_labels.push_back(L("Default"));
+    def->enum_labels.push_back(L("Outward"));
+    def->enum_labels.push_back(L("Inward"));
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionEnum<SurfaceFillOrder>(SurfaceFillOrder::Default));
+
+    def = this->add("bottom_surface_fill_order", coEnum);
+    def->label = L("Bottom surface fill order");
+    def->category = L("Strength");
+    def->tooltip = L("Direction in which bottom surfaces are filled when using a center-based pattern "
+                     "(Concentric, Archimedean Chords, Octagram Spiral).\n"
+                     "Inward starts each surface with the wider outer curves, which improves first layer "
+                     "adhesion on build plates where the tight curves at the center may not stick. "
+                     "Outward starts at the center, pushing any excess material towards the edge.\n"
+                     "Default uses shortest-path ordering, which may run in either direction.");
+    def->enum_keys_map = &ConfigOptionEnum<SurfaceFillOrder>::get_enum_values();
+    def->enum_values = def_top_fill_order->enum_values;
+    def->enum_labels = def_top_fill_order->enum_labels;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionEnum<SurfaceFillOrder>(SurfaceFillOrder::Default));
 
 	def                = this->add("internal_solid_infill_pattern", coEnum);
     def->label         = L("Internal solid infill pattern");
@@ -4604,11 +4646,6 @@ void PrintConfigDef::init_fff_params()
     def->category = L("Advanced");
     def->mode     = comAdvanced;
     def->set_default_value(new ConfigOptionInt(2));
-
-    // ORCA: special flag for flow rate calibration
-    def           = this->add("calib_flowrate_topinfill_special_order", coBool);
-    def->mode     = comDevelop;
-    def->set_default_value(new ConfigOptionBool(false));
 
     def = this->add("ironing_type", coEnum);
     def->label = L("Ironing type");
@@ -7198,17 +7235,6 @@ void PrintConfigDef::init_fff_params()
     def->min = 0;
     def->set_default_value(new ConfigOptionFloat(0.6));
 
-    def           = this->add("anisotropic_surfaces", coBool);
-    def->label    = L("Anisotropic surfaces");
-    def->category = L("Strength");
-    def->tooltip  = L("Anisotropic patterns on the top and bottom surfaces.\n"
-                       "Co-directional printing mode will be applied. For certain patterns, omni-directional filling provides color "
-                       "dispersion when using multi-colored or silk plastics.\n"
-                       "This option disable the gap fill.\n"
-                       "This option can increase a printing time.");
-    def->mode     = comExpert;
-    def->set_default_value(new ConfigOptionBool(false));
-
     def           = this->add("separated_infills", coBool);
     def->label    = L("Separated infills");
     def->category = L("Strength");
@@ -8966,6 +8992,8 @@ void PrintConfigDef::handle_legacy(t_config_option_key &opt_key, std::string &va
         "internal_bridge_support_thickness", "top_area_threshold", "reduce_wall_solid_infill","filament_load_time","filament_unload_time",
         "smooth_coefficient", "overhang_totally_speed", "silent_mode",
         "overhang_speed_classic", "filament_prime_volume",
+        "calib_flowrate_topinfill_special_order",
+        "anisotropic_surfaces", // superseded by top_surface_fill_order / bottom_surface_fill_order
     };
 
     if (ignore.find(opt_key) != ignore.end()) {
