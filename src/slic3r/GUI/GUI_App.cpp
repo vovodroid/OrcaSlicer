@@ -142,7 +142,6 @@
 
 #include "PluginsDialog.hpp"
 #include "SpeedDialDialog.hpp"
-#include "ScriptActionSource.hpp"
 #include "TerminalDialog.hpp"
 
 //#ifdef WIN32
@@ -3172,15 +3171,7 @@ bool GUI_App::on_init_inner()
 
     init_plugin_gui_wiring();
 
-    // Register all AppAction sources
-    m_action_registry.add_source(std::make_unique<ScriptActionSource>());
-    // m_action_registry.add_source(std::make_unique<AnotherActionSource>());
-    // m_action_registry.add_source(std::make_unique<YetAnotherActionSource>());
-    // ...
-
-    // Initialize with all added sources
-    // - register callbacks,
-    // - then enumerate: upsert all actions into registry
+    // Subscribe to the plugin loader and enumerate current actions (UI thread, once).
     m_action_registry.init();
 
     for (const std::string& plugin_key : plugin_mgr.get_enabled_plugin_keys()) {

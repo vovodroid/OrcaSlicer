@@ -1,7 +1,5 @@
 #pragma once
 
-#include "IActionSource.hpp"
-
 #include <nlohmann/json.hpp>
 
 #include <wx/string.h>
@@ -10,11 +8,15 @@
 #include <cassert>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace Slic3r { namespace GUI {
+
+// How a source's action set changed. Drives the registry's refresh handlers.
+enum class ActionChange { Added, Removed };
 
 // Result of running an AppAction, in the action layer's own vocabulary. Concrete
 // actions translate their runner-specific result into this generic shape.
@@ -35,7 +37,19 @@ struct AppAction
 {
     const std::string& id() const { return m_id; }
     const std::string& title() const { return m_title; }
-    const std::string& source() const { return m_source; }
+    const std::string& source_key() const { return m_source_key; }   // stable source identity
+    const std::string& source_name() const { return m_source_name; } // source display name
+
+    // Builds the stable id "<prefix>:<title>:<source_key>". why: one place owns the
+    // format - both the base ctor and the one raw-key lookup (removing a capability
+    // without an action object) go through this; ids are never parsed back apart.
+    static std::string compose_id(std::string_view prefix, std::string_view title, std::string_view source_key)
+    {
+        std::string out;
+        out.reserve(prefix.size() + title.size() + source_key.size() + 2);
+        out.append(prefix).append(1, ':').append(title).append(1, ':').append(source_key);
+        return out;
+    }
 
     // seeded from AppConfig for the snapshot / sort:
     bool        favourite = false;
@@ -48,35 +62,40 @@ struct AppAction
 protected:
     // The definition is constructor-set and immutable. Refreshes replace an action
     // instead of mutating identity after the registry has indexed it by id.
-    AppAction(std::string id, std::string title, std::string source)
-        : m_id(std::move(id)), m_title(std::move(title)), m_source(std::move(source)) {}
+    // why: source_key (not the display name) carries identity, so renaming the source's
+    // display name leaves the id - and its persisted stats/favourite - intact.
+    AppAction(std::string_view prefix, std::string title, std::string source_key, std::string source_name)
+        : m_id(compose_id(prefix, title, source_key)),
+          m_title(std::move(title)),
+          m_source_key(std::move(source_key)),
+          m_source_name(std::move(source_name)) {}
 
 private:
-    std::string m_id;       // speed_dial_action_id(...) - stable identity + AppConfig key
-    std::string m_title;    // display name
-    std::string m_source;   // display name of the action's source
+    std::string m_id;          // <prefix>:<title>:<source_key> - stable identity + AppConfig key
+    std::string m_title;       // display name
+    std::string m_source_key;  // stable identity of the action's source (e.g. plugin_key)
+    std::string m_source_name; // display name of the action's source
 };
 
-// Generic sink and single owner of runnable actions for the app session.
+// Self-contained sink and single owner of runnable actions for the app session.
 //
 // Workflow:
-// 1. GUI_App transfers each concrete source to the registry with add_source().
-// 2. init() starts every source; each source enumerates its current actions and
-//    subscribes to future changes.
-// 3. Sources push those changes through upsert() and remove(). The registry keeps
-//    the only action list and restores persisted user state as actions arrive.
-// 4. Consumers use by_id(), snapshot(), and run() without knowing which source
-//    created an action.
+// 1. init() (once, UI thread) subscribes to the plugin loader and enumerates the
+//    current script capabilities into actions.
+// 2. Loader load/unload callbacks route through refresh_source()/refresh_capability(),
+//    which upsert()/remove() actions. The registry keeps the only action list and
+//    restores persisted user state as actions arrive.
+// 3. Consumers use by_id(), snapshot(), and run() without knowing the source.
+//
+// note: there is exactly one source (script plugins), so it lives inline here rather
+// than behind a polymorphic source interface.
 class ActionRegistry
 {
 public:
-    // Starts all registered sources. Call once on the UI thread after sources are
-    // added; source startup both populates the initial list and wires live updates.
+    // Subscribes to the plugin loader and enumerates its current actions. Call once
+    // on the UI thread after the plugin system is up; wires the initial list and live
+    // updates together.
     void init();
-
-    // Transfers ownership of a source to the registry. The source remains dormant
-    // until init() starts it.
-    void add_source(std::unique_ptr<IActionSource> source);
 
     // Takes ownership, seeds persisted state, then inserts the action or replaces
     // the action with the same id. A null action is ignored.
@@ -104,7 +123,12 @@ private:
     void         seed_state(AppAction& a) const;               // favourite/stats from config
     AppAction*      find(const std::string& id);
 
-    std::vector<std::unique_ptr<IActionSource>> m_sources;
+    // Loader callbacks (marshalled to the UI thread) land here. refresh_source rebuilds
+    // one plugin's whole action set; refresh_capability touches a single capability.
+    void refresh_source(const std::string& plugin_key, ActionChange change);
+    void refresh_capability(const std::string& plugin_key, const std::string& capability, ActionChange change);
+
+    bool m_started = false;  // init() runs exactly once; guards double-subscription
     std::unordered_map<std::string, std::shared_ptr<AppAction>> m_actions;  // UI-thread confined; no lock
 };
 

@@ -8,7 +8,6 @@ add_executable(${_TEST_NAME}_tests
     test_plugin_lifecycle.cpp
     test_slicing_pipeline_bindings.cpp
     test_plugin_sort.cpp
-    test_speed_dial_action_id.cpp
     )
 
 if (MSVC)

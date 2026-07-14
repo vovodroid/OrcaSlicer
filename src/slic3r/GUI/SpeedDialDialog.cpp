@@ -270,7 +270,7 @@ private:
         // why: value-capture only. Script execution may outlive this popup if the app is closing.
         wxGetApp().CallAfter([id] {
             // why: the queue may drain during shutdown, after MainFrame/Plater teardown;
-            //      skip like the ScriptActionSource callbacks do instead of running into it.
+            //      skip like the registry's loader callbacks do instead of running into it.
             if (wxGetApp().is_closing())
                 return;
             AppActionRunResult o = wxGetApp().action_registry().run(id);
