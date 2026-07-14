@@ -184,6 +184,36 @@ std::vector<PluginCapabilityIdentifier> capabilities_in_use(Preset::Type type, c
     return result;
 }
 
+Preset::Type preset_type_for_capability(PluginCapabilityType type)
+{
+    if (type == PluginCapabilityType::Unknown)
+        return Preset::TYPE_INVALID;
+
+    // The three typed option lists are disjoint, so the first that holds the key names its owner.
+    const auto owner_of_option = [](const std::string& key) {
+        const auto holds = [&key](const std::vector<std::string>& keys) {
+            return std::find(keys.begin(), keys.end(), key) != keys.end();
+        };
+        if (holds(Preset::print_options()))
+            return Preset::TYPE_PRINT;
+        if (holds(Preset::filament_options()))
+            return Preset::TYPE_FILAMENT;
+        if (holds(Preset::printer_options()))
+            return Preset::TYPE_PRINTER;
+        return Preset::TYPE_INVALID;
+    };
+
+    const std::string type_key = plugin_capability_type_to_string(type);
+    for (const auto& [key, def] : print_config_def.options) {
+        if (def.plugin_type != type_key)
+            continue;
+        const Preset::Type owner = owner_of_option(key);
+        if (owner != Preset::TYPE_INVALID)
+            return owner;
+    }
+    return Preset::TYPE_INVALID;
+}
+
 static std::string resolve_cloud_base_url()
 {
     std::string cloud_base_url = "https://cloud.orcaslicer.com";

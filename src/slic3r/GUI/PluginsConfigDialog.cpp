@@ -102,47 +102,21 @@ void PluginsConfigDialog::on_script_message(const nlohmann::json& payload)
         }
         send_capability_config(id);
         show_status(_L("Configuration updated. Save the preset to persist it."), "success");
-    } else if (command == "restore_preset_defaults") {
+    } else if (command == "remove_preset_override") {
+        // "Restore defaults" for a preset means holding no override at all: the capability goes back
+        // to the global configuration, which is where an untouched preset takes its values from. The
+        // plugin's own get_default_config() is the global config's default, not the preset's.
         if (!m_parse_error.empty()) {
             send_save_error(id, m_parse_error);
             return;
         }
 
         const int rc = wxMessageBox(wxString::Format(_L("Restore the default configuration for \"%s\"?\n\n"
-                                                        "This writes the plugin defaults into the current preset override."),
+                                                        "This discards the preset's override and uses the global configuration."),
                                                      from_u8(id.name)),
                                     _L("Restore defaults"), wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this);
         if (rc != wxYES)
             return;
-
-        const auto cap = PluginManager::instance().get_loader().get_plugin_capability_by_name(id);
-        if (!cap)
-            return;
-
-        nlohmann::json defaults;
-        try {
-            wxBusyCursor  busy;
-            PythonGILState gil;
-            defaults = cap->instance->get_default_config();
-        } catch (const std::exception& ex) {
-            // A broken plugin must not be able to wipe the stored config: store nothing and say so.
-            send_save_error(id, into_u8(GUI::format_wxstr(_L("The plugin failed to supply its default configuration (%1%)."),
-                                                          from_u8(ex.what()))));
-            return;
-        }
-
-        const MutationResult result = m_service.set_preset_override(m_overrides, id, defaults);
-        if (!result.ok) {
-            send_save_error(id, result.error);
-            return;
-        }
-        send_capability_config(id);
-        show_status(_L("Default configuration restored. Save the preset to persist it."), "success");
-    } else if (command == "remove_preset_override") {
-        if (!m_parse_error.empty()) {
-            send_save_error(id, m_parse_error);
-            return;
-        }
 
         const MutationResult result = m_service.remove_preset_override(m_overrides, id);
         if (!result.ok) {

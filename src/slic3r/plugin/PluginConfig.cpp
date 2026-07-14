@@ -9,6 +9,7 @@
 #include <slic3r/GUI/format.hpp>
 #include <slic3r/plugin/PluginLoader.hpp>
 #include <slic3r/plugin/PluginManager.hpp>
+#include <slic3r/plugin/PresetPluginConfig.hpp>
 #include <slic3r/plugin/PythonInterpreter.hpp>
 #include <slic3r/plugin/PythonPluginInterface.hpp>
 #include <stdexcept>
@@ -41,6 +42,25 @@ std::pair<std::string, std::string> capability_identity(const PluginCapabilityIn
         throw std::runtime_error(std::string(api_name) + "() is only available on a capability loaded by the plugin host");
 
     return id;
+}
+
+// The identity above, completed with the type, which decides which preset may override the
+// capability (see preset_type_for_capability). Taken from the instance rather than from the loader's
+// registry: a capability calling get_config() from on_load() is not registered yet, and it must
+// still see its preset's config. get_type() is the plugin's own method, so a raising one costs it
+// only the preset layer — Unknown names no preset, and the base config answers as it always did.
+PluginCapabilityIdentifier capability_full_identity(const PluginCapabilityInterface& capability, const char* api_name)
+{
+    const auto [plugin_key, capability_name] = capability_identity(capability, api_name);
+
+    PluginCapabilityType type = PluginCapabilityType::Unknown;
+    try {
+        type = capability.get_type();
+    } catch (const std::exception& ex) {
+        BOOST_LOG_TRIVIAL(warning) << "Capability '" << capability_name << "' of plugin '" << plugin_key
+                                   << "': get_type() failed (" << ex.what() << "); reading the base config only";
+    }
+    return {type, capability_name, plugin_key};
 }
 
 } // namespace
@@ -178,18 +198,19 @@ bool PluginConfig::dirty() const
 
 nlohmann::json capability_get_config(const PluginCapabilityInterface& capability)
 {
-    const auto [plugin_key, capability_name] = capability_identity(capability, "get_config");
-
-    const BaseConfig config = PluginManager::instance().get_config().get_config(plugin_key, capability_name);
-    // Never saved: hand back an empty object so a plugin can index the result unconditionally.
-    return config.empty() ? nlohmann::json::object() : config.config;
+    // The active preset's override, when it has one, is the config this run must use: it is what the
+    // user attached to the preset being sliced, and config.json is the fallback. The resolution is
+    // shared with the dialogs, so a capability reads back exactly the config its UI showed as
+    // effective. Stored in neither layer: an empty object, so a plugin can index it unconditionally.
+    return active_capability_config(capability_full_identity(capability, "get_config")).config;
 }
 
 std::string capability_get_config_version(const PluginCapabilityInterface& capability)
 {
-    const auto [plugin_key, capability_name] = capability_identity(capability, "get_config_version");
-
-    return PluginManager::instance().get_config().get_config(plugin_key, capability_name).plugin_version;
+    // The version that wrote the config get_config() just handed out, whichever layer that was: the
+    // two must come from the same layer, or a plugin would migrate one layer's config by another's
+    // version stamp.
+    return active_capability_config(capability_full_identity(capability, "get_config_version")).stored_plugin_version;
 }
 
 bool capability_save_config(const PluginCapabilityInterface& capability, const nlohmann::json& config)

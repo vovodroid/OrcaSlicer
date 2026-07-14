@@ -67,4 +67,15 @@ public:
                                                      const PluginCapabilityIdentifier& id) const;
 };
 
+// The same `preset override -> base config -> none` resolution, against the preset that is active
+// right now instead of a document the caller holds: this is what a running capability reads through
+// the Python config API, so a preset that overrides a capability configures the slice it drives.
+//
+// Only one preset type can reference a given capability type (preset_type_for_capability), so there
+// is exactly one preset to consult. Filament capabilities are the exception and are not supported:
+// the active filament preset is per-extruder and a capability does not say which extruder it runs
+// for, so they read the base config. See active_preset_for() for why, and for what it will take to
+// lift that. Base config also in a host with no preset bundle (the plugin unit tests).
+EffectiveCapabilityConfig active_capability_config(const PluginCapabilityIdentifier& id);
+
 } // namespace Slic3r

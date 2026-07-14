@@ -151,12 +151,17 @@ private:
 // passed in from Python, so a capability cannot reach another capability's config.
 // Throw std::runtime_error (surfacing to Python as RuntimeError) on an unmaterialized instance.
 
-// Only the user-editable cap_config. An empty object when nothing has been saved yet.
+// Only the user-editable cap_config, resolved the way the config UI presents it: the active preset's
+// override when it has one, otherwise the config stored here (see active_capability_config). An
+// empty object when neither layer holds one.
 nlohmann::json capability_get_config(const PluginCapabilityInterface& capability);
-// The plugin version that last wrote the entry, so a plugin can migrate a stale cap_config.
-// Empty when the capability has no stored config.
+// The plugin version that last wrote the config get_config() returns — the same layer it came from —
+// so a plugin can migrate a stale cap_config. Empty when the capability has no stored config.
 std::string capability_get_config_version(const PluginCapabilityInterface& capability);
 // Replaces cap_config and persists. Host-managed identity and version metadata are preserved.
+// Writes the store here, never a preset: presets are the user's to edit, and a plugin saving from a
+// worker thread cannot mark one dirty. A capability whose active preset overrides it will therefore
+// keep reading that override back, not what it saved.
 bool capability_save_config(const PluginCapabilityInterface& capability, const nlohmann::json& config);
 
 } // namespace Slic3r

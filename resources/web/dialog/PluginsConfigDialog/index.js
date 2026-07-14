@@ -233,21 +233,19 @@ function UpdateConfigMeta(payload) {
 
   const meta = document.getElementById("configMeta");
   const badge = document.getElementById("configSourceBadge");
-  const useGlobal = document.getElementById("configUseGlobalBtn");
   const save = document.getElementById("configSaveBtn");
   const restore = document.getElementById("configRestoreBtn");
-  if (!meta || !badge || !useGlobal)
+  if (!meta || !badge)
     return;
 
   const source = String(payload?.source || "none");
   badge.textContent = source === "preset" ? "Preset override" :
     (source === "base" ? "Inherited from global configuration" : "No saved configuration");
-  useGlobal.hidden = !selectedHasPresetOverride;
-  useGlobal.disabled = selectedReadOnly;
   if (save)
     save.disabled = selectedReadOnly;
+  // There is nothing to discard when the preset holds no override of its own.
   if (restore)
-    restore.disabled = selectedReadOnly;
+    restore.disabled = selectedReadOnly || !selectedHasPresetOverride;
   meta.hidden = false;
 }
 
@@ -361,22 +359,11 @@ function SaveCapabilityConfig() {
   });
 }
 
-// Asks the native side to write the capability's default config over whatever is stored. The
-// defaults come from the capability's get_default_config(), never from this page — the host does not
-// know what a given plugin considers default. The native side confirms before discarding anything,
-// and replies with the same "saved" payload, so both editors reload from what was persisted.
+// Drops the preset's override, which is what "default" means here: the capability falls back to the
+// global configuration, the same as a preset that was never overridden. The native side confirms
+// before discarding it and then re-sends the capability's config, so the editors reload from what is
+// now effective rather than from what was typed.
 function RestoreCapabilityConfig() {
-  if (!selectedPluginKey || !selectedCapabilityName)
-    return;
-
-  SendMessage("restore_preset_defaults", {
-    plugin_key: selectedPluginKey,
-    capability_name: selectedCapabilityName,
-    capability_type: selectedCapabilityType
-  });
-}
-
-function UseGlobalCapabilityConfig() {
   if (!selectedPluginKey || !selectedCapabilityName || !selectedHasPresetOverride)
     return;
 
@@ -481,10 +468,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const restoreBtn = document.getElementById("configRestoreBtn");
   if (restoreBtn)
     restoreBtn.addEventListener("click", RestoreCapabilityConfig);
-
-  const useGlobalBtn = document.getElementById("configUseGlobalBtn");
-  if (useGlobalBtn)
-    useGlobalBtn.addEventListener("click", UseGlobalCapabilityConfig);
 
   const text = document.getElementById("configText");
   if (text)

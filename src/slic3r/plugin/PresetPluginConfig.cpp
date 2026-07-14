@@ -1,6 +1,13 @@
 #include "PresetPluginConfig.hpp"
 
 #include "PluginManager.hpp"
+#include "PluginResolver.hpp"
+
+#include <slic3r/GUI/GUI_App.hpp>
+
+#include <boost/log/trivial.hpp>
+#include <libslic3r/PresetBundle.hpp>
+#include <wx/app.h>
 
 namespace Slic3r {
 
@@ -17,6 +24,48 @@ std::string running_plugin_version(const std::string& plugin_key)
     if (!PluginManager::instance().get_catalog().try_get_valid_plugin_descriptor(plugin_key, descriptor))
         return {};
     return descriptor.installed_version.empty() ? descriptor.version : descriptor.installed_version;
+}
+
+// Null wherever the plugin host runs without the GUI app (the unit tests): there are no presets
+// then, only the base config. wxGetApp() dereferences the app unconditionally, so ask wxWidgets.
+const PresetBundle* active_preset_bundle()
+{
+    const auto* app = dynamic_cast<const GUI::GUI_App*>(wxApp::GetInstance());
+    return app == nullptr ? nullptr : app->preset_bundle;
+}
+
+// The active preset that can carry an override for a capability of `type`. Edited, not selected: an
+// override typed into the tab configures the next slice the same way every other unsaved setting does.
+const Preset* active_preset_for(Preset::Type type)
+{
+    const PresetBundle* bundle = active_preset_bundle();
+    if (bundle == nullptr)
+        return nullptr;
+
+    switch (type) {
+    case Preset::TYPE_PRINT: return &bundle->prints.get_edited_preset();
+    case Preset::TYPE_PRINTER: return &bundle->printers.get_edited_preset();
+
+    // Deliberately unimplemented, not forgotten.
+    //
+    // There is no single active filament preset: one is selected per extruder, and a capability
+    // calls get_config() without saying which extruder it is running for, so we cannot tell which
+    // of them owns the config. Guessing (first override wins, or extruder 0) would hand a plugin
+    // another extruder's settings and look like a plugin bug, so it reads the base config instead —
+    // the value it had before presets could override anything.
+    //
+    // Nothing reaches this today: preset_type_for_capability only names TYPE_FILAMENT once a
+    // filament option declares a plugin_type, and none does (the two plugin-backed options are
+    // print and printer ones). Solve it with the first filament-backed capability, by pushing the
+    // extruder onto the plugin call context the trampoline already maintains
+    // (ScopedPluginAuditContext) along with the override text snapshotted off the preset, and
+    // resolving the preset here from that instead of from the bundle. The extruder must be optional:
+    // whole slicing steps (posSlice, psGCodePostProcess) span every extruder and have no current
+    // filament, and this fallback is the honest answer for them.
+    case Preset::TYPE_FILAMENT: return nullptr;
+
+    default: return nullptr;
+    }
 }
 
 } // namespace
@@ -123,6 +172,24 @@ MutationResult PresetPluginConfigService::remove_preset_override(CapabilityConfi
     // Reads back as the base value now that the override is gone.
     result.effective = get_effective_config(overrides, id);
     return result;
+}
+
+EffectiveCapabilityConfig active_capability_config(const PluginCapabilityIdentifier& id)
+{
+    const PresetPluginConfigService service;
+
+    CapabilityConfigDocument overrides;
+    if (const Preset* preset = active_preset_for(preset_type_for_capability(id.type))) {
+        std::string error;
+        if (!parse_plugin_overrides(plugin_overrides_of(*preset), overrides, error)) {
+            // Text we cannot read is not an override. Say so and resolve against the base config,
+            // which is what the capability ran with before anything was written into the preset.
+            BOOST_LOG_TRIVIAL(error) << "Preset \"" << preset->name << "\": " << error;
+            overrides = CapabilityConfigDocument();
+        }
+    }
+
+    return service.get_effective_config(overrides, id);
 }
 
 } // namespace Slic3r
