@@ -3090,7 +3090,7 @@ void TabPrint::build()
         // label — and so the revert arrow beside it — to show. No label-width override either: a 0
         // there means "no label column", which is what the neighbouring full-width groups want and
         // what would collapse this one.
-        optgroup = page->new_optgroup(L("Plugin Configuration"), L"param_gcode");
+        optgroup = page->new_optgroup(L("Plugin Preferences"), L"param_gcode");
         optgroup->append_single_option_line("plugin_preference_overrides");
 
         optgroup = page->new_optgroup(L("Notes"), "note", 0);
@@ -4488,7 +4488,7 @@ void TabFilament::build()
         option.opt.height = gcode_field_height;// 150;
         optgroup->append_single_option_line(option);
 
-        optgroup = page->new_optgroup(L("Plugin Configuration"), L"param_gcode");
+        optgroup = page->new_optgroup(L("Plugin Preferences"), L"param_gcode");
         optgroup->append_single_option_line("plugin_preference_overrides");
 
     page = add_options_page(L("Multimaterial"), "custom-gcode_multi_material"); // ORCA: icon only visible on placeholders
