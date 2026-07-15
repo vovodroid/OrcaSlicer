@@ -13,7 +13,6 @@
 #include <slic3r/GUI/format.hpp>
 #include <slic3r/plugin/PluginLoader.hpp>
 #include <slic3r/plugin/PluginManager.hpp>
-#include <slic3r/plugin/PresetPluginConfig.hpp>
 #include <slic3r/plugin/PythonInterpreter.hpp>
 #include <slic3r/plugin/PythonPluginInterface.hpp>
 #include <stdexcept>

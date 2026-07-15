@@ -2,7 +2,7 @@
 
 #include <slic3r/GUI/Widgets/WebViewHostDialog.hpp>
 #include <libslic3r/Preset.hpp>
-#include <slic3r/plugin/PresetPluginConfig.hpp>
+#include <slic3r/plugin/PluginConfig.hpp>
 
 #include <string>
 

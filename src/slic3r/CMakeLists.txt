@@ -619,10 +619,8 @@ set(SLIC3R_GUI_SOURCES
     plugin/CloudPluginService.hpp
     plugin/PluginFsUtils.cpp
     plugin/PluginFsUtils.hpp
-    plugin/CapabilityConfigDocument.hpp
     plugin/PluginConfig.cpp
     plugin/PluginConfig.hpp
-    plugin/PresetPluginConfig.hpp
     plugin/PythonJsonUtils.hpp
     plugin/PluginLoader.cpp
     plugin/PluginLoader.hpp
