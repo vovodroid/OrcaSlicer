@@ -58,7 +58,7 @@ const Preset* PluginsConfigDialog::current_preset() const
     }
 }
 
-PluginCapabilityIdentifier PluginsConfigDialog::identifier_from(const nlohmann::json& payload) const
+PluginCapabilityId PluginsConfigDialog::identifier_from(const nlohmann::json& payload) const
 {
     return {plugin_capability_type_from_string(payload.value("capability_type", "")),
             payload.value("capability_name", ""),
@@ -76,7 +76,7 @@ void PluginsConfigDialog::on_script_message(const nlohmann::json& payload)
         return;
     }
 
-    const PluginCapabilityIdentifier id = identifier_from(payload);
+    const PluginCapabilityId id = identifier_from(payload);
 
     if (command == "get_capability_config") {
         send_capability_config(id);
@@ -143,7 +143,7 @@ void PluginsConfigDialog::send_capabilities()
     call_web_handler(response);
 }
 
-void PluginsConfigDialog::send_capability_config(const PluginCapabilityIdentifier& id)
+void PluginsConfigDialog::send_capability_config(const PluginCapabilityId& id)
 {
     const Preset* preset = current_preset();
 
@@ -156,7 +156,7 @@ void PluginsConfigDialog::send_capability_config(const PluginCapabilityIdentifie
     response["custom_html"]     = "";
     response["error"]           = "";
 
-    const auto cap = PluginManager::instance().get_loader().get_plugin_capability_by_name(id);
+    const auto cap = PluginManager::instance().get_plugin_capability(id.plugin_key, id.name, id.type, false);
     if (!cap || preset == nullptr) {
         response["error"] = into_u8(_L("This capability is no longer available."));
         call_web_handler(response);
@@ -173,11 +173,11 @@ void PluginsConfigDialog::send_capability_config(const PluginCapabilityIdentifie
     if (!m_parse_error.empty())
         response["error"] = m_parse_error;
 
-    if (cap->has_config_ui) {
+    if (cap->config_ui_available()) {
         try {
             wxBusyCursor  busy;
             PythonGILState gil;
-            response["custom_html"] = cap->instance->get_config_ui();
+            response["custom_html"] = cap->get_config_ui();
         } catch (const std::exception& ex) {
             response["error"] = into_u8(GUI::format_wxstr(_L("The plugin's configuration UI failed to load (%1%). Showing the default editor."),
                                                           from_u8(ex.what())));
@@ -187,7 +187,7 @@ void PluginsConfigDialog::send_capability_config(const PluginCapabilityIdentifie
     call_web_handler(response);
 }
 
-void PluginsConfigDialog::send_save_error(const PluginCapabilityIdentifier& id, const std::string& error)
+void PluginsConfigDialog::send_save_error(const PluginCapabilityId& id, const std::string& error)
 {
     call_web_handler({{"command", "capability_config_saved"},
                       {"plugin_key", id.plugin_key},

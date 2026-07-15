@@ -4,7 +4,7 @@
 #include <libslic3r/Config.hpp>   // PluginCapabilityRef, parse_capability_ref
 #include <libslic3r/Preset.hpp>   // Preset::Type
 #include <libslic3r/PresetBundle.hpp>
-#include <slic3r/plugin/PluginLoader.hpp> // PluginCapabilityIdentifier
+#include <slic3r/plugin/PluginManager.hpp> // PluginCapabilityId
 #include <slic3r/plugin/PythonPluginInterface.hpp> // PluginCapabilityType
 #include <cstddef>
 #include <functional>
@@ -78,13 +78,13 @@ std::string resolve_recovery_url(const PluginCapabilityRef& ref);
 // (ConfigOptionDef::is_plugin_backed) currently references: a manifest entry nobody points at is not
 // in use. Pure preset logic — the catalog and loader are not consulted. Empty for untracked types.
 std::vector<PluginCapabilityRef> referenced_capabilities(Preset::Type type, const Preset& preset);
-std::vector<PluginCapabilityIdentifier> capabilities_in_use(Preset::Type type, const Preset& preset);
+std::vector<PluginCapabilityId> capabilities_in_use(Preset::Type type, const Preset& preset);
 
 // The referenced capabilities of the active preset(s) of `type` that are loaded right now: the set
 // that can actually be configured. Missing and broken refs are absent, having no instance to ask for
 // a config UI or defaults. A loaded-but-disabled capability IS listed — it still has stored config
 // worth editing.
-std::vector<PluginCapabilityIdentifier> capabilities_in_use(const PresetBundle& preset_bundle, Preset::Type type);
+std::vector<PluginCapabilityId> capabilities_in_use(const PresetBundle& preset_bundle, Preset::Type type);
 
 bool check_capability_in_use(const std::string& capability_refs);
 

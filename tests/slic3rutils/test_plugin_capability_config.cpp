@@ -57,8 +57,9 @@ py::object make_capability(const std::string& class_name,
 
     if (!plugin_key.empty()) {
         auto iface = instance.cast<std::shared_ptr<PluginCapabilityInterface>>();
+        const PluginCapabilityType type = iface->get_type();
         iface->set_audit_plugin_key(plugin_key);
-        iface->set_audit_capability_name(capability_name);
+        iface->set_resolved_identity(capability_name, type);
     }
     return instance;
 }

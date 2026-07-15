@@ -61,12 +61,12 @@ CapabilityConfigEntry decode_entry(const CapabilityConfigId& id, const nlohmann:
 std::string running_plugin_version(const std::string& plugin_key)
 {
     PluginDescriptor descriptor;
-    if (!PluginManager::instance().get_catalog().try_get_valid_plugin_descriptor(plugin_key, descriptor))
+    if (!PluginManager::instance().try_get_valid_plugin_descriptor(plugin_key, descriptor))
         return {};
     return descriptor.installed_version.empty() ? descriptor.version : descriptor.installed_version;
 }
 
-CapabilityConfigId make_id(const PluginCapabilityIdentifier& id)
+CapabilityConfigId make_id(const PluginCapabilityId& id)
 {
     return CapabilityConfigId{id.plugin_key, id.name};
 }
@@ -84,7 +84,7 @@ const PresetBundle* active_preset_bundle()
 // was never materialized: refuse rather than read or clobber a wrong entry.
 std::pair<std::string, std::string> capability_identity(const PluginCapabilityInterface& capability, const char* api_name)
 {
-    std::pair<std::string, std::string> id{capability.audit_plugin_key(), capability.audit_capability_name()};
+    std::pair<std::string, std::string> id{capability.audit_plugin_key(), capability.name()};
     if (id.first.empty() || id.second.empty())
         throw std::runtime_error(std::string(api_name) + "() is only available on a capability loaded by the plugin host");
 
@@ -93,7 +93,7 @@ std::pair<std::string, std::string> capability_identity(const PluginCapabilityIn
 
 // The capability type identifies the preset that owns its override. If a plugin raises while
 // reporting its type, resolve against the base config instead of failing the capability config API.
-PluginCapabilityIdentifier capability_full_identity(const PluginCapabilityInterface& capability, const char* api_name)
+PluginCapabilityId capability_full_identity(const PluginCapabilityInterface& capability, const char* api_name)
 {
     const auto [plugin_key, capability_name] = capability_identity(capability, api_name);
 
@@ -356,7 +356,7 @@ std::string serialize_plugin_overrides(const CapabilityConfigDocument& document)
 }
 
 EffectiveCapabilityConfig PresetPluginConfigService::get_effective_config(const CapabilityConfigDocument&   overrides,
-                                                                         const PluginCapabilityIdentifier& id) const
+                                                                         const PluginCapabilityId& id) const
 {
     EffectiveCapabilityConfig result;
     result.id                     = make_id(id);
@@ -380,7 +380,7 @@ EffectiveCapabilityConfig PresetPluginConfigService::get_effective_config(const 
 }
 
 MutationResult PresetPluginConfigService::set_preset_override(CapabilityConfigDocument&         overrides,
-                                                              const PluginCapabilityIdentifier& id,
+                                                              const PluginCapabilityId& id,
                                                               const nlohmann::json&             value) const
 {
     MutationResult           result;
@@ -405,7 +405,7 @@ MutationResult PresetPluginConfigService::set_preset_override(CapabilityConfigDo
 }
 
 MutationResult PresetPluginConfigService::remove_preset_override(CapabilityConfigDocument&         overrides,
-                                                                 const PluginCapabilityIdentifier& id) const
+                                                                 const PluginCapabilityId& id) const
 {
     MutationResult result;
     result.ok        = true;
@@ -414,7 +414,7 @@ MutationResult PresetPluginConfigService::remove_preset_override(CapabilityConfi
     return result;
 }
 
-EffectiveCapabilityConfig active_capability_config(const PluginCapabilityIdentifier& id)
+EffectiveCapabilityConfig active_capability_config(const PluginCapabilityId& id)
 {
     const PresetPluginConfigService service;
 
@@ -476,14 +476,12 @@ bool capability_save_config(const PluginCapabilityInterface& capability, const n
     return PluginManager::instance().get_config().store_capability_config(plugin_key, capability_name, config);
 }
 
-nlohmann::json PluginConfig::capabilities_payload(const std::vector<PluginCapabilityIdentifier>& caps)
+nlohmann::json PluginConfig::capabilities_payload(const std::vector<PluginCapabilityId>& caps)
 {
-    PluginLoader& loader = PluginManager::instance().get_loader();
-
     nlohmann::json payload = nlohmann::json::array();
-    for (const PluginCapabilityIdentifier& id : caps) {
+    for (const PluginCapabilityId& id : caps) {
         // A capability unloaded since the list was built has nothing to configure.
-        const auto capability = loader.get_plugin_capability_by_name(id);
+        const auto capability = PluginManager::instance().get_plugin_capability(id.plugin_key, id.name, id.type, false);
         if (!capability)
             continue;
 
@@ -492,7 +490,7 @@ nlohmann::json PluginConfig::capabilities_payload(const std::vector<PluginCapabi
         entry["name"]          = id.name;
         entry["type"]          = plugin_capability_type_display_name(id.type);
         entry["type_key"]      = plugin_capability_type_to_string(id.type);
-        entry["has_config_ui"] = capability->has_config_ui;
+        entry["has_config_ui"] = capability->config_ui_available();
         payload.push_back(std::move(entry));
     }
     return payload;
@@ -500,7 +498,7 @@ nlohmann::json PluginConfig::capabilities_payload(const std::vector<PluginCapabi
 
 // Config is sent as a JSON value, not text: the default editor pretty-prints it into its textarea,
 // and a custom UI receives it as-is through window.orca.
-nlohmann::json PluginConfig::get_config_response(const PluginCapabilityIdentifier& id)
+nlohmann::json PluginConfig::get_config_response(const PluginCapabilityId& id)
 {
     nlohmann::json response;
     response["command"]         = "capability_config";
@@ -513,7 +511,7 @@ nlohmann::json PluginConfig::get_config_response(const PluginCapabilityIdentifie
 
     // Scoped to the full identity, so a stale request from a page that has not caught up with a
     // refresh misses rather than reading a different plugin's config.
-    const auto cap = PluginManager::instance().get_loader().get_plugin_capability_by_name(id);
+    const auto cap = PluginManager::instance().get_plugin_capability(id.plugin_key, id.name, id.type, false);
     if (!cap) {
         BOOST_LOG_TRIVIAL(warning) << "Ignoring config request for a capability that is no longer loaded. plugin_key="
                                    << id.plugin_key << " capability_name=" << id.name;
@@ -523,7 +521,7 @@ nlohmann::json PluginConfig::get_config_response(const PluginCapabilityIdentifie
 
     response["config"] = PluginManager::instance().get_config().get_config(id.plugin_key, id.name).config;
 
-    if (cap->has_config_ui) {
+    if (cap->config_ui_available()) {
         // A raising or empty get_config_ui() costs the capability only its custom UI: report the
         // failure and let the page fall back to the default JSON editor over the same stored config.
         std::string html;
@@ -532,7 +530,7 @@ nlohmann::json PluginConfig::get_config_response(const PluginCapabilityIdentifie
             wxBusyCursor busy;
             try {
                 PythonGILState gil;
-                html = cap->instance->get_config_ui();
+                html = cap->get_config_ui();
             } catch (const std::exception& ex) {
                 error = ex.what();
             } catch (...) {
@@ -557,7 +555,7 @@ nlohmann::json PluginConfig::get_config_response(const PluginCapabilityIdentifie
     return response;
 }
 
-nlohmann::json PluginConfig::save_config_response(const PluginCapabilityIdentifier& id, const nlohmann::json& config)
+nlohmann::json PluginConfig::save_config_response(const PluginCapabilityId& id, const nlohmann::json& config)
 {
     nlohmann::json response;
     response["command"]         = "capability_config_saved";
@@ -567,7 +565,7 @@ nlohmann::json PluginConfig::save_config_response(const PluginCapabilityIdentifi
     response["ok"]              = false;
     response["error"]           = "";
 
-    const auto cap = PluginManager::instance().get_loader().get_plugin_capability_by_name(id);
+    const auto cap = PluginManager::instance().get_plugin_capability(id.plugin_key, id.name, id.type, false);
     if (!cap) {
         BOOST_LOG_TRIVIAL(warning) << "Refusing to save config for a capability that is no longer loaded. plugin_key="
                                    << id.plugin_key << " capability_name=" << id.name;
@@ -603,7 +601,7 @@ nlohmann::json PluginConfig::save_config_response(const PluginCapabilityIdentifi
 
 // The host never invents the default: a capability that does not override get_default_config()
 // restores an empty config, which is right for one that applies its own defaults on read.
-nlohmann::json PluginConfig::restore_config_response(const PluginCapabilityIdentifier& id)
+nlohmann::json PluginConfig::restore_config_response(const PluginCapabilityId& id)
 {
     nlohmann::json response;
     response["command"]         = "capability_config_saved";
@@ -613,7 +611,7 @@ nlohmann::json PluginConfig::restore_config_response(const PluginCapabilityIdent
     response["ok"]              = false;
     response["error"]           = "";
 
-    const auto cap = PluginManager::instance().get_loader().get_plugin_capability_by_name(id);
+    const auto cap = PluginManager::instance().get_plugin_capability(id.plugin_key, id.name, id.type, false);
     if (!cap) {
         BOOST_LOG_TRIVIAL(warning) << "Refusing to restore config for a capability that is no longer loaded. plugin_key="
                                    << id.plugin_key << " capability_name=" << id.name;
@@ -627,7 +625,7 @@ nlohmann::json PluginConfig::restore_config_response(const PluginCapabilityIdent
         wxBusyCursor busy;
         try {
             PythonGILState gil;
-            defaults = cap->instance->get_default_config();
+            defaults = cap->get_default_config();
         } catch (const std::exception& ex) {
             error = ex.what();
         } catch (...) {

@@ -28,11 +28,11 @@ private:
 
     const Preset* current_preset() const;
     void          send_capabilities();
-    void          send_capability_config(const PluginCapabilityIdentifier& id);
-    void          send_save_error(const PluginCapabilityIdentifier& id, const std::string& error);
+    void          send_capability_config(const PluginCapabilityId& id);
+    void          send_save_error(const PluginCapabilityId& id, const std::string& error);
     void          show_status(const wxString& message, const char* level);
 
-    PluginCapabilityIdentifier identifier_from(const nlohmann::json& payload) const;
+    PluginCapabilityId identifier_from(const nlohmann::json& payload) const;
 
     Preset::Type              m_type = Preset::TYPE_INVALID;
     PresetPluginConfigService m_service;

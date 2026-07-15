@@ -17,6 +17,7 @@
 namespace Slic3r {
 
 class PluginCapabilityInterface;
+struct PluginCapabilityId;
 
 /*
 Example config.json shape
@@ -85,18 +86,18 @@ public:
 
     // The config sidebar's rows, in the order given. Capabilities no longer loaded are skipped — the
     // sidebar only offers what can actually be configured.
-    static nlohmann::json capabilities_payload(const std::vector<PluginCapabilityIdentifier>& caps);
+    static nlohmann::json capabilities_payload(const std::vector<PluginCapabilityId>& caps);
 
     // One capability's stored config, plus its custom HTML UI when it provides one.
-    static nlohmann::json get_config_response(const PluginCapabilityIdentifier& id);
+    static nlohmann::json get_config_response(const PluginCapabilityId& id);
 
     // Persists one capability's config. `config` is either text from the default editor (re-parsed
     // here, so malformed JSON can never reach config.json) or a structured value from a custom UI.
-    static nlohmann::json save_config_response(const PluginCapabilityIdentifier& id, const nlohmann::json& config);
+    static nlohmann::json save_config_response(const PluginCapabilityId& id, const nlohmann::json& config);
 
     // Overwrites one capability's stored config with its get_default_config(). The caller must have
     // confirmed with the user first — this does not ask.
-    static nlohmann::json restore_config_response(const PluginCapabilityIdentifier& id);
+    static nlohmann::json restore_config_response(const PluginCapabilityId& id);
 
 private:
     mutable std::mutex m_mutex;

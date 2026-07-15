@@ -54,17 +54,17 @@ class PresetPluginConfigService
 {
 public:
     EffectiveCapabilityConfig get_effective_config(const CapabilityConfigDocument& overrides,
-                                                   const PluginCapabilityIdentifier& id) const;
+                                                   const PluginCapabilityId& id) const;
     MutationResult            set_preset_override(CapabilityConfigDocument& overrides,
-                                                  const PluginCapabilityIdentifier& id,
+                                                  const PluginCapabilityId& id,
                                                   const nlohmann::json& value) const;
     MutationResult            remove_preset_override(CapabilityConfigDocument& overrides,
-                                                     const PluginCapabilityIdentifier& id) const;
+                                                     const PluginCapabilityId& id) const;
 };
 
 // The same resolution against the preset that is active right now, rather than a document the caller
 // holds: this is what a running capability reads through the Python config API. It falls back to the
 // base config when no active preset bundle is available.
-EffectiveCapabilityConfig active_capability_config(const PluginCapabilityIdentifier& id);
+EffectiveCapabilityConfig active_capability_config(const PluginCapabilityId& id);
 
 } // namespace Slic3r
