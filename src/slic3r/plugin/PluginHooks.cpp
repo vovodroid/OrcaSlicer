@@ -14,6 +14,7 @@
 
 #include <memory>
 #include <string>
+#include <stdexcept>
 
 namespace Slic3r::plugin_hooks {
 namespace {
@@ -25,12 +26,16 @@ void install_capability_resolver()
 {
     ConfigBase::set_resolve_capability_fn([](const std::string& cap_name, const std::string& cap_type) {
         PluginManager& plugin_mgr = PluginManager::instance();
-        auto plugin_cap = plugin_mgr.get_loader().try_get_plugin_capability_by_name_and_type(cap_name, plugin_capability_type_from_string(cap_type));
+        const PluginCapabilityType type = plugin_capability_type_from_string(cap_type);
+        // only_enabled = false: this resolves the reference a preset STORES, which must stay
+        // resolvable whether or not the user currently has the capability enabled. Filtering on
+        // the enable flag here would quietly drop the reference out of the preset's manifest.
+        auto plugin_cap = plugin_mgr.get_plugin_capability(cap_name, type, /*only_enabled=*/false);
         if (!plugin_cap)
             return std::string();
 
         PluginDescriptor descriptor;
-        if (!plugin_mgr.get_catalog().try_get_plugin_descriptor(plugin_cap->plugin_key, descriptor))
+        if (!plugin_mgr.try_get_plugin_descriptor_for_capability(cap_name, type, descriptor))
             return std::string();
 
         // Cloud plugins are resolved at runtime via the UUID in the middle field, so the first
@@ -62,11 +67,17 @@ void install_slicing_pipeline_hook()
             execute_capabilities_from_refs<SlicingPipelinePluginCapability>(
                 *caps, plugs, PluginCapabilityType::SlicingPipeline,
                 [&](std::shared_ptr<SlicingPipelinePluginCapability> cap, const PluginCapabilityRef& ref) {
+                    const std::string plugin_key = ref.uuid.empty() ? ref.name : ref.uuid;
                     ExecutionResult r;
                     try {
+                        // Read manager state before acquiring the GIL so this path does not take
+                        // m_mutex in the opposite order to plugin teardown.
+                        const auto plugin_settings = PluginManager::instance().get_plugin_settings(plugin_key);
                         // GIL is acquired per capability (not once for the whole dispatch) so it
                         // is released between capabilities.
                         PythonGILState gil;
+                        if (!gil)
+                            throw std::runtime_error("Python interpreter is shutting down");
                         // throw_if_canceled() is protected on PrintBase; canceled() is the public
                         // equivalent check (same cancel flag), so honor cancellation via it.
                         if (print.canceled())
@@ -78,8 +89,7 @@ void install_slicing_pipeline_hook()
                         ctx.object = object;
                         // hand the plugin its own [tool.orcaslicer.plugin.settings] as ctx.params
                         // (same plugin_key the capability was resolved by, so it always matches).
-                        const std::string plugin_key = ref.uuid.empty() ? ref.name : ref.uuid;
-                        ctx.params = PluginManager::instance().get_loader().get_plugin_settings(plugin_key);
+                        ctx.params = plugin_settings;
                         r = cap->execute(ctx);
                     } catch (const CanceledException&) {
                         throw; // cancellation must reach process(), never become a slicing error
