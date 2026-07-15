@@ -116,8 +116,6 @@ set(SLIC3R_GUI_SOURCES
     GUI/PluginPickerDialog.hpp
     GUI/PluginsDialog.cpp
     GUI/PluginsDialog.hpp
-    GUI/PluginScriptRunner.cpp
-    GUI/PluginScriptRunner.hpp
     GUI/SpeedDialDialog.cpp
     GUI/SpeedDialDialog.hpp
     GUI/ActionRegistry.cpp
@@ -438,6 +436,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/Project.hpp
     GUI/PublishDialog.cpp
     GUI/PublishDialog.hpp
+    GUI/PurgeModeDialog.cpp
+    GUI/PurgeModeDialog.hpp
     GUI/RammingChart.cpp
     GUI/RammingChart.hpp
     GUI/RecenterDialog.cpp
@@ -521,6 +521,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/Widgets/AMSControl.hpp
     GUI/Widgets/AMSItem.cpp
     GUI/Widgets/AMSItem.hpp
+    GUI/Widgets/MultiNozzleSync.cpp
+    GUI/Widgets/MultiNozzleSync.hpp
     GUI/Widgets/AxisCtrlButton.cpp
     GUI/Widgets/AxisCtrlButton.hpp
     GUI/SafetyOptionsDialog.hpp
@@ -623,9 +625,6 @@ set(SLIC3R_GUI_SOURCES
     plugin/CloudPluginService.hpp
     plugin/PluginFsUtils.cpp
     plugin/PluginFsUtils.hpp
-    plugin/PluginCatalog.cpp
-    plugin/PluginCatalog.hpp
-    plugin/PluginCallbackList.hpp
     plugin/PluginLoader.cpp
     plugin/PluginLoader.hpp
     plugin/PluginDescriptor.hpp

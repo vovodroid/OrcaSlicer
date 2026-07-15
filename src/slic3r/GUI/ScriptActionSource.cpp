@@ -1,12 +1,9 @@
 #include "ScriptActionSource.hpp"
 
 #include "GUI_App.hpp"
-#include "PluginScriptRunner.hpp"
+#include "I18N.hpp"
 #include "SpeedDialActionId.hpp"
 #include "slic3r/plugin/PluginManager.hpp"
-
-#include <slic3r/plugin/PluginLoader.hpp>
-#include <slic3r/plugin/PythonPluginInterface.hpp>
 
 #include <wx/thread.h>
 
@@ -18,11 +15,11 @@ namespace Slic3r { namespace GUI {
 
 namespace {
 
-std::string find_loaded_source_name(PluginLoader& loader, const std::string& plugin_key)
+std::string find_loaded_source_name(PluginManager& manager, const std::string& plugin_key)
 {
-    for (const PluginDescriptor& desc : loader.get_all_loaded_plugin_descriptors())
-        if (desc.plugin_key == plugin_key)
-            return desc.name.empty() ? plugin_key : desc.name;
+    PluginDescriptor descriptor;
+    if (manager.try_get_plugin_descriptor(plugin_key, descriptor) && !descriptor.name.empty())
+        return descriptor.name;
     return plugin_key;
 }
 
@@ -37,15 +34,15 @@ PluginScriptAction::PluginScriptAction(std::string plugin_key, std::string capab
 
 AppActionRunResult PluginScriptAction::run() const
 {
-    ScriptRunOutcome outcome = run_script_plugin_capability(plugin_key, capability);
-    AppActionRunResult::Level level = AppActionRunResult::Level::Info;
-    switch (outcome.level) {
-        case ScriptRunOutcome::Level::Success: level = AppActionRunResult::Level::Success; break;
-        case ScriptRunOutcome::Level::Error:   level = AppActionRunResult::Level::Error;   break;
-        case ScriptRunOutcome::Level::Busy:    level = AppActionRunResult::Level::Busy;    break;
-        case ScriptRunOutcome::Level::Info:    break;
-    }
-    return {level, outcome.message};
+    std::string error;
+    const ExecutionResult result = PluginManager::instance().run_script_capability(plugin_key, capability, error);
+    if (!error.empty())
+        return {AppActionRunResult::Level::Error, from_u8(error)};
+
+    const bool skipped = result.status == PluginResult::Skipped;
+    const wxString fallback = skipped ? _L("Script plugin skipped.") : _L("Script plugin finished.");
+    return {skipped ? AppActionRunResult::Level::Info : AppActionRunResult::Level::Success,
+            result.message.empty() ? fallback : from_u8(result.message)};
 }
 
 void ScriptActionSource::start(ActionRegistry& sink)
@@ -54,7 +51,7 @@ void ScriptActionSource::start(ActionRegistry& sink)
     assert(m_sink == nullptr);
     m_sink = &sink;
 
-    PluginLoader& loader = PluginManager::instance().get_loader();
+    PluginManager& manager = PluginManager::instance();
 
     auto refresh_source = [this](const std::string& plugin_key, ActionChange change) {
         if (!wxTheApp || wxGetApp().is_closing())
@@ -64,7 +61,7 @@ void ScriptActionSource::start(ActionRegistry& sink)
                 this->refresh_source(plugin_key, change);
         });
     };
-    auto refresh_capability = [this](const PluginCapabilityIdentifier& capability, ActionChange change) {
+    auto refresh_capability = [this](const PluginCapabilityId& capability, ActionChange change) {
         if (capability.type != PluginCapabilityType::Script || !wxTheApp || wxGetApp().is_closing())
             return;
         const std::string plugin_key = capability.plugin_key;
@@ -78,32 +75,32 @@ void ScriptActionSource::start(ActionRegistry& sink)
     // Subscribe before enumerating so a concurrent load cannot land in between the
     // initial snapshot and callback registration. Duplicate notifications are safe:
     // the sink upserts by id and tracking is de-duplicated.
-    loader.subscribe_on_load_callback(
+    manager.subscribe_on_load_callback(
         [refresh_source](const std::string& key) { refresh_source(key, ActionChange::Added); });
-    loader.subscribe_on_unload_callback(
+    manager.subscribe_on_unload_callback(
         [refresh_source](const std::string& key) { refresh_source(key, ActionChange::Removed); });
-    loader.subscribe_on_capability_load_callback(
-        [refresh_capability](const PluginCapabilityIdentifier& capability) {
+    manager.subscribe_on_capability_load_callback(
+        [refresh_capability](const PluginCapabilityId& capability) {
             refresh_capability(capability, ActionChange::Added);
         });
-    loader.subscribe_on_capability_unload_callback(
-        [refresh_capability](const PluginCapabilityIdentifier& capability) {
+    manager.subscribe_on_capability_unload_callback(
+        [refresh_capability](const PluginCapabilityId& capability) {
             refresh_capability(capability, ActionChange::Removed);
         });
 
     // enumerate
     std::unordered_map<std::string, std::string> source_names;
-    for (const PluginDescriptor& desc : loader.get_all_loaded_plugin_descriptors())
+    for (const PluginDescriptor& desc : manager.get_plugin_descriptors())
         if (!desc.name.empty())
             source_names.emplace(desc.plugin_key, desc.name);
 
-    for (const auto& capability : loader.get_plugin_capabilities_by_type(PluginCapabilityType::Script)) {
-        if (!capability || !capability->enabled)
+    for (const auto& capability : manager.get_plugin_capabilities("", PluginCapabilityType::Script)) {
+        if (!capability)
             continue;
-        auto source = source_names.find(capability->plugin_key);
-        const std::string& source_name = source == source_names.end() ? capability->plugin_key : source->second;
-        if (auto action = make_action(capability->plugin_key, capability->name, source_name)) {
-            track(capability->plugin_key, action->id());
+        auto source = source_names.find(capability->audit_plugin_key());
+        const std::string& source_name = source == source_names.end() ? capability->audit_plugin_key() : source->second;
+        if (auto action = make_action(capability->audit_plugin_key(), capability->name(), source_name)) {
+            track(capability->audit_plugin_key(), action->id());
             m_sink->upsert(std::move(action));
         }
     }
@@ -113,12 +110,12 @@ std::unique_ptr<AppAction> ScriptActionSource::make_action(const std::string& pl
                                                            const std::string& capability,
                                                            const std::string& source) const
 {
-    PluginLoader& loader = PluginManager::instance().get_loader();
-    if (!loader.is_plugin_loaded(plugin_key))
+    PluginManager& manager = PluginManager::instance();
+    if (!manager.is_plugin_loaded(plugin_key))
         return nullptr;
 
-    auto loaded = loader.get_plugin_capability_by_name(plugin_key, PluginCapabilityType::Script, capability);
-    if (!loaded || !loaded->enabled)
+    auto loaded = manager.get_plugin_capability(plugin_key, capability, PluginCapabilityType::Script);
+    if (!loaded)
         return nullptr;
 
     return std::make_unique<PluginScriptAction>(plugin_key, capability, source);
@@ -137,8 +134,8 @@ void ScriptActionSource::refresh_capability(const std::string& plugin_key, const
         return;
     }
 
-    PluginLoader& loader = PluginManager::instance().get_loader();
-    auto action = make_action(plugin_key, capability, find_loaded_source_name(loader, plugin_key));
+    PluginManager& manager = PluginManager::instance();
+    auto action = make_action(plugin_key, capability, find_loaded_source_name(manager, plugin_key));
     if (!action) {
         m_sink->remove(id);
         untrack(plugin_key, id);
@@ -163,12 +160,12 @@ void ScriptActionSource::refresh_source(const std::string& plugin_key, ActionCha
     if (change == ActionChange::Removed)
         return;
 
-    PluginLoader& loader = PluginManager::instance().get_loader();
-    const std::string source_name = find_loaded_source_name(loader, plugin_key);
-    for (const auto& capability : loader.get_plugin_capabilities_by_type(plugin_key, PluginCapabilityType::Script)) {
-        if (!capability || !capability->enabled)
+    PluginManager& manager = PluginManager::instance();
+    const std::string source_name = find_loaded_source_name(manager, plugin_key);
+    for (const auto& capability : manager.get_plugin_capabilities(plugin_key, PluginCapabilityType::Script)) {
+        if (!capability)
             continue;
-        if (auto action = make_action(plugin_key, capability->name, source_name)) {
+        if (auto action = make_action(plugin_key, capability->name(), source_name)) {
             track(plugin_key, action->id());
             m_sink->upsert(std::move(action));
         }

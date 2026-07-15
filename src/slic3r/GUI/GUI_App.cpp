@@ -1123,7 +1123,7 @@ void GUI_App::shutdown()
     if (m_is_recreating_gui) return;
     stop_http_server();
     set_closing(true);
-    Slic3r::PluginManager::instance().get_loader().set_shutting_down();
+    Slic3r::PluginManager::instance().set_shutting_down();
 
     if (m_agent)
         m_agent->set_printer_agent(nullptr);
@@ -2725,12 +2725,13 @@ void GUI_App::init_plugin_gui_wiring()
         });
     };
 
-    plugin_mgr.get_loader().subscribe_on_load_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
-    plugin_mgr.get_loader().subscribe_on_unload_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
-    plugin_mgr.get_loader().subscribe_on_load_callback(NetworkAgentFactory::register_python_plugin);
-    plugin_mgr.get_loader().subscribe_on_unload_callback(NetworkAgentFactory::deregister_python_plugin);
-    plugin_mgr.get_loader().subscribe_on_capability_load_callback(
-        [refresh_plugins_dialog](const PluginCapabilityIdentifier& capability) {
+    plugin_mgr.subscribe_on_unload_callback(PluginHostUi::close_windows_for_plugin);
+    plugin_mgr.subscribe_on_load_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
+    plugin_mgr.subscribe_on_unload_callback([refresh_plugins_dialog](const std::string&) { refresh_plugins_dialog(); });
+    plugin_mgr.subscribe_on_load_callback(NetworkAgentFactory::register_python_plugin);
+    plugin_mgr.subscribe_on_unload_callback(NetworkAgentFactory::deregister_python_plugin);
+    plugin_mgr.subscribe_on_capability_load_callback(
+        [refresh_plugins_dialog](const PluginCapabilityId& capability) {
             if (capability.type == PluginCapabilityType::PrinterConnection)
                 NetworkAgentFactory::register_python_printer_agent(capability.plugin_key, capability.name);
             refresh_plugins_dialog();
@@ -2742,8 +2743,8 @@ void GUI_App::init_plugin_gui_wiring()
                         plater->revalidate_current_plate_if_plugins_missing();
                 });
         });
-    plugin_mgr.get_loader().subscribe_on_capability_unload_callback(
-        [refresh_plugins_dialog](const PluginCapabilityIdentifier& capability) {
+    plugin_mgr.subscribe_on_capability_unload_callback(
+        [refresh_plugins_dialog](const PluginCapabilityId& capability) {
             if (capability.type == PluginCapabilityType::PrinterConnection)
                 NetworkAgentFactory::deregister_python_printer_agent(capability.plugin_key, capability.name);
             refresh_plugins_dialog();
@@ -2933,10 +2934,11 @@ bool GUI_App::on_init_inner()
         //update_label_colours_from_appconfig();
     }
     if (bool new_sys_menu_enabled = app_config->get("sys_menu_enabled") == "1";
-        init_sys_menu_enabled != new_sys_menu_enabled)
+        init_sys_menu_enabled != new_sys_menu_enabled) {
 #ifdef __WINDOWS__
         NppDarkMode::SetSystemMenuForApp(new_sys_menu_enabled);
 #endif
+    }
 #endif
 
     // Orca: we allow user to pin the version of plugin, so we don't need to remove old networking plugins when the app version is updated
@@ -3163,8 +3165,7 @@ bool GUI_App::on_init_inner()
     // plugins are discovered even before the network agent is ready.
     const std::string preset_folder = app_config->get("preset_folder");
     if (!preset_folder.empty()) {
-        plugin_mgr.get_catalog().set_cloud_plugin_dir(preset_folder);
-        plugin_mgr.get_loader().set_cloud_user_id(preset_folder);
+        plugin_mgr.set_cloud_user(preset_folder);
     }
 
     plugin_mgr.discover_plugins(false, true);
@@ -3182,9 +3183,9 @@ bool GUI_App::on_init_inner()
     // - then enumerate: upsert all actions into registry
     m_action_registry.init();
 
-    for (const std::string& plugin_key : plugin_mgr.get_catalog().get_enabled_plugin_keys()) {
-        if (!plugin_mgr.get_loader().is_plugin_loaded(plugin_key)) {
-            plugin_mgr.get_loader().load_plugin(plugin_mgr.get_catalog(), plugin_key, false);
+    for (const std::string& plugin_key : plugin_mgr.get_enabled_plugin_keys()) {
+        if (!plugin_mgr.is_plugin_loaded(plugin_key)) {
+            plugin_mgr.load_plugin(plugin_key, false);
             BOOST_LOG_TRIVIAL(info) << "Auto-loading plugin on startup: " << plugin_key;
         }
     }
@@ -3194,8 +3195,7 @@ bool GUI_App::on_init_inner()
 
     if (m_agent && m_agent->is_user_login()) {
         enable_user_preset_folder(true);
-        plugin_mgr.get_catalog().set_cloud_plugin_dir(m_agent->get_user_id());
-        plugin_mgr.get_loader().set_cloud_user_id(m_agent->get_user_id());
+        plugin_mgr.set_cloud_user(m_agent->get_user_id());
         // If there is a user logged in we do an immediate sync.
         std::vector<std::string> not_found, unauthorized;
         plugin_mgr.fetch_plugins_from_cloud(&not_found, &unauthorized);
@@ -3215,8 +3215,7 @@ bool GUI_App::on_init_inner()
         }
     } else {
         enable_user_preset_folder(false);
-        plugin_mgr.get_catalog().set_cloud_plugin_dir("");
-        plugin_mgr.get_loader().set_cloud_user_id("");
+        plugin_mgr.set_cloud_user("");
     }
 
     // BBS if load user preset failed
@@ -3761,8 +3760,24 @@ void GUI_App::switch_printer_agent()
         return;
     }
 
-    if (m_agent->get_printer_agent() == new_printer_agent)
+    // The factory caches agents per ID, so an identical pointer means the agent type is unchanged.
+    if (m_agent->get_printer_agent() == new_printer_agent) {
+        // Orca: the agent type is unchanged (e.g. switching between two Moonraker/Klipper
+        // printer presets), so the selected machine and the agent's cached device_info still
+        // point at the previously active printer preset. Re-select the machine when the new
+        // preset targets a different host, otherwise filament sync keeps hitting the old
+        // printer. (#12506)
+        if (effective_agent_id != BBL_PRINTER_AGENT_ID && m_device_manager && preset_bundle) {
+            const std::string print_host = config.opt_string("print_host");
+            if (!print_host.empty()) {
+                const std::string dev_id = MachineObject::dev_id_from_address(print_host, config.opt_string("printhost_port"));
+                MachineObject*    sel    = m_device_manager->get_selected_machine();
+                if (!sel || sel->get_dev_id() != dev_id)
+                    select_machine(effective_agent_id);
+            }
+        }
         return;
+    }
 
     // Swap the agent
     m_agent->set_printer_agent(new_printer_agent);
@@ -3773,10 +3788,8 @@ void GUI_App::switch_printer_agent()
     // Start discovery so Python agents can populate the device list via SSDP callback
     m_agent->start_discovery(true, false);
 
-    {
-        // Auto-switch MachineObject
-        select_machine(agent_info.id);
-    }
+    // Auto-switch MachineObject (new agent has empty device_info, so always re-select)
+    select_machine(effective_agent_id);
 }
 
 void GUI_App::select_machine(const std::string& agent_id)
@@ -4774,10 +4787,9 @@ void GUI_App::request_user_logout(const std::string& provider/* = ORCA_CLOUD_PRO
 
             remove_user_presets();
             enable_user_preset_folder(false);
-            Slic3r::PluginManager::instance().get_loader().unload_cloud_plugins();
-            Slic3r::PluginManager::instance().get_catalog().clear_cloud_plugin_catalog();
-            Slic3r::PluginManager::instance().get_catalog().set_cloud_plugin_dir("");
-            Slic3r::PluginManager::instance().get_loader().set_cloud_user_id("");
+            Slic3r::PluginManager::instance().unload_cloud_plugins();
+            Slic3r::PluginManager::instance().clear_cloud_plugin_catalog();
+            Slic3r::PluginManager::instance().set_cloud_user("");
             preset_bundle->load_user_presets(DEFAULT_USER_FOLDER_NAME, ForwardCompatibilitySubstitutionRule::Enable);
             mainframe->update_side_preset_ui();
 
@@ -5249,21 +5261,28 @@ void GUI_App::on_http_error(wxCommandEvent &evt)
         if (plater != nullptr && wxGetApp().imgui()->display_initialized()) {
             std::string text;
 
+            // Name the specific preset in the header so the user knows which one conflicts.
+            // The agent injects the local preset name into every 409 conflict body, so this is
+            // normally populated; fall back to a generic header if it is somehow missing.
+            const std::string header = conflict_preset_name.empty()
+                ? _u8L("Cloud sync conflict:")
+                : format(_u8L("Cloud sync conflict for preset \"%s\":"), conflict_preset_name);
+
             switch (conflict_code) {
             case -1:
-                text = _u8L("Cloud sync conflict: this preset has a newer version in OrcaCloud.\n"
+                text = header + " " + _u8L("This preset has a newer version in OrcaCloud.\n"
                             "Pull downloads the cloud copy. Force push overwrites it with your local preset.");
                 break;
             case -2:
-                text = _u8L("Cloud sync conflict: a preset with this name already exists in OrcaCloud.\n"
+                text = header + " " + _u8L("A preset with this name already exists in OrcaCloud.\n"
                             "Pull downloads the cloud copy. Force push overwrites it with your local preset.");
                 break;
             case -3:
-                text = _u8L("Cloud sync conflict: a preset with the same name was previously deleted from the cloud.\n"
+                text = header + " " + _u8L("A preset with the same name was previously deleted from the cloud.\n"
                             "Delete will delete your local preset. Force push overwrites it with your local preset.");
                 break;
             default:
-                text = _u8L("Cloud sync conflict: there was an unexpected or unidentified preset conflict.\n"
+                text = header + " " + _u8L("There was an unexpected or unidentified preset conflict.\n"
                             "Pull downloads the cloud copy. Force push overwrites it with your local preset.");
                 break;
             };
@@ -5282,10 +5301,12 @@ void GUI_App::on_http_error(wxCommandEvent &evt)
                 [this, conflict_setting_id, conflict_preset_name, conflict_user_id](wxEvtHandler*) {
                     if (mainframe == nullptr)
                         return false;
-                    MessageDialog
-                        dlg(mainframe,
-                            _L("Force push will overwrite the cloud copy with your local preset changes.\nDo you want to continue?"),
-                            _L("Resolve cloud sync conflict"), wxCENTER | wxYES_NO | wxNO_DEFAULT | wxICON_WARNING);
+                    const wxString confirm_msg = conflict_preset_name.empty()
+                        ? _L("Force push will overwrite the cloud copy with your local preset changes.\nDo you want to continue?")
+                        : format_wxstr(_L("Force push will overwrite the cloud copy of preset \"%s\" with your local changes.\nDo you want to continue?"),
+                                       conflict_preset_name);
+                    MessageDialog dlg(mainframe, confirm_msg, _L("Resolve cloud sync conflict"),
+                                      wxCENTER | wxYES_NO | wxNO_DEFAULT | wxICON_WARNING);
                     if (dlg.ShowModal() != wxID_YES)
                         return false;
 
@@ -5314,14 +5335,12 @@ void GUI_App::enable_user_preset_folder(bool enable)
         std::string user_id = m_agent->get_user_id();
         app_config->set("preset_folder", user_id);
         GUI::wxGetApp().preset_bundle->update_user_presets_directory(user_id);
-        PluginManager::instance().get_catalog().set_cloud_plugin_dir(user_id);
-        PluginManager::instance().get_loader().set_cloud_user_id(user_id);
+        PluginManager::instance().set_cloud_user(user_id);
     } else {
         BOOST_LOG_TRIVIAL(info) << "preset_folder: set to empty";
         app_config->set("preset_folder", "");
         GUI::wxGetApp().preset_bundle->update_user_presets_directory(DEFAULT_USER_FOLDER_NAME);
-        PluginManager::instance().get_catalog().set_cloud_plugin_dir("");
-        PluginManager::instance().get_loader().set_cloud_user_id("");
+        PluginManager::instance().set_cloud_user("");
     }
 }
 
@@ -5393,7 +5412,7 @@ void GUI_App::on_user_login_handle(wxCommandEvent &evt)
 
 void GUI_App::check_track_enable()
 {
-    // Orca: alaways disable track event
+    // Orca: telemetry only exists on the BBL cloud agent; always disable it.
     if (m_agent) {
         m_agent->track_enable(false);
         m_agent->track_remove_files();
@@ -6706,14 +6725,14 @@ void GUI_App::sync_preset(Preset* preset, bool force)
         result = 0; // Set to 0 so the sync_info gets saved below
 
         // Show user notification
-        CallAfter([this] {
+        CallAfter([this, name = preset->name] {
             static bool size_limit_dialog_notified = false;
             if (size_limit_dialog_notified)
                 return;
             size_limit_dialog_notified = true;
             if (mainframe == nullptr)
                 return;
-            auto msg = _L("The preset content is too large to sync to the cloud (exceeds 1MB). Please reduce the preset size by removing custom configurations or use it locally only.");
+            auto msg = format_wxstr(_L("The preset \"%s\" is too large to sync to the cloud (exceeds 1MB). Please reduce the preset size by removing custom configurations or use it locally only."), name);
             MessageDialog(mainframe, msg, _L("Sync user presets"), wxICON_WARNING | wxOK).ShowModal();
         });
         // NOTE: Don't return here - let execution continue to save the sync_info
@@ -7090,6 +7109,10 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
             // finishFn tears down the progress dialog (and clears the re-entrancy guard), so it
             // must run on every exit path — otherwise an early bail-out would leak the modal
             // dialog and leave the guard stuck, blocking all later manual syncs.
+            // Guard the whole thread body: an uncaught exception here (e.g. a transient
+            // boost::filesystem error while scanning the preset folder) would otherwise
+            // propagate out of the thread and terminate the entire application.
+            try {
             if (!m_agent) { finishFn(false); return; }
 
             // One-time scan for orphaned .info files left over from offline deletions; queues HTTP DELETEs.
@@ -7265,7 +7288,7 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
                                 .plater()
                                 ->get_notification_manager()
                                 ->push_notification(NotificationType::CustomNotification,
-                                                    NotificationManager::NotificationLevel::RegularNotificationLevel, "There is an update available. Open the preset bundle dialog to update it.");
+                                                    NotificationManager::NotificationLevel::RegularNotificationLevel, _u8L("There is an update available. Open the preset bundle dialog to update it."));
 
                             update_available = false;
                         }
@@ -7330,6 +7353,11 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
                 } else {
                     boost::this_thread::sleep_for(boost::chrono::milliseconds(500));
                 }
+            }
+            } catch (const std::exception& e) {
+                BOOST_LOG_TRIVIAL(error) << "user preset sync thread terminated by exception: " << e.what();
+            } catch (...) {
+                BOOST_LOG_TRIVIAL(error) << "user preset sync thread terminated by unknown exception";
             }
         });
 }
@@ -7838,14 +7866,14 @@ bool GUI_App::load_language(wxString language, bool initial)
 
     if (!wxLocale::IsAvailable(locale_language_info->Language)) {
     	// Loading the language dictionary failed.
-	    wxString message = "Switching Orca Slicer to language " + requested_language_code + " failed.";
+	    wxString message = wxString::Format(_L("Switching Orca Slicer to language %s failed."), requested_language_code);
 #if !defined(_WIN32) && !defined(__APPLE__)
         // likely some linux system
-        message += "\nYou may need to reconfigure the missing locales, likely by running the \"locale-gen\" and \"dpkg-reconfigure locales\" commands.\n";
+        message += _L("\nYou may need to reconfigure the missing locales, likely by running the \"locale-gen\" and \"dpkg-reconfigure locales\" commands.\n");
 #endif
         if (initial)
         	message + "\n\nApplication will close.";
-        wxMessageBox(message, "Orca Slicer - Switching language failed", wxOK | wxICON_ERROR);
+        wxMessageBox(message, _L("Orca Slicer - Switching language failed"), wxOK | wxICON_ERROR);
         if (initial)
 			std::exit(EXIT_FAILURE);
 		else
@@ -8210,7 +8238,7 @@ void GUI_App::open_plugins_dialog(size_t open_on_tab, const std::string& highlig
     }
 
     try {
-        m_plugins_dlg = new PluginsDialog(mainframe, open_on_tab, highlight_option);
+        m_plugins_dlg = new PluginsDialog(mainframe, wxID_ANY, _L("Plugins"));
         m_plugins_dlg->set_open_terminal_dlg_fn();
         m_plugins_dlg->Bind(wxEVT_DESTROY, [this](wxWindowDestroyEvent& event) {
             if (event.GetEventObject() == m_plugins_dlg)
@@ -8711,8 +8739,13 @@ void GUI_App::scan_orphaned_info_files()
         if (!fs::exists(type_dir))
             continue;
 
-        // Iterate through all .info files
-        for (auto& entry : boost::filesystem::directory_iterator(type_dir)) {
+        // Iterate through all .info files. Use the error_code-based iterator so a transient
+        // directory-read failure (e.g. macOS readdir returning ENOTSUP) is logged and skipped
+        // instead of throwing an uncaught exception that would terminate the app from the
+        // background sync thread this runs on.
+        boost::system::error_code ec;
+        for (boost::filesystem::directory_iterator it(type_dir, ec), end; !ec && it != end; it.increment(ec)) {
+            const auto& entry = *it;
             if (entry.path().extension() != ".info")
                 continue;
 
@@ -8731,6 +8764,8 @@ void GUI_App::scan_orphaned_info_files()
                 }
             }
         }
+        if (ec)
+            BOOST_LOG_TRIVIAL(warning) << "scan_orphaned_info_files: failed to scan " << type_dir.string() << ": " << ec.message();
     }
 }
 

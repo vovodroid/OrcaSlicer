@@ -7,7 +7,6 @@
 #include "MsgDialog.hpp"
 #include "NotificationManager.hpp"
 #include "Plater.hpp"
-#include "PluginScriptRunner.hpp"
 #include "Widgets/PopupWindow.hpp"
 #include "Widgets/WebView.hpp"
 #include "Widgets/WebViewHostDialog.hpp"

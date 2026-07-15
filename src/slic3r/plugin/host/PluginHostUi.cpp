@@ -105,7 +105,10 @@ struct GilSafeCallable
     {
         if (fn) {
             PythonGILState gil;
-            fn = py::object();
+            if (gil)
+                fn = py::object();
+            else
+                (void) fn.release();
         }
     }
 };
@@ -127,6 +130,8 @@ GUI::PluginWebDialog::MessageHandler make_message_adapter(py::object on_message)
         return nullptr;
     return [holder](const json& data) {
         PythonGILState gil;
+        if (!gil)
+            return;
         try {
             holder->fn(json_to_py(data));
         } catch (py::error_already_set& e) {
@@ -343,6 +348,8 @@ py::object ui_create_window(const std::string& html, const std::string& title, i
         if (close_holder) {
             on_close = [close_holder]() {
                 PythonGILState gil;
+                if (!gil)
+                    return;
                 try {
                     close_holder->fn();
                 } catch (py::error_already_set& e) {
@@ -412,7 +419,7 @@ UiProgressHandle* new_progress_dialog(const std::string& title, const std::strin
 
 bool progress_is_open(int id)
 {
-    return UiRegistry::instance().get_as<GUI::PluginProgressDialog>(id) != nullptr;
+    return UiRegistry::instance().is_open(id);
 }
 
 bool progress_pulse(int id, const std::string& message)
@@ -462,7 +469,10 @@ void PluginHostUi::RegisterBindings(pybind11::module_& host)
     auto ui = host.def_submodule(
         "ui",
         "Host UI: native dialogs and interactive HTML windows. Calls run on the main/UI "
-        "thread (marshaled from the plugin thread). See the plugin docs for the window.orca bridge.");
+        "thread (marshaled from the plugin thread). See the plugin docs for the window.orca bridge. "
+        "Do not call these from a slicing pipeline hook (SlicingPipeline capability): that hook runs "
+        "on the slicing worker thread, which the UI thread can itself be blocked waiting on, so a "
+        "marshaled UI call from there can deadlock the application.");
 
     ui.def("message", &ui_message, py::arg("text"), py::arg("title") = "OrcaSlicer", py::arg("buttons") = "ok",
            py::arg("icon") = "info",
