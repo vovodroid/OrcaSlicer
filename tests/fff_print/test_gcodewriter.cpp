@@ -12,6 +12,8 @@
 #include "libslic3r/Print.hpp"
 #include "libslic3r/ModelArrange.hpp"
 
+#include <boost/filesystem.hpp>
+
 #include "test_helpers.hpp"
 
 using namespace Slic3r;
@@ -723,11 +725,19 @@ static std::string slice_two_object_bbl(DynamicPrintConfig &config)
 // The real change_filament_gcode of a shipped "<printer> 0.4 nozzle" machine profile.
 static std::string shipped_change_filament_gcode(const std::string &printer)
 {
-    const std::string                  path = std::string(PROFILES_DIR) + "/BBL/machine/Bambu Lab " + printer + " 0.4 nozzle.json";
+    const std::string path = std::string(PROFILES_DIR) + "/BBL/machine/Bambu Lab " + printer + " 0.4 nozzle.json";
+    // PROFILES_DIR is an absolute path baked in at build time; a sparse test checkout
+    // without resources/ leaves it missing. Skip rather than dereference a config that
+    // never loaded - this is the only fff_print test that reads a shipped profile.
+    if (!boost::filesystem::exists(path))
+        SKIP("shipped profile not present in this checkout: " << path);
     DynamicPrintConfig                 config;
     std::map<std::string, std::string> key_values;
     std::string                        reason;
     config.load_from_json(path, ForwardCompatibilitySubstitutionRule::Enable, key_values, reason);
+    // Fail loudly on a malformed/renamed profile instead of null-dereferencing in opt_string.
+    INFO("profile: " << path << (reason.empty() ? "" : ("  load reason: " + reason)));
+    REQUIRE(config.has("change_filament_gcode"));
     return config.opt_string("change_filament_gcode");
 }
 
