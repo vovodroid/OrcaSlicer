@@ -269,14 +269,18 @@ struct PrintParams {
     bool            task_vibration_cali;    /* vibration calibration of task */
     bool            task_layer_inspect;     /* first layer inspection of task */
     bool            task_record_timelapse;  /* record timelapse of task */
+    bool            task_timelapse_use_internal;
     bool            task_use_ams;
     std::string     task_bed_type;
     std::string     extra_options;
     int             auto_bed_leveling{ 0 };
     int             auto_flow_cali{ 0 };
     int             auto_offset_cali{ 0 };
+    int             extruder_cali_manual_mode{ -1 };
     bool            task_ext_change_assist;
     bool            try_emmc_print;
+    std::string     svc_context;
+    std::string     slicer_uid;
 };
 
 struct TaskQueryParams
@@ -313,7 +317,8 @@ struct NetworkLibraryVersion {
 };
 
 static const NetworkLibraryVersion AVAILABLE_NETWORK_VERSIONS[] = {
-    {"02.03.00.62", "02.03.00.62", nullptr, true, nullptr},
+    {"02.08.01.52", "02.08.01.52", nullptr, true, nullptr},
+    {"02.03.00.62", "02.03.00.62", nullptr, false, nullptr},
     {"02.01.01.52", "02.01.01.52", nullptr, false, nullptr},
     {"02.00.02.50", "02.00.02.50", nullptr, false, "This version may crash on startup due to Bambu Lab's signature verification."},
     {BAMBU_NETWORK_AGENT_VERSION_LEGACY, BAMBU_NETWORK_AGENT_VERSION_LEGACY " (legacy)", nullptr, false, nullptr},

@@ -78,7 +78,7 @@ int OrcaPrinterAgent::bind_detect(std::string dev_ip, std::string sec_link, dete
 }
 
 int OrcaPrinterAgent::bind(
-    std::string dev_ip, std::string dev_id, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn)
+    std::string dev_ip, std::string dev_id, std::string dev_model, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn)
 {
     return BAMBU_NETWORK_SUCCESS;
 }

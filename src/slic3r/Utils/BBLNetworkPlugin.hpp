@@ -68,7 +68,7 @@ typedef std::string (*func_build_login_info)(void *agent);
 typedef int (*func_ping_bind)(void *agent, std::string ping_code);
 typedef int (*func_bind_detect)(void *agent, std::string dev_ip, std::string sec_link, detectResult& detect);
 typedef int (*func_set_server_callback)(void *agent, OnServerErrFn fn);
-typedef int (*func_bind)(void *agent, std::string dev_ip, std::string dev_id, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn);
+typedef int (*func_bind)(void *agent, std::string dev_ip, std::string dev_id, std::string dev_model, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn);
 typedef int (*func_unbind)(void *agent, std::string dev_id);
 typedef std::string (*func_get_bambulab_host)(void *agent);
 typedef std::string (*func_get_user_selected_machine)(void *agent);

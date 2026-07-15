@@ -138,13 +138,13 @@ int BBLPrinterAgent::bind_detect(std::string dev_ip, std::string sec_link, detec
     return -1;
 }
 
-int BBLPrinterAgent::bind(std::string dev_ip, std::string dev_id, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn)
+int BBLPrinterAgent::bind(std::string dev_ip, std::string dev_id, std::string dev_model, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn)
 {
     auto& plugin = BBLNetworkPlugin::instance();
     auto agent = plugin.get_agent();
     auto func = plugin.get_bind();
     if (func && agent) {
-        return func(agent, dev_ip, dev_id, sec_link, timezone, improved, update_fn);
+        return func(agent, dev_ip, dev_id, dev_model, sec_link, timezone, improved, update_fn);
     }
     return -1;
 }

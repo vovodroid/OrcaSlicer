@@ -229,10 +229,11 @@ int MoonrakerPrinterAgent::bind_detect(std::string dev_ip, std::string sec_link,
 }
 
 int MoonrakerPrinterAgent::bind(
-    std::string dev_ip, std::string dev_id, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn)
+    std::string dev_ip, std::string dev_id, std::string dev_model, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn)
 {
     (void) dev_ip;
     (void) dev_id;
+    (void) dev_model;
     (void) sec_link;
     (void) timezone;
     (void) improved;

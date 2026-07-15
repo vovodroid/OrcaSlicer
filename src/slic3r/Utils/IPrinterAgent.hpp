@@ -127,7 +127,7 @@ public:
     /**
      * Execute the multi-stage printer binding workflow.
      */
-    virtual int bind(std::string dev_ip, std::string dev_id, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn) = 0;
+    virtual int bind(std::string dev_ip, std::string dev_id, std::string dev_model, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn) = 0;
 
     /**
      * Remove the association between account and printer.

@@ -824,10 +824,10 @@ int NetworkAgent::bind_detect(std::string dev_ip, std::string sec_link, detectRe
 }
 
 int NetworkAgent::bind(
-    std::string dev_ip, std::string dev_id, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn)
+    std::string dev_ip, std::string dev_id, std::string dev_model, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn)
 {
     if (m_printer_agent)
-        return m_printer_agent->bind(dev_ip, dev_id, sec_link, timezone, improved, update_fn);
+        return m_printer_agent->bind(dev_ip, dev_id, dev_model, sec_link, timezone, improved, update_fn);
     return -1;
 }
 
