@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "libslic3r/PrintConfig.hpp"
+#include "test_helpers.hpp"
 using namespace Slic3r;
 
 TEST_CASE("slicing_pipeline_plugin option exists and defaults empty", "[slicing_pipeline]") {
@@ -24,7 +25,6 @@ TEST_CASE("slicing pipeline hook setter is a no-op-safe injection", "[slicing_pi
     CHECK(calls == 0);
 }
 
-#include "test_data.hpp"
 #include <vector>
 #include <algorithm>
 using namespace Slic3r::Test;
@@ -38,7 +38,7 @@ TEST_CASE("SlicingPipeline hook fires once per step per object in order", "[slic
     Slic3r::Print print; Slic3r::Model model;
     Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
     config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"})); // activate
-    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    init_print({cube(20)}, print, model, config);
     print.process();
     Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
 
@@ -102,7 +102,7 @@ TEST_CASE("Inactive hook: process output is byte-identical (no-op hook == unset)
             Slic3r::Print::set_slicing_pipeline_hook_fn([](Slic3r::Print&, const Slic3r::PrintObject*, Slic3r::SlicingPipelineStepPlugin){});
         else
             Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
-        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        init_print({cube(20)}, print, model, config);
         std::string g = Slic3r::Test::gcode(print);
         Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
         return g;
@@ -126,7 +126,7 @@ TEST_CASE("Empty option: registered hook is gated off and never fires", "[slicin
     Slic3r::Print print; Slic3r::Model model;
     auto config = Slic3r::DynamicPrintConfig::full_print_config();
     // option left EMPTY -> inactive regardless of the registered hook.
-    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    init_print({cube(20)}, print, model, config);
     print.process();
     Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
     CHECK(calls == 0);
@@ -150,7 +150,7 @@ TEST_CASE("Duplicate objects share a slice: Slice hook fires exactly once", "[sl
     config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"})); // activate
 
     // init_print builds one arranged, on-bed cube object (o1).
-    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    init_print({cube(20)}, print, model, config);
     Slic3r::ModelObject* o1 = model.objects.front();
     // Model::add_object(const ModelObject&) force-sets object extruder=1 on the clone; give o1
     // the same so the two objects' configs match (is_print_object_the_same compares config).
@@ -198,7 +198,7 @@ TEST_CASE("Mutating slices at the Slice boundary cascades downstream", "[slicing
                     }
             });
         else Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
-        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        init_print({cube(20)}, print, model, config);
         print.process();
         double a = 0; for (auto* l : print.objects().front()->layers()) for (auto* r : l->regions()) for (auto& s : r->fill_surfaces.surfaces) a += s.expolygon.area();
         Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
@@ -210,7 +210,7 @@ TEST_CASE("Mutating slices at the Slice boundary cascades downstream", "[slicing
 TEST_CASE("Changing slicing_pipeline_plugin invalidates posSlice", "[slicing_pipeline]") {
     Slic3r::Print print; Slic3r::Model model;
     auto config = Slic3r::DynamicPrintConfig::full_print_config();
-    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    init_print({cube(20)}, print, model, config);
     print.process();
     REQUIRE(print.objects().front()->is_step_done(posSlice));
     config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
@@ -271,7 +271,7 @@ TEST_CASE("Rotating slices at the Slice boundary cascades (area preserved, bbox 
                     }
             });
         else Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
-        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        init_print({cube(20)}, print, model, config);
         print.process();
         double area = 0;
         coord_t nx=0, xx=0, ny=0, xy=0; bool seeded=false;
@@ -320,7 +320,7 @@ TEST_CASE("Identity round-trip through slices.set() is byte-identical", "[slicin
                         r->slices.set(std::move(in));             // write back unchanged: identity transform
                     }
             });
-        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        init_print({cube(20)}, print, model, config);
         std::string g = Slic3r::Test::gcode(print);
         Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
         return g;
@@ -376,7 +376,7 @@ TEST_CASE("raw_slices captures post-hook geometry so a perimeter re-run keeps th
     Slic3r::Print print; Slic3r::Model model;
     auto config = Slic3r::DynamicPrintConfig::full_print_config();
     config.set_key_value("slicing_pipeline_plugin", new Slic3r::ConfigOptionStrings({"probe"}));
-    init_print({TestMesh::cube_20x20x20}, print, model, config);
+    init_print({cube(20)}, print, model, config);
     print.process();
     const double w_mutated = outer_slices_width(print);   // inset applied at the Slice hook
 
@@ -410,7 +410,7 @@ TEST_CASE("fill_surfaces mutation cascades at PrepareInfill but not at Infill", 
                         r->fill_surfaces.set(std::move(out));
                     }
             });
-        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        init_print({cube(20)}, print, model, config);
         print.process();
         size_t n = 0;
         for (auto* l : print.objects().front()->layers())
@@ -451,7 +451,7 @@ TEST_CASE("refreshing lslices after a slice mutation makes islands track the geo
                         l->make_slices();
                 }
             });
-        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        init_print({cube(20)}, print, model, config);
         print.process();
         coord_t min_x = 0, max_x = 0; bool seeded = false;
         for (auto* l : print.objects().front()->layers())
@@ -533,7 +533,7 @@ TEST_CASE("Fuzzing slice contours at the Slice boundary cascades with bounded di
                     }
             });
         else Slic3r::Print::set_slicing_pipeline_hook_fn(nullptr);
-        init_print({TestMesh::cube_20x20x20}, print, model, config);
+        init_print({cube(20)}, print, model, config);
         print.process();
         Measure m { 0.0, 0, outer_slices_width(print) };
         for (auto* l : print.objects().front()->layers())
