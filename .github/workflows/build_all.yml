@@ -172,17 +172,17 @@ jobs:
   # binary); this covers src/engine PRs with the PR-built binary. Runs in
   # parallel off build_linux's artifact so it doesn't lengthen the build leg.
   slice_check_linux:
-    name: Slice check (Linux x86_64)
+    name: Slice check (Linux aarch64)
     needs: build_linux
     if: ${{ !cancelled() && success() }}
-    runs-on: ${{ vars.SELF_HOSTED && 'orca-lnx-server' || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
       - name: Download profile validator
         uses: actions/download-artifact@v8
         with:
-          name: ${{ github.sha }}-profile-validator-linux-x86_64
+          name: ${{ github.sha }}-profile-validator-linux-aarch64
           path: validator-bin
       - name: Validate slice (expand custom g-code)
         timeout-minutes: 60

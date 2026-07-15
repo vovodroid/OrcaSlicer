@@ -510,13 +510,15 @@ jobs:
 
         # Ship the freshly-built validator so the parallel slice_check_linux job
         # (build_all.yml) can slice-sweep the shipped profiles with this PR's
-        # engine. Stable sha-based name mirrors the tests artifact above so the
+        # engine. Taken from the aarch64 leg so the sweep runs on arm64 (its
+        # GitHub-hosted runner is free, and it also exercises the arm build).
+        # Stable sha-based name mirrors the tests artifact above so the
         # downstream job downloads it by exact name.
       - name: Upload profile validator (for slice check)
-        if: runner.os == 'Linux' && inputs.arch != 'aarch64'
+        if: runner.os == 'Linux' && inputs.arch == 'aarch64'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ github.sha }}-profile-validator-linux-x86_64
+          name: ${{ github.sha }}-profile-validator-linux-aarch64
           overwrite: true
           path: ./build/src/Release/OrcaSlicer_profile_validator
           retention-days: 5
