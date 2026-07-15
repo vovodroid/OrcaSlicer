@@ -212,13 +212,25 @@ void install_slice_context_log_sink()
 // -v). Unlike the static reference/placeholder checks, this expands every custom *_gcode - including
 // change_filament_gcode at the one filament change - against the printer's fully-resolved config, so
 // undefined-placeholder / invalid-flow bugs surface here. Reports every offending printer and returns 1
-// if any failed, 0 otherwise. The sweep is SEQUENTIAL by necessity: Print::process() keeps
-// process-global state, so slicing printers concurrently in one process races even with per-slice
-// Model+Print. Load in validation mode so the vendors are read straight from the -p profiles dir
-// (no data_dir/system tree) and -v scoping is honoured for free.
-int slice_all_printers(const std::string &vendor)
+// if any failed, 0 otherwise. When outdir is non-empty, each printer's g-code is also written there as
+// "<vendor>__<printer>.gcode" for manual inspection. The sweep is SEQUENTIAL by necessity:
+// Print::process() keeps process-global state, so slicing printers concurrently in one process races
+// even with per-slice Model+Print. Load in validation mode so the vendors are read straight from the -p
+// profiles dir (no data_dir/system tree) and -v scoping is honoured for free.
+int slice_all_printers(const std::string &vendor, const std::string &outdir)
 {
     install_slice_context_log_sink();
+
+    if (!outdir.empty()) {
+        boost::system::error_code ec;
+        fs::create_directories(outdir, ec);
+        if (ec) {
+            BOOST_LOG_TRIVIAL(error) << "Could not create output directory \"" << outdir << "\": " << ec.message();
+            std::cout << "Validation failed" << std::endl;
+            return 1;
+        }
+        std::cout << "Saving sliced g-code to " << outdir << std::endl;
+    }
 
     PresetBundle bundle;
     bundle.set_is_validation_mode(true);
@@ -323,6 +335,10 @@ int slice_all_printers(const std::string &vendor)
 
         try {
             const std::string out = slice_two_color_cube_and_export(cfg, bundle.is_bbl_vendor());
+            if (!outdir.empty() && !out.empty()) {
+                const fs::path f = fs::path(outdir) / (sanitize_filename(vendor_name) + "__" + sanitize_filename(printer) + ".gcode");
+                save_string_file(f, out);
+            }
             if (out.empty() || out.find("G1") == std::string::npos) {
                 BOOST_LOG_TRIVIAL(error) << "Printer \"" << printer << "\" produced no g-code";
                 ++failures;
@@ -364,6 +380,7 @@ int main(int argc, char* argv[])
     ("vendor,v", po::value<std::string>()->default_value(""), "Vendor name. Optional, all profiles present in the folder will be validated if not specified")
     ("generate_presets,g", po::value<bool>()->default_value(false), "Generate user presets for mock test")
     ("slice,s", po::bool_switch()->default_value(false), "Slice a two-colour cube through every printer to expand all custom g-code (catches placeholder/flow errors that static checks miss). Off unless this flag is present.")
+    ("outdir,o", po::value<std::string>()->default_value(""), "With -s, also save each printer's g-code to this folder (as <vendor>__<printer>.gcode) for manual inspection. Optional.")
     ("check_filament_subtypes,f", po::bool_switch()->default_value(false), "Also flag printers with duplicate (ambiguous) filament subtypes. Off unless this flag is present.")
     ("log_level,l", po::value<int>()->default_value(2), "Log level. Optional, default is 2 (warning). Higher values produce more detailed logs.");
     // clang-format on
@@ -389,6 +406,7 @@ int main(int argc, char* argv[])
     int         log_level            = vm["log_level"].as<int>();
     bool        generate_user_preset = vm["generate_presets"].as<bool>();
     bool        slice_mode           = vm["slice"].as<bool>();
+    std::string slice_outdir         = vm["outdir"].as<std::string>();
     bool        check_filament_subtypes = vm["check_filament_subtypes"].as<bool>();
 
     //  check if path is valid, and return error if not
@@ -419,7 +437,7 @@ int main(int argc, char* argv[])
     // Slice mode expands every printer's custom g-code by actually slicing (see slice_all_printers).
     // A distinct opt-in mode so the default static checks stay fast for every profile PR.
     if (slice_mode)
-        return slice_all_printers(vendor);
+        return slice_all_printers(vendor, slice_outdir);
 
     auto preset_bundle = new PresetBundle();
     // preset_bundle->setup_directories();
