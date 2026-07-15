@@ -545,6 +545,10 @@ public:
     bool slicing_with_fila_switch() const;
     bool CheckErrorDynamicSwitchNozzle(MachineObject* obj_);
     void on_flow_cali_option_changed();
+    // PA-profile sharing (extrude_cali_manual_mode): device-side toggle shown only for pa_mode
+    // printers when Flow Dynamics Calibration is off. See on_flow_cali_option_changed / send flow.
+    void on_pa_value_option_changed();
+    void update_pa_value_option(MachineObject *obj);
 
     bool is_ams_drying(MachineObject* obj);
     bool is_selected_ams_drying(MachineObject* obj);

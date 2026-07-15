@@ -561,6 +561,15 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
         ops_auto, "nozzle_offset_cali"
     );
 
+    // Orca: PA-profile-sharing toggle (extrude_cali_manual_mode). On = nozzles/filaments of the
+    // same type share one PA profile; shown only for pa_mode printers with Flow Dynamics Cali off.
+    auto option_pa_value = new PrintOption(
+        m_options_other,
+        _L("Shared PA Profile"),
+        _L("Nozzles and filaments of the same type share the same PA profile."),
+        ops_no_auto, "pa_value"
+    );
+
     m_sizer_options = new wxGridSizer(0, 2, FromDIP(5), FromDIP(10));
     m_sizer_options->Add(option_timelapse, 0, wxEXPAND);
     m_sizer_options->Add(option_auto_bed_level, 0, wxEXPAND);
@@ -571,6 +580,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     m_checkbox_list_order.push_back(option_auto_bed_level);
     m_checkbox_list_order.push_back(option_flow_dynamics_cali);
     m_checkbox_list_order.push_back(option_nozzle_offset_cali_cali);
+    m_checkbox_list_order.push_back(option_pa_value);
 
     m_options_other->SetSizer(m_sizer_options);
     m_options_other->Layout();
@@ -580,17 +590,20 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     m_checkbox_list["bed_leveling"]  = option_auto_bed_level;
     m_checkbox_list["flow_cali"]     = option_flow_dynamics_cali;
     m_checkbox_list["nozzle_offset_cali"] = option_nozzle_offset_cali_cali;
+    m_checkbox_list["pa_value"]      = option_pa_value;
     for (auto print_opt : m_checkbox_list_order) {
         print_opt->Bind(EVT_SWITCH_PRINT_OPTION, [this, print_opt](auto &e) {
             save_option_vals();
             // Flow calibration feeds the printer-side rack nozzle mapping; re-request it on change.
             if (print_opt == m_checkbox_list["flow_cali"]) on_flow_cali_option_changed();
+            else if (print_opt == m_checkbox_list["pa_value"]) on_pa_value_option_changed();
         });
     }
 
     option_auto_bed_level->Hide();
     option_flow_dynamics_cali->Hide();
     option_nozzle_offset_cali_cali->Hide();
+    option_pa_value->Hide();
 
     m_simplebook   = new wxSimplebook(this, wxID_ANY, wxDefaultPosition, SELECT_MACHINE_DIALOG_SIMBOOK_SIZE2, 0);
     m_simplebook->SetMinSize(SELECT_MACHINE_DIALOG_SIMBOOK_SIZE2);
@@ -889,6 +902,11 @@ void SelectMachineDialog::update_select_layout(MachineObject *obj)
     load_option_vals(obj);
     if (obj && obj->get_printer_arch() == PrinterArch::ARCH_I3) { m_checkbox_list["timelapse"]->setValue("off"); } /*off timelapse on selected for n series by zhimin.zeng*/
     save_option_vals(obj);
+
+    // Orca: pa_value visibility depends on the freshly-loaded flow_cali value, so recompute it
+    // after load_option_vals and re-run the grid layout.
+    update_pa_value_option(obj);
+    update_options_layout();
 
     Layout();
     Fit();
@@ -1588,16 +1606,47 @@ void SelectMachineDialog::clear_nozzle_mapping()
         obj_->get_nozzle_mapping_result()->Clear();
 }
 
+void SelectMachineDialog::update_pa_value_option(MachineObject *obj)
+{
+    auto it = m_checkbox_list.find("pa_value");
+    if (it == m_checkbox_list.end()) return;
+    // Orca: the PA-profile-sharing toggle only applies when the printer advertises pa_mode support
+    // and Flow Dynamics Calibration is set to off (mirrors the device's own gate for the switch).
+    const bool show_pa = obj && obj->is_support_pa_mode
+        && m_checkbox_list["flow_cali"]->IsShown()
+        && m_checkbox_list["flow_cali"]->getValue() == "off";
+    it->second->Show(show_pa);
+}
+
 void SelectMachineDialog::on_flow_cali_option_changed()
 {
+    DeviceManager* dev  = wxGetApp().getDeviceManager();
+    MachineObject* obj_ = dev ? dev->get_selected_machine() : nullptr;
+    if (!obj_) return;
+
+    // Orca: the PA-profile-sharing toggle is shown only while Flow Dynamics Calibration is off,
+    // so its visibility must track flow_cali changes (for every pa_mode printer, rack or not).
+    update_pa_value_option(obj_);
+    update_options_layout();
+    m_options_other->Layout();
+    Layout();
+
     // Flow calibration feeds the printer-side rack nozzle-mapping computation, so a change must
     // invalidate the cached mapping and let the next status poll re-request it (V0 path).
+    if (!(obj_->GetNozzleSystem() && obj_->GetNozzleSystem()->GetNozzleRack()->IsSupported())) return;
+    if (use_dynamic_nozzle_map()) return;
+    clear_nozzle_mapping();
+    s_nozzle_mapping_last_request_time = 0;
+}
+
+void SelectMachineDialog::on_pa_value_option_changed()
+{
+    // Orca: the PA-sharing value feeds the printer-side rack nozzle-mapping request (V0), so a
+    // change must invalidate the cached mapping and let the next status poll re-request it.
     DeviceManager* dev  = wxGetApp().getDeviceManager();
     MachineObject* obj_ = dev ? dev->get_selected_machine() : nullptr;
     if (!obj_ || !(obj_->GetNozzleSystem() && obj_->GetNozzleSystem()->GetNozzleRack()->IsSupported())) return;
     if (use_dynamic_nozzle_map()) return;
-    // Orca: BBS also pops a confirmation dialog and re-fires immediately (and handles a PA-value
-    // switch Orca lacks); here we just clear + unthrottle so the next poll re-requests promptly.
     clear_nozzle_mapping();
     s_nozzle_mapping_last_request_time = 0;
 }
@@ -1693,9 +1742,11 @@ bool SelectMachineDialog::CheckErrorSyncNozzleMappingResultV0(MachineObject* obj
     const auto& obj_nozzle_mapping_ptr = obj_->get_nozzle_mapping_result();
     if (!obj_nozzle_mapping_ptr->HasResult()) {
         if (time(nullptr) - s_nozzle_mapping_last_request_time > 10) { // avoid too many requests
-            // Orca: BBS passes m_pa_value_switch->GetValue() ? 0 : 1; Orca has no PA-value switch UI,
-            // so use the switch-off default (1).
-            int rtn = obj_nozzle_mapping_ptr->CtrlGetAutoNozzleMappingV0(m_plater, m_ams_mapping_result, m_checkbox_list["flow_cali"]->getValueInt(), 1);
+            // Orca: PA-profile-sharing value from the send-dialog toggle (On = share -> 0, Off -> 1).
+            // Only pa_mode-capable printers honor the toggle; others keep the prior default (1) so this
+            // feature changes nothing for them (matches the print-command gate in on_send_print).
+            const int pa_value = obj_->is_support_pa_mode ? ((m_checkbox_list["pa_value"]->getValue() == "on") ? 0 : 1) : 1;
+            int rtn = obj_nozzle_mapping_ptr->CtrlGetAutoNozzleMappingV0(m_plater, m_ams_mapping_result, m_checkbox_list["flow_cali"]->getValueInt(), pa_value);
             if (rtn == 0) {
                 s_nozzle_mapping_last_request_time = time(nullptr);
             } else {
@@ -2889,6 +2940,14 @@ void SelectMachineDialog::on_send_print()
         timelapse_option = m_checkbox_list["timelapse"]->getValue() == "on";
     }
 
+    // Orca: PA-profile-sharing mode (extrude_cali_manual_mode): 0 = share (toggle on), 1 = per-nozzle.
+    // Only sent for pa_mode-capable printers; -1 keeps the field omitted for everyone else, matching
+    // Orca's prior behavior (this field was never populated before).
+    int pa_manual_mode = -1;
+    if (obj_->is_support_pa_mode) {
+        pa_manual_mode = (m_checkbox_list["pa_value"]->getValue() == "on") ? 0 : 1;
+    }
+
     m_print_job->set_print_config(
         MachineBedTypeString[0],
         (m_checkbox_list["bed_leveling"]->getValue() == "on"),
@@ -2899,7 +2958,8 @@ void SelectMachineDialog::on_send_print()
         m_ext_change_assist,
         m_checkbox_list["bed_leveling"]->getValueInt(),
         m_checkbox_list["flow_cali"]->getValueInt(),
-        m_checkbox_list["nozzle_offset_cali"]->getValueInt()
+        m_checkbox_list["nozzle_offset_cali"]->getValueInt(),
+        pa_manual_mode
     );
 
     if (obj_->HasAms()) {
