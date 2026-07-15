@@ -639,6 +639,19 @@ void BBLNetworkPlugin::load_all_function_pointers()
     m_get_model_mall_rating_result = reinterpret_cast<func_get_model_mall_rating_result>(get_function("bambu_network_get_model_mall_rating"));
     m_get_mw_user_preference = reinterpret_cast<func_get_mw_user_preference>(get_function("bambu_network_get_mw_user_preference"));
     m_get_mw_user_4ulist = reinterpret_cast<func_get_mw_user_4ulist>(get_function("bambu_network_get_mw_user_4ulist"));
+
+    // Added by the 02.08.01.52 plugin ABI; resolve to null on older plugins so callers no-op.
+    m_set_on_user_login_fn = reinterpret_cast<func_set_on_user_login_fn>(get_function("bambu_network_set_on_user_login_fn"));
+    m_get_studio_info_url = reinterpret_cast<func_get_studio_info_url>(get_function("bambu_network_get_studio_info_url"));
+    m_report_consent = reinterpret_cast<func_report_consent>(get_function("bambu_network_report_consent"));
+    m_get_camera_url_for_golive = reinterpret_cast<func_get_camera_url_for_golive>(get_function("bambu_network_get_camera_url_for_golive"));
+    m_get_hms_snapshot = reinterpret_cast<func_get_hms_snapshot>(get_function("bambu_network_get_hms_snapshot"));
+    m_get_filament_spools = reinterpret_cast<func_get_filament_spools>(get_function("bambu_network_get_filament_spools"));
+    m_create_filament_spool = reinterpret_cast<func_create_filament_spool>(get_function("bambu_network_create_filament_spool"));
+    m_update_filament_spool = reinterpret_cast<func_update_filament_spool>(get_function("bambu_network_update_filament_spool"));
+    m_delete_filament_spools = reinterpret_cast<func_delete_filament_spools>(get_function("bambu_network_delete_filament_spools"));
+    m_get_filament_config = reinterpret_cast<func_get_filament_config>(get_function("bambu_network_get_filament_config"));
+    m_sync_ams_filaments = reinterpret_cast<func_sync_ams_filaments>(get_function("bambu_network_sync_ams_filaments"));
 }
 
 void BBLNetworkPlugin::clear_all_function_pointers()
@@ -741,6 +754,18 @@ void BBLNetworkPlugin::clear_all_function_pointers()
     m_get_model_mall_rating_result = nullptr;
     m_get_mw_user_preference = nullptr;
     m_get_mw_user_4ulist = nullptr;
+
+    m_set_on_user_login_fn = nullptr;
+    m_get_studio_info_url = nullptr;
+    m_report_consent = nullptr;
+    m_get_camera_url_for_golive = nullptr;
+    m_get_hms_snapshot = nullptr;
+    m_get_filament_spools = nullptr;
+    m_create_filament_spool = nullptr;
+    m_update_filament_spool = nullptr;
+    m_delete_filament_spools = nullptr;
+    m_get_filament_config = nullptr;
+    m_sync_ams_filaments = nullptr;
 }
 
 std::vector<NetworkLibraryVersionInfo> get_all_available_versions()

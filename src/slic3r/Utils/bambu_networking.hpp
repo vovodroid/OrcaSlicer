@@ -128,6 +128,7 @@ typedef std::function<void(std::string topic)>      GetSubscribeFailureFn;
 typedef std::function<void(int status, int code, std::string msg)> OnUpdateStatusFn;
 typedef std::function<bool()>                       WasCancelledFn;
 typedef std::function<bool(int status, std::string job_info)> OnWaitFn;
+typedef std::function<void(int online_login, bool login)> OnUserLoginFn;
 // local callbacks
 typedef std::function<void(std::string dev_info_json_str)> OnMsgArrivedFn;
 // queue call to main thread
@@ -289,6 +290,48 @@ struct TaskQueryParams
     int status = 0;
     int offset = 0;
     int limit = 20;
+};
+
+struct FilamentQueryParams
+{
+    std::string category;
+    std::string status;
+    std::string spool_id;
+    std::string rfid;
+    int offset = 0;
+    int limit = 20;
+};
+
+struct FilamentDeleteParams
+{
+    std::vector<std::string> ids;
+    std::vector<std::string> rfids;
+};
+
+struct AmsSyncItem {
+    std::string RFID;
+    std::string filamentVendor;
+    std::string filamentType;
+    std::string filamentName;
+    std::string filamentId;
+    bool        isSupport      = false;
+    std::string color;
+    int         colorType      = 0;
+    std::vector<std::string> colors;
+    int         netWeight      = 0;
+    int         totalNetWeight = 0;
+    std::string trayIdName;
+    std::string note;
+    std::string amsSn;
+    std::string slotId;
+    int         amsId          = 0;
+    int         amsType        = 0;
+    bool        createNew      = false;
+};
+
+struct AmsSyncParams {
+    std::string              devId;
+    std::vector<AmsSyncItem> items;
 };
 
 struct PublishParams {
