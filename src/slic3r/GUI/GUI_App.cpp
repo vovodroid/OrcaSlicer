@@ -3756,7 +3756,7 @@ void GUI_App::switch_printer_agent()
         // point at the previously active printer preset. Re-select the machine when the new
         // preset targets a different host, otherwise filament sync keeps hitting the old
         // printer. (#12506)
-        if (effective_agent_id != BBL_PRINTER_AGENT_ID && m_device_manager) {
+        if (effective_agent_id != BBL_PRINTER_AGENT_ID && m_device_manager && preset_bundle) {
             const std::string print_host = config.opt_string("print_host");
             if (!print_host.empty()) {
                 const std::string dev_id = MachineObject::dev_id_from_address(print_host, config.opt_string("printhost_port"));
@@ -3778,7 +3778,7 @@ void GUI_App::switch_printer_agent()
     m_agent->start_discovery(true, false);
 
     // Auto-switch MachineObject (new agent has empty device_info, so always re-select)
-    select_machine(agent_info.id);
+    select_machine(effective_agent_id);
 }
 
 void GUI_App::select_machine(const std::string& agent_id)
