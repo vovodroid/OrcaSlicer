@@ -254,6 +254,15 @@ int MoonrakerPrinterAgent::request_bind_ticket(std::string* ticket)
     return BAMBU_NETWORK_SUCCESS;
 }
 
+int MoonrakerPrinterAgent::get_hms_snapshot(std::string dev_id, std::string file_name, std::function<void(std::string, int)> callback)
+{
+    // No BBL cloud snapshot source; report failure so the caller falls back.
+    (void) dev_id;
+    (void) file_name;
+    (void) callback;
+    return -1;
+}
+
 int MoonrakerPrinterAgent::set_server_callback(OnServerErrFn fn)
 {
     std::lock_guard<std::recursive_mutex> lock(state_mutex);

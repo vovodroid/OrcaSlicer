@@ -171,6 +171,19 @@ int BBLPrinterAgent::request_bind_ticket(std::string* ticket)
     return -1;
 }
 
+int BBLPrinterAgent::get_hms_snapshot(std::string dev_id, std::string file_name, std::function<void(std::string, int)> callback)
+{
+    auto& plugin = BBLNetworkPlugin::instance();
+    auto agent = plugin.get_agent();
+    auto func = plugin.get_get_hms_snapshot();
+    // dev_id/file_name are passed as lvalues to bind the plugin's std::string& params.
+    // A null func (older plugin without this symbol) falls through to -1 so callers degrade gracefully.
+    if (func && agent) {
+        return func(agent, dev_id, file_name, callback);
+    }
+    return -1;
+}
+
 int BBLPrinterAgent::set_server_callback(OnServerErrFn fn)
 {
     auto& plugin = BBLNetworkPlugin::instance();

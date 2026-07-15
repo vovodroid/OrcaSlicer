@@ -1,6 +1,8 @@
 #pragma once
 
 #include <unordered_set>
+#include <atomic>
+#include <memory>
 #include <wx/statbmp.h>
 #include <wx/webrequest.h>
 
@@ -84,6 +86,11 @@ protected:
 
     void on_button_click(ActionButton btn_id);
     void on_webrequest_state(wxWebRequestEvent& evt);
+    void on_request_timeout(wxTimerEvent& event);
+    void clear_request_timer();
+    wxBitmap make_placeholder_image(const wxString& text);
+    bool get_fail_snapshot_from_cloud();
+    bool get_fail_snapshot_from_local(const wxString& image_url);
     void on_dpi_changed(const wxRect& suggested_rect);
 
 private:
@@ -93,6 +100,11 @@ private:
     std::unordered_set<Button*> m_used_button;
 
     wxWebRequest web_request;
+    wxTimer* m_request_timer{ nullptr };
+    std::atomic<bool> m_request_cancelled{ false };
+    wxString m_local_img_url;
+    // Orca: liveness token for the async cloud snapshot callback (the request has no cancel handle)
+    std::shared_ptr<std::atomic_bool> m_alive{ std::make_shared<std::atomic_bool>(true) };
     wxStaticBitmap* m_error_picture;
     Label* m_error_msg_label{ nullptr };
     Label* m_error_code_label{ nullptr };

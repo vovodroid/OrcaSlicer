@@ -937,4 +937,11 @@ int NetworkAgent::request_bind_ticket(std::string* ticket)
     return -1;
 }
 
+int NetworkAgent::get_hms_snapshot(std::string dev_id, std::string file_name, std::function<void(std::string, int)> callback)
+{
+    if (m_printer_agent)
+        return m_printer_agent->get_hms_snapshot(dev_id, file_name, callback);
+    return -1;
+}
+
 } // namespace Slic3r

@@ -166,6 +166,7 @@ public:
     FilamentSyncMode get_filament_sync_mode() const;
     bool fetch_filament_info(std::string dev_id);
     int request_bind_ticket(std::string* ticket);
+    int get_hms_snapshot(std::string dev_id, std::string file_name, std::function<void(std::string, int)> callback);
 
 private:
     struct PrinterCallbacks {

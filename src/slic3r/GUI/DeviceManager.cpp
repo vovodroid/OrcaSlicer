@@ -553,6 +553,7 @@ MachineObject::MachineObject(DeviceManager* manager, NetworkAgent* agent, std::s
     mc_print_sub_stage = 0;
     mc_left_time = 0;
     hw_switch_state = 0;
+    m_print_error_img_id = "";
 
     has_ipcam = true; // default true
 
@@ -3141,6 +3142,17 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
                     if (jj.contains("print_error")) {
                         if (jj["print_error"].is_number())
                             print_error = jj["print_error"].get<int>();
+                    }
+                    // Orca: keep the failure-snapshot id only while an error is active, so a stale
+                    // id can't leak into a later unrelated error dialog once the failure clears.
+                    if (print_error <= 0) {
+                        m_print_error_img_id.clear();
+                    }
+                    else if (jj.contains("err2") && jj["err2"].is_object()) {
+                        json err2 = jj["err2"];
+                        if (err2.contains("img_id") && err2["img_id"].is_string()) {
+                            m_print_error_img_id = err2["img_id"].get<std::string>();
+                        }
                     }
 
                      DevStorage::ParseV1_0(jj, m_storage);

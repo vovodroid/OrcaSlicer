@@ -140,6 +140,12 @@ public:
     virtual int request_bind_ticket(std::string* ticket) = 0;
 
     /**
+     * Fetch the cloud snapshot image captured at a print failure.
+     * Returns 0 if the request was dispatched; the image body arrives via callback(body, http_status).
+     */
+    virtual int get_hms_snapshot(std::string dev_id, std::string file_name, std::function<void(std::string, int)> callback) = 0;
+
+    /**
      * Register callback for fatal HTTP errors.
      */
     virtual int set_server_callback(OnServerErrFn fn) = 0;
