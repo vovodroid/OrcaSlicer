@@ -162,6 +162,49 @@ void PrePrintChecker::add(PrintDialogStatus state, wxString msg, wxString tip, c
     }
 }
 
+// Orca: minimal callback-link variant of add(): stores an internal click action
+// (link_callback) rendered as a trailing link instead of the wiki-url launcher.
+void PrePrintChecker::add_with_link(PrintDialogStatus state, wxString msg, wxString link_label, std::function<void()> link_callback)
+{
+    prePrintInfo info;
+
+    if (is_error(state)) {
+        info.level = prePrintInfoLevel::Error;
+    } else if (is_warning(state)) {
+        info.level = prePrintInfoLevel::Warning;
+    } else {
+        info.level = prePrintInfoLevel::Normal;
+    }
+
+    if (is_error_printer(state)) {
+        info.type = prePrintInfoType::Printer;
+    } else if (is_error_filament(state)) {
+        info.type = prePrintInfoType::Filament;
+    } else if (is_warning_printer(state)) {
+        info.type = prePrintInfoType::Printer;
+    } else if (is_warning_filament(state)) {
+        info.type = prePrintInfoType::Filament;
+    }
+
+    info.msg           = msg;
+    info.link_label    = link_label;
+    info.link_callback = link_callback;
+
+    switch (info.type) {
+    case prePrintInfoType::Filament:
+        if (std::find(filamentList.begin(), filamentList.end(), info) == filamentList.end()) {
+            filamentList.push_back(info);
+        }
+        break;
+    case prePrintInfoType::Printer:
+        if (std::find(printerList.begin(), printerList.end(), info) == printerList.end()) {
+            printerList.push_back(info);
+        }
+        break;
+    default: break;
+    }
+}
+
 
 //void PrePrintMsgBoard::add(const wxString &msg, const wxString &tips, bool is_error)
 //{
@@ -230,7 +273,15 @@ bool PrinterMsgPanel::UpdateInfos(const std::vector<prePrintInfo>& infos)
             label->SetForegroundColour(_GetLabelColour(info));
 
 
-            if (info.wiki_url.empty())
+            if (!info.link_label.empty())
+            {
+                // Orca: internal callback link (e.g. "Clean up files") instead of a wiki url
+                label->SetLabel(info.msg + " " + info.link_label);
+                label->Bind(wxEVT_ENTER_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_HAND); });
+                label->Bind(wxEVT_LEAVE_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_ARROW); });
+                label->Bind(wxEVT_LEFT_DOWN, [info](wxMouseEvent& event) { if (info.link_callback) info.link_callback(); });
+            }
+            else if (info.wiki_url.empty())
             {
                 label->SetLabel(info.msg);
             }

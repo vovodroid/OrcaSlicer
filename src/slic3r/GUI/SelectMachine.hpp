@@ -340,6 +340,12 @@ private:
     std::string                         m_timelapse_storage;   // "internal" or "external"; empty = unsupported
     ScalableButton*                     m_timelapse_folder_btn { nullptr };
     PopupWindow*                        m_timelapse_storage_popup { nullptr };
+    // timelapse storage-low send-time gate (async ipcam MQTT round-trip)
+    wxTimer*                            m_timelapse_check_timer { nullptr };
+    int                                 m_timelapse_check_timeout_ms { 5000 };
+    int                                 m_timelapse_check_elapsed_ms { 0 };
+    int                                 m_timelapse_check_interval_ms { 100 };
+    int                                 m_timelapse_total_layer { 0 };
 
     std::vector<POItem> ops_auto;
     std::vector<POItem> ops_no_auto;
@@ -581,6 +587,12 @@ private:
     /* timelapse storage-location selector */
     void update_timelapse_folder_btn_icon();
     void show_timelapse_folder_popup();
+    void check_timelapse_storage_warning(MachineObject* obj);
+    void start_timelapse_storage_check(MachineObject* obj);
+    void on_timelapse_storage_check_timer(wxTimerEvent& event);
+    void on_timelapse_storage_check_result();
+    void show_timelapse_storage_dialog(MachineObject* obj);
+    void navigate_to_timelapse_page();
 
     // save and restore from config
     void load_option_vals(MachineObject* obj);

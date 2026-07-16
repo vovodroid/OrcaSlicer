@@ -3,6 +3,7 @@
 
 #include <map>
 #include <mutex>
+#include <atomic>
 #include <vector>
 #include <string>
 #include <memory>
@@ -558,6 +559,7 @@ public:
 
     bool        file_model_download{false};
     bool        virtual_camera{false};
+    bool        m_has_timelapse_kit{false};
 
     bool xcam_ai_monitoring{ false };
     bool xcam_disable_ai_detection_display{false};
@@ -634,6 +636,12 @@ public:
     bool is_support_airprinting_detection{false};
     bool is_support_idelheadingprotect_detection{false};
 
+    // timelapse storage check result (temp state from MQTT response)
+    std::atomic<bool> timelapse_storage_check_done { false };
+    int timelapse_storage_check_result { -1 };
+    bool timelapse_storage_is_enough { true };
+    int timelapse_storage_file_count { 0 };
+
     // fun2
     bool is_support_print_with_emmc{false};
     bool is_support_remote_dry = false;
@@ -706,6 +714,7 @@ public:
 
     /* quick check*/
     bool canEnableTimelapse(wxString& error_message) const;
+    bool is_timelapse_storage_low(const std::string& storage) const;
 
     /* command commands */
     int command_get_version(bool with_retry = true);
@@ -810,6 +819,8 @@ public:
     int command_ipcam_record(bool on_off);
     int command_ipcam_timelapse(bool on_off);
     int command_ipcam_resolution_set(std::string resolution);
+    int command_ipcam_check_timelapse_storage(const std::string& storage, int total_layer);
+    int command_ipcam_delete_oldest_timelapse(const std::string& storage, int total_layer);
     int command_xcam_control(std::string module_name, bool on_off, std::string lvl = "");
 
     //refine printer

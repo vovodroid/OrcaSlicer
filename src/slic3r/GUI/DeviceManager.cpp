@@ -1208,7 +1208,7 @@ bool MachineObject::canEnableTimelapse(wxString &error_message) const
         return true;
     }
 
-    if (m_storage->get_sdcard_state() != DevStorage::SdcardState::HAS_SDCARD_NORMAL) {
+    if (m_storage->get_sdcard_state() != DevStorage::SdcardState::HAS_SDCARD_NORMAL && !m_has_timelapse_kit) {
         if (m_storage->get_sdcard_state() == DevStorage::SdcardState::NO_SDCARD) {
             error_message = _L("Timelapse is not supported while the storage does not exist.");
         } else if (m_storage->get_sdcard_state() == DevStorage::SdcardState::HAS_SDCARD_ABNORMAL) {
@@ -2219,6 +2219,32 @@ int MachineObject::command_ack_proceed(json& proceed) {
 
     json j;
     j["print"] = proceed;
+    return this->publish_json(j);
+}
+
+bool MachineObject::is_timelapse_storage_low(const std::string& storage) const
+{
+    return m_storage && m_storage->is_timelapse_storage_low(storage);
+}
+
+int MachineObject::command_ipcam_check_timelapse_storage(const std::string& storage, int total_layer)
+{
+    json j;
+    j["camera"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);
+    j["camera"]["command"] = "ipcam_get_media_info";
+    j["camera"]["sub_command"] = "is_timelapse_storage_enough";
+    j["camera"]["storage"] = storage;
+    j["camera"]["total_layer"] = total_layer;
+    return this->publish_json(j);
+}
+
+int MachineObject::command_ipcam_delete_oldest_timelapse(const std::string& storage, int total_layer)
+{
+    json j;
+    j["camera"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);
+    j["camera"]["command"] = "ipcam_delete_oldest_timelapse";
+    j["camera"]["storage"] = storage;
+    j["camera"]["total_layer"] = total_layer;
     return this->publish_json(j);
 }
 
@@ -4409,6 +4435,17 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
                                 this->camera_resolution = j["camera"]["resolution"].get<std::string>();
                                 BOOST_LOG_TRIVIAL(info) << "ack of resolution = " << camera_resolution;
                             }
+                        } else if (j["camera"]["command"].get<std::string>() == "ipcam_get_media_info") {
+                            if (j["camera"].contains("sub_command") &&
+                                j["camera"]["sub_command"].get<std::string>() == "is_timelapse_storage_enough") {
+                                timelapse_storage_check_result = j["camera"]["result"].get<int>();
+                                timelapse_storage_is_enough = j["camera"].value("is_enough", true);
+                                timelapse_storage_file_count = j["camera"].value("file_count", 0);
+                                timelapse_storage_check_done = true;
+                                BOOST_LOG_TRIVIAL(info) << "timelapse storage check: result=" << timelapse_storage_check_result
+                                    << " is_enough=" << timelapse_storage_is_enough
+                                    << " file_count=" << timelapse_storage_file_count;
+                            }
                         }
                     }
                 }
@@ -5182,6 +5219,7 @@ void MachineObject::parse_new_info(json print)
 
     if (!aux.empty()) {
         m_storage->set_sdcard_state(get_flag_bits(aux, 12, 2));
+        m_has_timelapse_kit = (get_flag_bits(aux, 26, 1) == 1);
     }
 
     /*stat*/
