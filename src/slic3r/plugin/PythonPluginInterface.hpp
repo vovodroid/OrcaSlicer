@@ -14,6 +14,27 @@ namespace Slic3r {
 
 enum class PluginCapabilityType { PrinterConnection = 0, Automation, Analysis, Importer, Exporter, Visualization, Script, SlicingPipeline, Unknown };
 
+struct PluginCapabilityId
+{
+    PluginCapabilityType type = PluginCapabilityType::Unknown;
+    std::string          name;
+    std::string          plugin_key;
+
+    bool empty() const { return type == PluginCapabilityType::Unknown || name.empty() || plugin_key.empty(); }
+    friend bool operator==(const PluginCapabilityId& lhs, const PluginCapabilityId& rhs)
+    {
+        return lhs.type == rhs.type && lhs.name == rhs.name && lhs.plugin_key == rhs.plugin_key;
+    }
+    friend bool operator<(const PluginCapabilityId& lhs, const PluginCapabilityId& rhs)
+    {
+        if (lhs.plugin_key != rhs.plugin_key)
+            return lhs.plugin_key < rhs.plugin_key;
+        if (lhs.name != rhs.name)
+            return lhs.name < rhs.name;
+        return lhs.type < rhs.type;
+    }
+};
+
 inline std::string plugin_capability_type_to_string(PluginCapabilityType type)
 {
     switch (type) {
@@ -157,6 +178,7 @@ public:
     // from Python can tell which capability they are serving.
     const std::string&   name() const { return m_name; }
     PluginCapabilityType type() const { return m_type; }
+    PluginCapabilityId   identity() const { return {m_type, m_name, m_audit_plugin_key}; }
     void                 set_resolved_identity(std::string name, PluginCapabilityType type)
     {
         m_name = std::move(name);

@@ -4,8 +4,7 @@
 #include <libslic3r/Config.hpp>   // PluginCapabilityRef, parse_capability_ref
 #include <libslic3r/Preset.hpp>   // Preset::Type
 #include <libslic3r/PresetBundle.hpp>
-#include <slic3r/plugin/PluginManager.hpp> // PluginCapabilityId
-#include <slic3r/plugin/PythonPluginInterface.hpp> // PluginCapabilityType
+#include <slic3r/plugin/PythonPluginInterface.hpp> // PluginCapabilityId, PluginCapabilityType
 #include <cstddef>
 #include <functional>
 #include <string>

@@ -26,6 +26,7 @@ namespace {
 
 constexpr const char* KEY_PLUGIN     = "plugin_key";
 constexpr const char* KEY_CAPABILITY = "capability";
+constexpr const char* KEY_TYPE       = "capability_type";
 constexpr const char* KEY_VERSION    = "plugin_version";
 constexpr const char* KEY_CAP_CONFIG = "cap_config";
 
@@ -35,23 +36,24 @@ std::string string_field(const nlohmann::json& entry, const char* key)
     return it != entry.end() && it->is_string() ? it->get<std::string>() : std::string();
 }
 
-bool is_recognized_entry(const nlohmann::json& entry, CapabilityConfigId& id)
+bool is_recognized_entry(const nlohmann::json& entry, PluginCapabilityId& id)
 {
     if (!entry.is_object())
         return false;
 
     id.plugin_key = string_field(entry, KEY_PLUGIN);
-    id.capability = string_field(entry, KEY_CAPABILITY);
-    return !id.plugin_key.empty() && !id.capability.empty();
+    id.name       = string_field(entry, KEY_CAPABILITY);
+    id.type       = plugin_capability_type_from_string(string_field(entry, KEY_TYPE));
+    return !id.empty();
 }
 
-CapabilityConfigEntry decode_entry(const CapabilityConfigId& id, const nlohmann::json& entry)
+CapabilityConfigEntry decode_entry(const PluginCapabilityId& id, const nlohmann::json& entry)
 {
     CapabilityConfigEntry result;
     result.id             = id;
     result.plugin_version = string_field(entry, KEY_VERSION);
     const auto cap_it     = entry.find(KEY_CAP_CONFIG);
-    result.cap_config     = cap_it != entry.end() ? *cap_it : nlohmann::json::object();
+    result.config         = cap_it != entry.end() ? *cap_it : nlohmann::json::object();
     return result;
 }
 
@@ -65,11 +67,6 @@ std::string running_plugin_version(const std::string& plugin_key)
     return descriptor.installed_version.empty() ? descriptor.version : descriptor.installed_version;
 }
 
-CapabilityConfigId make_id(const PluginCapabilityId& id)
-{
-    return CapabilityConfigId{id.plugin_key, id.name};
-}
-
 // Null wherever the plugin host runs without the GUI app (the unit tests). wxGetApp() dereferences
 // the app unconditionally, so ask wxWidgets instead.
 const PresetBundle* active_preset_bundle()
@@ -81,29 +78,13 @@ const PresetBundle* active_preset_bundle()
 // PluginLoader stamps both halves onto the instance when it materializes the capability, so the
 // caller never supplies them and cannot name another capability's entry. Empty means the instance
 // was never materialized: refuse rather than read or clobber a wrong entry.
-std::pair<std::string, std::string> capability_identity(const PluginCapabilityInterface& capability, const char* api_name)
+PluginCapabilityId capability_identity(const PluginCapabilityInterface& capability, const char* api_name)
 {
-    std::pair<std::string, std::string> id{capability.audit_plugin_key(), capability.name()};
-    if (id.first.empty() || id.second.empty())
+    const PluginCapabilityId id = capability.identity();
+    if (id.empty())
         throw std::runtime_error(std::string(api_name) + "() is only available on a capability loaded by the plugin host");
 
     return id;
-}
-
-// The capability type identifies the preset that owns its override. If a plugin raises while
-// reporting its type, resolve against the base config instead of failing the capability config API.
-PluginCapabilityId capability_full_identity(const PluginCapabilityInterface& capability, const char* api_name)
-{
-    const auto [plugin_key, capability_name] = capability_identity(capability, api_name);
-
-    PluginCapabilityType type = PluginCapabilityType::Unknown;
-    try {
-        type = capability.get_type();
-    } catch (const std::exception& ex) {
-        BOOST_LOG_TRIVIAL(warning) << "Capability '" << capability_name << "' of plugin '" << plugin_key
-                                   << "': get_type() failed (" << ex.what() << "); reading the base config only";
-    }
-    return {type, capability_name, plugin_key};
 }
 
 } // namespace
@@ -115,8 +96,8 @@ CapabilityConfigDocument CapabilityConfigDocument::from_entries(const nlohmann::
         return document;
 
     for (const nlohmann::json& entry : entries) {
-        CapabilityConfigId id;
-        if (is_recognized_entry(entry, id))
+        PluginCapabilityId id;
+        if (is_recognized_entry(entry, id) || (!id.plugin_key.empty() && !id.name.empty()))
             document.m_entries[id] = entry;
         else
             document.m_opaque_entries.push_back(entry);
@@ -131,23 +112,34 @@ CapabilityConfigDocument CapabilityConfigDocument::from_root_json(const nlohmann
     return entries != root.end() ? from_entries(*entries) : CapabilityConfigDocument();
 }
 
-std::optional<CapabilityConfigEntry> CapabilityConfigDocument::find(const CapabilityConfigId& id) const
+std::optional<CapabilityConfigEntry> CapabilityConfigDocument::find(const PluginCapabilityId& id) const
 {
     const auto it = m_entries.find(id);
-    if (it == m_entries.end())
-        return std::nullopt;
-    return decode_entry(it->first, it->second);
+    if (it != m_entries.end())
+        return decode_entry(it->first, it->second);
+
+    // Legacy config.json entries have no capability type. Keep them addressable by the new
+    // typed API until that capability is saved again.
+    if (id.type != PluginCapabilityType::Unknown) {
+        const auto legacy = m_entries.find({PluginCapabilityType::Unknown, id.name, id.plugin_key});
+        if (legacy != m_entries.end())
+            return decode_entry(id, legacy->second);
+    }
+    return std::nullopt;
 }
 
-bool CapabilityConfigDocument::contains(const CapabilityConfigId& id) const
+bool CapabilityConfigDocument::contains(const PluginCapabilityId& id) const
 {
-    return m_entries.find(id) != m_entries.end();
+    return find(id).has_value();
 }
 
 bool CapabilityConfigDocument::upsert(CapabilityConfigEntry entry)
 {
-    if (entry.id.plugin_key.empty() || entry.id.capability.empty())
+    if (entry.id.empty())
         return false;
+
+    if (entry.id.type != PluginCapabilityType::Unknown)
+        m_entries.erase({PluginCapabilityType::Unknown, entry.id.name, entry.id.plugin_key});
 
     nlohmann::json serialized = nlohmann::json::object();
     const auto existing       = m_entries.find(entry.id);
@@ -155,17 +147,21 @@ bool CapabilityConfigDocument::upsert(CapabilityConfigEntry entry)
         serialized = existing->second;
 
     serialized[KEY_PLUGIN]     = entry.id.plugin_key;
-    serialized[KEY_CAPABILITY] = entry.id.capability;
+    serialized[KEY_CAPABILITY] = entry.id.name;
+    serialized[KEY_TYPE]       = plugin_capability_type_to_string(entry.id.type);
     serialized[KEY_VERSION]    = entry.plugin_version;
-    serialized[KEY_CAP_CONFIG] = entry.cap_config;
+    serialized[KEY_CAP_CONFIG] = entry.config;
 
     m_entries[entry.id] = std::move(serialized);
     return true;
 }
 
-bool CapabilityConfigDocument::erase(const CapabilityConfigId& id)
+bool CapabilityConfigDocument::erase(const PluginCapabilityId& id)
 {
-    return m_entries.erase(id) != 0;
+    bool erased = m_entries.erase(id) != 0;
+    if (id.type != PluginCapabilityType::Unknown)
+        erased = m_entries.erase({PluginCapabilityType::Unknown, id.name, id.plugin_key}) != 0 || erased;
+    return erased;
 }
 
 bool CapabilityConfigDocument::empty() const
@@ -260,39 +256,34 @@ bool PluginConfig::save()
     return true;
 }
 
-void PluginConfig::save_config(const std::string& plugin_key,
-                               const std::string& capability_name,
-                               const std::string& version,
-                               const nlohmann::json& config)
-{ save_config({plugin_key, capability_name, version, config}); }
-
-bool PluginConfig::store_capability_config(const std::string& plugin_key,
-                                           const std::string& capability_name,
-                                           const nlohmann::json& config)
+bool PluginConfig::store_capability_config(const PluginCapabilityId& id, const nlohmann::json& config)
 {
-    save_config({plugin_key, capability_name, running_plugin_version(plugin_key), config});
+    if (id.empty())
+        return false;
+
+    save_config({id, running_plugin_version(id.plugin_key), config});
     return save();
 }
 
-void PluginConfig::save_config(const BaseConfig& config)
+void PluginConfig::save_config(const CapabilityConfigEntry& config)
 {
-    if (config.empty()) {
-        BOOST_LOG_TRIVIAL(error) << "PluginConfig: refusing to store a config without a plugin key and capability name";
+    if (config.id.empty()) {
+        BOOST_LOG_TRIVIAL(error) << "PluginConfig: refusing to store a config without a complete capability identity";
         return;
     }
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_dirty = m_document.upsert(CapabilityConfigEntry{{config.plugin_key, config.capability_name}, config.plugin_version, config.config}) || m_dirty;
+    m_dirty = m_document.upsert(config) || m_dirty;
 }
 
-bool PluginConfig::erase_capability_config(const std::string& plugin_key, const std::string& capability_name)
+bool PluginConfig::erase_capability_config(const PluginCapabilityId& id)
 {
-    if (plugin_key.empty() || capability_name.empty())
+    if (id.empty())
         return false;
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (!m_document.erase({plugin_key, capability_name}))
+        if (!m_document.erase(id))
             return true;
         m_dirty = true;
     }
@@ -300,19 +291,16 @@ bool PluginConfig::erase_capability_config(const std::string& plugin_key, const 
     return save();
 }
 
-BaseConfig PluginConfig::get_config(const std::string& plugin_key, const std::string& capability_name) const
+std::optional<CapabilityConfigEntry> PluginConfig::get_config(const PluginCapabilityId& id) const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    const auto entry = m_document.find({plugin_key, capability_name});
-    if (!entry)
-        return BaseConfig();
-    return BaseConfig{entry->id.plugin_key, entry->id.capability, entry->plugin_version, entry->cap_config};
+    return m_document.find(id);
 }
 
-bool PluginConfig::has_config(const std::string& plugin_key, const std::string& capability_name) const
+bool PluginConfig::has_config(const PluginCapabilityId& id) const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_document.contains({plugin_key, capability_name});
+    return m_document.contains(id);
 }
 
 bool PluginConfig::dirty() const
@@ -358,22 +346,22 @@ EffectiveCapabilityConfig PresetPluginConfigService::get_effective_config(const 
                                                                          const PluginCapabilityId& id) const
 {
     EffectiveCapabilityConfig result;
-    result.id                     = make_id(id);
+    result.id                     = id;
     result.running_plugin_version = running_plugin_version(id.plugin_key);
 
-    const BaseConfig base  = PluginManager::instance().get_config().get_config(id.plugin_key, id.name);
-    result.has_base_config = !base.empty();
+    const auto base         = PluginManager::instance().get_config().get_config(id);
+    result.has_base_config  = base.has_value();
 
     if (const auto entry = overrides.find(result.id)) {
         result.has_preset_override   = true;
-        result.config                = entry->cap_config;
+        result.config                = entry->config;
         result.stored_plugin_version = entry->plugin_version;
         return result;
     }
 
     if (result.has_base_config) {
-        result.config                = base.config;
-        result.stored_plugin_version = base.plugin_version;
+        result.config                = base->config;
+        result.stored_plugin_version = base->plugin_version;
     }
     return result;
 }
@@ -382,20 +370,19 @@ MutationResult PresetPluginConfigService::set_preset_override(CapabilityConfigDo
                                                               const PluginCapabilityId& id,
                                                               const nlohmann::json&             value) const
 {
-    MutationResult           result;
-    const CapabilityConfigId config_id = make_id(id);
-    const std::string        version   = running_plugin_version(id.plugin_key);
+    MutationResult    result;
+    const std::string version = running_plugin_version(id.plugin_key);
 
     // A no-op is a successful unchanged result: re-saving the displayed value must not mark the
     // preset dirty.
-    const auto existing = overrides.find(config_id);
-    if (existing && existing->cap_config == value && existing->plugin_version == version) {
+    const auto existing = overrides.find(id);
+    if (existing && existing->config == value && existing->plugin_version == version) {
         result.ok        = true;
         result.effective = get_effective_config(overrides, id);
         return result;
     }
 
-    overrides.upsert({config_id, version, value});
+    overrides.upsert({id, version, value});
 
     result.ok        = true;
     result.changed   = true;
@@ -408,7 +395,7 @@ MutationResult PresetPluginConfigService::remove_preset_override(CapabilityConfi
 {
     MutationResult result;
     result.ok        = true;
-    result.changed   = overrides.erase(make_id(id));
+    result.changed   = overrides.erase(id);
     result.effective = get_effective_config(overrides, id);
     return result;
 }
@@ -458,21 +445,19 @@ nlohmann::json capability_get_config(const PluginCapabilityInterface& capability
 {
     // Shares its resolution with the dialogs, so a capability reads back exactly the config its UI
     // showed as effective. Stored in neither layer: an empty object, indexable unconditionally.
-    return active_capability_config(capability_full_identity(capability, "get_config")).config;
+    return active_capability_config(capability_identity(capability, "get_config")).config;
 }
 
 std::string capability_get_config_version(const PluginCapabilityInterface& capability)
 {
     // Must resolve through the same layer as get_config(), or a plugin would migrate one layer's
     // config by another's version stamp.
-    return active_capability_config(capability_full_identity(capability, "get_config_version")).stored_plugin_version;
+    return active_capability_config(capability_identity(capability, "get_config_version")).stored_plugin_version;
 }
 
 bool capability_save_config(const PluginCapabilityInterface& capability, const nlohmann::json& config)
 {
-    const auto [plugin_key, capability_name] = capability_identity(capability, "save_config");
-
-    return PluginManager::instance().get_config().store_capability_config(plugin_key, capability_name, config);
+    return PluginManager::instance().get_config().store_capability_config(capability_identity(capability, "save_config"), config);
 }
 
 nlohmann::json PluginConfig::capabilities_payload(const std::vector<PluginCapabilityId>& caps)
@@ -480,7 +465,7 @@ nlohmann::json PluginConfig::capabilities_payload(const std::vector<PluginCapabi
     nlohmann::json payload = nlohmann::json::array();
     for (const PluginCapabilityId& id : caps) {
         // A capability unloaded since the list was built has nothing to configure.
-        const auto capability = PluginManager::instance().get_plugin_capability(id.plugin_key, id.name, id.type, false);
+        const auto capability = PluginManager::instance().get_plugin_capability(id, false);
         if (!capability)
             continue;
 
@@ -510,7 +495,7 @@ nlohmann::json PluginConfig::get_config_response(const PluginCapabilityId& id)
 
     // Scoped to the full identity, so a stale request from a page that has not caught up with a
     // refresh misses rather than reading a different plugin's config.
-    const auto cap = PluginManager::instance().get_plugin_capability(id.plugin_key, id.name, id.type, false);
+    const auto cap = PluginManager::instance().get_plugin_capability(id, false);
     if (!cap) {
         BOOST_LOG_TRIVIAL(warning) << "Ignoring config request for a capability that is no longer loaded. plugin_key="
                                    << id.plugin_key << " capability_name=" << id.name;
@@ -518,7 +503,8 @@ nlohmann::json PluginConfig::get_config_response(const PluginCapabilityId& id)
         return response;
     }
 
-    response["config"] = PluginManager::instance().get_config().get_config(id.plugin_key, id.name).config;
+    if (const auto stored = PluginManager::instance().get_config().get_config(id))
+        response["config"] = stored->config;
 
     if (cap->config_ui_available()) {
         // A raising or empty get_config_ui() costs the capability only its custom UI: report the
@@ -564,7 +550,7 @@ nlohmann::json PluginConfig::save_config_response(const PluginCapabilityId& id, 
     response["ok"]              = false;
     response["error"]           = "";
 
-    const auto cap = PluginManager::instance().get_plugin_capability(id.plugin_key, id.name, id.type, false);
+    const auto cap = PluginManager::instance().get_plugin_capability(id, false);
     if (!cap) {
         BOOST_LOG_TRIVIAL(warning) << "Refusing to save config for a capability that is no longer loaded. plugin_key="
                                    << id.plugin_key << " capability_name=" << id.name;
@@ -583,7 +569,7 @@ nlohmann::json PluginConfig::save_config_response(const PluginCapabilityId& id, 
         }
     }
 
-    if (!PluginManager::instance().get_config().store_capability_config(id.plugin_key, id.name, parsed)) {
+    if (!PluginManager::instance().get_config().store_capability_config(id, parsed)) {
         BOOST_LOG_TRIVIAL(error) << "Failed to write the plugin config file. plugin_key=" << id.plugin_key
                                  << " capability_name=" << id.name;
         response["error"] = GUI::into_u8(_L("The configuration could not be written to disk. Your changes were not saved."));
@@ -594,7 +580,8 @@ nlohmann::json PluginConfig::save_config_response(const PluginCapabilityId& id, 
 
     // Echo back what was persisted, not what the user typed, so the editor reloads from the store.
     response["ok"]     = true;
-    response["config"] = PluginManager::instance().get_config().get_config(id.plugin_key, id.name).config;
+    if (const auto stored = PluginManager::instance().get_config().get_config(id))
+        response["config"] = stored->config;
     return response;
 }
 
@@ -610,7 +597,7 @@ nlohmann::json PluginConfig::restore_config_response(const PluginCapabilityId& i
     response["ok"]              = false;
     response["error"]           = "";
 
-    const auto cap = PluginManager::instance().get_plugin_capability(id.plugin_key, id.name, id.type, false);
+    const auto cap = PluginManager::instance().get_plugin_capability(id, false);
     if (!cap) {
         BOOST_LOG_TRIVIAL(warning) << "Refusing to restore config for a capability that is no longer loaded. plugin_key="
                                    << id.plugin_key << " capability_name=" << id.name;
@@ -643,7 +630,7 @@ nlohmann::json PluginConfig::restore_config_response(const PluginCapabilityId& i
         return response;
     }
 
-    if (!PluginManager::instance().get_config().store_capability_config(id.plugin_key, id.name, defaults)) {
+    if (!PluginManager::instance().get_config().store_capability_config(id, defaults)) {
         BOOST_LOG_TRIVIAL(error) << "Failed to write the plugin config file while restoring defaults. plugin_key="
                                  << id.plugin_key << " capability_name=" << id.name;
         response["error"] = GUI::into_u8(_L("The configuration could not be written to disk. Nothing was changed."));
@@ -654,7 +641,8 @@ nlohmann::json PluginConfig::restore_config_response(const PluginCapabilityId& i
                             << " capability_name=" << id.name;
 
     response["ok"]     = true;
-    response["config"] = PluginManager::instance().get_config().get_config(id.plugin_key, id.name).config;
+    if (const auto stored = PluginManager::instance().get_config().get_config(id))
+        response["config"] = stored->config;
     return response;
 }
 

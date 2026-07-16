@@ -29,20 +29,6 @@ namespace Slic3r {
 
 class OrcaCloudServiceAgent;
 
-// Identity of a single capability, as published to lifecycle subscribers. Purely a message
-// payload — capabilities are looked up by (plugin_key, name) linear scan, so unlike the registry
-// key this replaces, it needs no hash. Equality is provided for the plugin-config side, which
-// de-duplicates the "capabilities in use" list (PluginResolver) with std::unique.
-struct PluginCapabilityId
-{
-    PluginCapabilityType type = PluginCapabilityType::Unknown;
-    std::string          name;
-    std::string          plugin_key; // owning package
-
-    bool operator==(const PluginCapabilityId& o) const
-    { return type == o.type && name == o.name && plugin_key == o.plugin_key; }
-};
-
 // One discovered plugin package: one .py/.whl file -> one descriptor + one Python module +
 // N materialized capabilities.
 //
@@ -157,10 +143,9 @@ public:
         const std::string& plugin_key = "",                            // "" => all plugins
         PluginCapabilityType type     = PluginCapabilityType::Unknown, // Unknown => all types
         bool only_enabled             = true) const;
-    std::shared_ptr<PluginCapabilityInterface> get_plugin_capability(const std::string& plugin_key,
-                                                                     const std::string& capability_name,
-                                                                     PluginCapabilityType type = PluginCapabilityType::Unknown,
-                                                                     bool only_enabled         = true) const;
+    std::shared_ptr<PluginCapabilityInterface> get_plugin_capability(const PluginCapabilityId& id, bool only_enabled = true) const;
+
+    // Try to resolve from just capability name and type from presets.
     std::shared_ptr<PluginCapabilityInterface> get_plugin_capability(const std::string& capability_name,
                                                                      PluginCapabilityType type = PluginCapabilityType::Unknown,
                                                                      bool only_enabled         = true) const;
@@ -177,7 +162,7 @@ public:
     bool cancel_plugin_load(const std::string& plugin_key);
     std::string get_plugin_load_error(const std::string& plugin_key) const;
 
-    void set_capability_enabled(const std::string& plugin_key, const std::string& capability_name, bool enabled);
+    void set_capability_enabled(const PluginCapabilityId& id, bool enabled);
 
     // Sets the cloud user whose _subscribed/{user_id} directory is scanned and installed into.
     void set_cloud_user(const std::string& user_id);
@@ -290,6 +275,9 @@ private:
     std::map<std::string, std::string> m_load_errors;
     mutable std::condition_variable m_load_cv;
 
+    // Serialize sidecar snapshots so concurrent capability toggles cannot write stale state out of order.
+    mutable std::mutex m_install_state_mutex;
+
     std::map<CallbackType, std::vector<PluginLifecycleCompleteFn>> m_callbacks;
     std::map<CallbackType, std::vector<CapabilityLifecycleFn>> m_capability_callbacks;
 
@@ -346,7 +334,7 @@ void execute_capabilities_from_refs(const ConfigOptionStrings& capabilities,
 
         // only_enabled = false so that "not loaded" and "loaded but disabled" stay distinguishable
         // and each keeps its own diagnostic.
-        auto cap = plugin_mgr.get_plugin_capability(plugin_key, cap_name, type, /*only_enabled=*/false);
+        auto cap = plugin_mgr.get_plugin_capability({type, cap_name, plugin_key}, /*only_enabled=*/false);
         if (!cap) {
             BOOST_LOG_TRIVIAL(warning) << tag << ": no loaded capability '" << cap_name << "' for plugin '" << plugin_key << "'; skipping";
             continue;

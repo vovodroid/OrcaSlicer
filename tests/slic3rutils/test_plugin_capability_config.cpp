@@ -43,7 +43,8 @@ py::module_ import_orca_module()
 py::object make_capability(const std::string& class_name,
                            const std::string& body,
                            const std::string& plugin_key,
-                           const std::string& capability_name)
+                           const std::string& capability_name,
+                           PluginCapabilityType type = PluginCapabilityType::Script)
 {
     // Import first: it brings the interpreter up, and any py:: object built before it would touch a
     // Python that does not exist yet.
@@ -57,7 +58,6 @@ py::object make_capability(const std::string& class_name,
 
     if (!plugin_key.empty()) {
         auto iface = instance.cast<std::shared_ptr<PluginCapabilityInterface>>();
-        const PluginCapabilityType type = iface->get_type();
         iface->set_audit_plugin_key(plugin_key);
         iface->set_resolved_identity(capability_name, type);
     }
@@ -76,6 +76,11 @@ PluginConfig& host_config() { return PluginManager::instance().get_config(); }
 json py_get_config(const py::object& cap) { return json::parse(cap.attr("get_config")().cast<std::string>()); }
 
 bool py_save_config(const py::object& cap, const json& value) { return cap.attr("save_config")(value.dump()).cast<bool>(); }
+
+PluginCapabilityId capability_id(PluginCapabilityType type, const char* name, const char* plugin_key)
+{
+    return {type, name, plugin_key};
+}
 
 } // namespace
 
@@ -116,9 +121,10 @@ TEST_CASE("get_config returns only cap_config and save_config persists it", "[Pl
 
     REQUIRE(py_save_config(cap, json{{"speed", 5}, {"name", "fast"}}));
 
-    const BaseConfig stored = host_config().get_config("plugin_a", "cap_a");
-    REQUIRE_FALSE(stored.empty());
-    CHECK(stored.config == json{{"speed", 5}, {"name", "fast"}});
+    const auto stored = host_config().get_config(capability_id(PluginCapabilityType::Script, "cap_a", "plugin_a"));
+    REQUIRE(stored);
+    CHECK(stored->id == capability_id(PluginCapabilityType::Script, "cap_a", "plugin_a"));
+    CHECK(stored->config == json{{"speed", 5}, {"name", "fast"}});
 
     // Python reads back exactly cap_config — no host metadata.
     const json reloaded = py_get_config(cap);
@@ -141,7 +147,7 @@ TEST_CASE("save_config rejects a string that is not valid JSON", "[PluginConfig]
 
     // Refusing unparseable text must leave the previously stored config alone.
     CHECK_FALSE(cap.attr("save_config")("{not json").cast<bool>());
-    CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"keep", "me"}});
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Script, "cap_a", "plugin_a"))->config == json{{"keep", "me"}});
 }
 
 TEST_CASE("Saving one capability's config does not touch another's", "[PluginConfig][Python]")
@@ -162,9 +168,19 @@ TEST_CASE("Saving one capability's config does not touch another's", "[PluginCon
 
     REQUIRE(py_save_config(a_cap1, json{{"value", 99}}));
 
-    CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"value", 99}});
-    CHECK(host_config().get_config("plugin_a", "cap_b").config == json{{"value", 2}});
-    CHECK(host_config().get_config("plugin_b", "cap_a").config == json{{"value", 3}});
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Script, "cap_a", "plugin_a"))->config == json{{"value", 99}});
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Script, "cap_b", "plugin_a"))->config == json{{"value", 2}});
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Script, "cap_a", "plugin_b"))->config == json{{"value", 3}});
+
+    // A shared name under one plugin must remain isolated when the capability type differs.
+    py::object importer = make_capability("IsoCapImporter", body, "plugin_a", "cap_a", PluginCapabilityType::Importer);
+    REQUIRE(py_save_config(importer, json{{"value", 4}}));
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Script, "cap_a", "plugin_a"))->config == json{{"value", 99}});
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Importer, "cap_a", "plugin_a"))->config == json{{"value", 4}});
+
+    host_config().load();
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Script, "cap_a", "plugin_a"))->config == json{{"value", 99}});
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Importer, "cap_a", "plugin_a"))->config == json{{"value", 4}});
 
     CHECK(py_get_config(a_cap2).at("value") == 2);
     CHECK(py_get_config(b_cap1).at("value") == 3);
@@ -213,7 +229,7 @@ TEST_CASE("A capability that omits the config UI hooks gets the default editor",
     CHECK(iface->get_config_ui().empty());
 
     REQUIRE(py_save_config(bare, json{{"speed", 5}}));
-    CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"speed", 5}});
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Script, "cap_a", "plugin_a"))->config == json{{"speed", 5}});
 }
 
 TEST_CASE("get_default_config supplies the value Restore defaults writes back", "[PluginConfig][Python]")
@@ -289,10 +305,10 @@ TEST_CASE("Restoring defaults overwrites only the target capability", "[PluginCo
 
     // What PluginsDialog::restore_capability_config does: ask the capability, store the answer.
     auto iface = as_interface(target);
-    REQUIRE(host_config().store_capability_config("plugin_a", "cap_a", iface->get_default_config()));
+    REQUIRE(host_config().store_capability_config(capability_id(PluginCapabilityType::Script, "cap_a", "plugin_a"), iface->get_default_config()));
 
-    CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"speed", 1}});
-    CHECK(host_config().get_config("plugin_b", "cap_a").config == json{{"speed", 99}});
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Script, "cap_a", "plugin_a"))->config == json{{"speed", 1}});
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Script, "cap_a", "plugin_b"))->config == json{{"speed", 99}});
 }
 
 TEST_CASE("A raising get_default_config leaves the stored config untouched", "[PluginConfig][Python]")
@@ -312,7 +328,7 @@ TEST_CASE("A raising get_default_config leaves the stored config untouched", "[P
     CHECK_THROWS_AS(iface->get_default_config(), py::error_already_set);
 
     // The dialog stores nothing when the hook throws: a broken plugin must not wipe user settings.
-    CHECK(host_config().get_config("plugin_a", "cap_a").config == json{{"keep", "me"}});
+    CHECK(host_config().get_config(capability_id(PluginCapabilityType::Script, "cap_a", "plugin_a"))->config == json{{"keep", "me"}});
 }
 
 TEST_CASE("A raising config UI hook surfaces as an exception the host can catch", "[PluginConfig][Python]")

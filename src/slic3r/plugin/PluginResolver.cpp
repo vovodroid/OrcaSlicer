@@ -31,7 +31,10 @@ namespace {
 // The tracked option in `preset` whose value references `ref`'s capability, or "" when none does.
 // Doubles as the "Jump to" target and as the signal that the plugin is still required: a missing
 // plugin with no referencing option is dropped from the set.
-std::string find_option_for_capability(Preset::Type type, const Preset& preset, const PluginCapabilityRef& ref)
+std::string find_option_for_capability(Preset::Type type,
+                                       const Preset& preset,
+                                       const PluginCapabilityRef& ref,
+                                       PluginCapabilityType capability_type = PluginCapabilityType::Unknown)
 {
     if (type != Preset::TYPE_PRINT && type != Preset::TYPE_PRINTER && type != Preset::TYPE_FILAMENT)
         return {};
@@ -42,13 +45,15 @@ std::string find_option_for_capability(Preset::Type type, const Preset& preset, 
     if (def == nullptr)
         return {};
 
+    const std::string expected_type = plugin_capability_type_to_string(capability_type);
     const auto matches_ref = [&ref](const std::string& value) {
         return value == ref.capability_name;
     };
 
     for (const std::string& field : preset.config.keys()) {
         const ConfigOptionDef* opt_def = def->get(field);
-        if (opt_def == nullptr || !opt_def->is_plugin_backed())
+        if (opt_def == nullptr || !opt_def->is_plugin_backed() ||
+            (capability_type != PluginCapabilityType::Unknown && opt_def->plugin_type != expected_type))
             continue;
 
         const ConfigOption* option = preset.config.option(field);
@@ -70,8 +75,12 @@ std::string find_option_for_capability(Preset::Type type, const Preset& preset, 
 
     // printer_agent stores AgentInfo::id, so a missing plugin cannot be reverse-mapped through
     // the runtime registry. If no regular printer plugin field matched, assume printer_agent.
-    if (type == Preset::Type::TYPE_PRINTER && preset.config.has("printer_agent"))
+    if (type == Preset::Type::TYPE_PRINTER && preset.config.has("printer_agent")) {
+        const ConfigOptionDef* agent_def = def->get("printer_agent");
+        if (agent_def != nullptr && agent_def->is_plugin_backed() &&
+            (capability_type == PluginCapabilityType::Unknown || agent_def->plugin_type == expected_type))
         return "printer_agent";
+    }
 
     return {};
 }
@@ -129,10 +138,13 @@ void collect_capabilities_in_use(Preset::Type type, const Preset& preset, std::v
         if (!PluginManager::instance().try_get_plugin_descriptor(key, descriptor))
             continue;
 
-        // The loaded capability is also what supplies the type: the manifest ref does not carry one.
+        // The manifest ref does not carry a type, so require the live capability type to match the
+        // type declared by the option that references it.
         for (const auto& capability : PluginManager::instance().get_plugin_capabilities(descriptor.plugin_key, PluginCapabilityType::Unknown, false))
-            if (capability && capability->name() == ref.capability_name)
-                out.push_back(PluginCapabilityId{capability->type(), capability->name(), capability->audit_plugin_key()});
+            if (capability && capability->type() != PluginCapabilityType::Unknown &&
+                capability->name() == ref.capability_name &&
+                !find_option_for_capability(type, preset, ref, capability->type()).empty())
+                out.push_back(capability->identity());
     }
 }
 
@@ -206,7 +218,7 @@ static std::pair<bool, bool> loaded_capability_state(const std::string& plugin_k
     if (!mgr.is_plugin_loaded(plugin_key))
         return {false, false};
 
-    const auto capability = mgr.get_plugin_capability(plugin_key, ref.capability_name, PluginCapabilityType::Unknown,
+    const auto capability = mgr.get_plugin_capability({PluginCapabilityType::Unknown, ref.capability_name, plugin_key},
                                                       /*only_enabled=*/false);
     if (!capability)
         return {false, false};

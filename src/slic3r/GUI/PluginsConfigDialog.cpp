@@ -156,7 +156,7 @@ void PluginsConfigDialog::send_capability_config(const PluginCapabilityId& id)
     response["custom_html"]     = "";
     response["error"]           = "";
 
-    const auto cap = PluginManager::instance().get_plugin_capability(id.plugin_key, id.name, id.type, false);
+    const auto cap = PluginManager::instance().get_plugin_capability(id, false);
     if (!cap || preset == nullptr) {
         response["error"] = into_u8(_L("This capability is no longer available."));
         call_web_handler(response);
