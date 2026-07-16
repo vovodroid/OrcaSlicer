@@ -639,6 +639,7 @@ public:
     bool is_support_remote_dry = false;
     bool is_support_check_track_switch_match_slice_printer{false};
     bool is_support_pa_mode{false};
+    std::optional<bool> m_firmware_support_print_tpu_left;
 
     bool installed_upgrade_kit{false};
     int  bed_temperature_limit = -1;

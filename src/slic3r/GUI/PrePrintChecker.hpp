@@ -48,6 +48,7 @@ enum PrintDialogStatus : unsigned int {
     PrintStatusConnecting,
     PrintStatusReconnecting,
     PrintStatusInUpgrading,
+    PrintStatusFirmwareNotSupportTpuAtLeft,
     PrintStatusModeNotFDM,
     PrintStatusInSystemPrinting,
     PrintStatusInPrinting,

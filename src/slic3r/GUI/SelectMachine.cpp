@@ -2104,6 +2104,10 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
         // Extra-waste warning: allow Send.
         Enable_Refresh_Button(true);
         Enable_Send_Button(true);
+    } else if (status == PrintDialogStatus::PrintStatusFirmwareNotSupportTpuAtLeft) {
+        // Firmware can't print TPU on the left extruder: block Send.
+        Enable_Refresh_Button(true);
+        Enable_Send_Button(false);
     } else if (status == PrintDialogStatus::PrintStatusFilaSwitcherError) {
         // Missing or un-set-up switch required by the slice: block Send.
         Enable_Refresh_Button(true);
@@ -4160,6 +4164,32 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
     // Rack print-dispatch nozzle mapping (static rack V0): consumes the validated AMS mapping, so it
     // runs after the AMS-validity check and before the per-nozzle blacklist loop (which needs the result).
     if (!CheckErrorSyncNozzleMappingResultV0(obj_)) return;
+
+    // H2-series firmware gate: block Send when TPU is mapped to the left (deputy) extruder on firmware
+    // that can't print it. Inert unless the printer JSON opts in via support_print_check_firmware_for_tpu_left.
+    if (DevPrinterConfigUtil::support_print_check_firmware_for_tpu_left(obj_->printer_type)) {
+        bool has_tpu_left = false;
+        for (const auto& fila : m_ams_mapping_result) {
+            const auto& ams_id  = fila.ams_id;
+            const auto& slot_id = fila.slot_id;
+            if (!obj_->contains_tray(ams_id, slot_id)) {
+                show_status(PrintDialogStatus::PrintStatusAmsMappingInvalid);
+                return;
+            }
+
+            if (obj_->get_extruder_id_by_ams_id(ams_id) == DEPUTY_EXTRUDER_ID &&
+                obj_->get_tray(ams_id, slot_id).get_filament_type() == "TPU") {
+                has_tpu_left = true;
+                break;
+            }
+        }
+
+        if (has_tpu_left && !obj_->m_firmware_support_print_tpu_left.value_or(false)) {
+            show_status(PrintDialogStatus::PrintStatusFirmwareNotSupportTpuAtLeft,
+                        {_L("Your current firmware version cannot start this print job. Please update to the latest version and try again.")});
+            return;
+        }
+    }
 
     // filaments check for black list
     for (auto i = 0; i < m_ams_mapping_result.size(); i++) {

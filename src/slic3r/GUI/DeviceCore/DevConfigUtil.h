@@ -103,6 +103,7 @@ public:
 
     /*print check*/
     static bool support_print_check_extension_fan_f000_mounted(const std::string& type_str) { return get_value_from_config<bool>(type_str, "print", "support_print_check_extension_fan_f000_mounted"); }
+    static bool support_print_check_firmware_for_tpu_left(const std::string& type_str) { return get_value_from_config<bool>(type_str, "print", "support_print_check_firmware_for_tpu_left"); }
 
 public:
     template<typename T>
