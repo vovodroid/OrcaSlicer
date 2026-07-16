@@ -304,6 +304,7 @@ void DeviceErrorDialog::init_button_list()
     init_button(FILAMENT_LOAD_RESUME, _L("Filament Loaded, Resume"));
     init_button(JUMP_TO_LIVEVIEW, _L("View Liveview"));
     init_button(NO_REMINDER_NEXT_TIME, _L("No Reminder Next Time"));
+    init_button(REFRESH_NOZZLE, _L("Recheck")); // Orca: ported REF error action
     init_button(IGNORE_NO_REMINDER_NEXT_TIME, _L("Ignore. Don't Remind Next Time"));
     init_button(IGNORE_RESUME, _L("Ignore this and Resume"));
     init_button(PROBLEM_SOLVED_RESUME, _L("Problem Solved and Resume"));
@@ -312,6 +313,8 @@ void DeviceErrorDialog::init_button_list()
     init_button(CANCEL, _L("Cancel"));
     init_button(STOP_DRYING, _L("Stop Drying"));
     init_button(PROCEED, _L("Proceed"));
+    init_button(OK_JUMP_RACK, _L("OK"));  // Orca: ported REF error action
+    init_button(ABORT, _L("Abort"));      // Orca: ported REF error action
     init_button(DISABLE_PURIFICATION, _L("Disable Purification for This Print"));
     init_button(DONT_REMIND_NEXT_TIME, _L("Don't Remind Me"));
     init_button(DBL_CHECK_CANCEL, _L("Cancel"));
@@ -377,6 +380,7 @@ wxString DeviceErrorDialog::show_error_code(int error_code)
     Raise();
 
 #ifndef __linux__
+    // Orca: skip RequestUserAttention on Linux/Wayland (urgency-hint deadlock).
     // On Linux (especially Wayland) RequestUserAttention(wxUSER_ATTENTION_ERROR) maps to
     // gtk_window_set_urgency_hint(TRUE) which can leave the window in an urgent-but-unfocused
     // state — clicks no longer reach any widget in the app and the user has to kill the
@@ -598,6 +602,21 @@ void DeviceErrorDialog::on_button_click(ActionButton btn_id)
                 BOOST_LOG_TRIVIAL(error) << "DeviceErrorDialog: Action Proceed missing params.";
             }
         }
+        break;
+    }
+    case DeviceErrorDialog::REFRESH_NOZZLE: { // Orca: ported REF error action
+        m_obj->command_refresh_nozzle();
+        break;
+    }
+    case DeviceErrorDialog::OK_JUMP_RACK: { // Orca: ported REF error action
+        Slic3r::GUI::wxGetApp().mainframe->jump_to_monitor();
+        // Orca: transitional shim (removed in resync cluster 8)
+        if (auto* mon = Slic3r::GUI::wxGetApp().mainframe->m_monitor)
+            mon->get_status_panel()->jump_to_Rack();
+        break;
+    }
+    case DeviceErrorDialog::ABORT: { // Orca: ported REF error action
+        m_obj->command_ams_control("abort");
         break;
     }
     case DeviceErrorDialog::DISABLE_PURIFICATION: {

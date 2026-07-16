@@ -208,6 +208,8 @@ public:
     int  update_print_required_data(Slic3r::DynamicPrintConfig config, Slic3r::Model model, Slic3r::PlateDataPtrs plate_data_list, std::string file_name, std::string file_path);
     void set_print_type(PrintFromType type) { m_print_type = type; };
     bool do_ams_mapping(MachineObject *obj_);
+    // Orca: true when a Filament Track Switch is installed and ready (drives the combined dynamic mapping view).
+    bool has_selector(MachineObject *obj_) const;
     void deal_only_exist_ext_spool(MachineObject *obj_);
     void show_thumbnail_page();
     bool get_ams_mapping_result(std::string &mapping_array_str, std::string &mapping_array_str2, std::string &ams_mapping_info);

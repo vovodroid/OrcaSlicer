@@ -25,6 +25,7 @@
 
 #include "DeviceCore/DevConfig.h"
 #include "DeviceCore/DevConfigUtil.h"
+#include "DeviceCore/DevFilaSwitch.h" // Orca: has_selector() reads GetFilaSwitch()->IsInstalled()/IsReady()
 #include "DeviceCore/DevFilaSystem.h"
 #include "DeviceCore/DevManager.h"
 #include "DeviceCore/DevMapping.h"
@@ -371,6 +372,9 @@ void SyncAmsInfoDialog::update_map_when_change_map_mode()
         m_cur_colors_in_thumbnail = m_back_cur_colors_in_thumbnail;
     } else if (m_map_mode == MapModeEnum::Override) {
         if (m_ams_combo_info.empty()) {
+            // Orca: the reference passes has_selector() here to skip ext-spool colors in Override mode;
+            // that overload lives in libslic3r/PresetBundle (out of this cluster's scope), so we keep the
+            // 1-arg form. Minor: with an FTS installed, ext-spool colors still appear in the Override combo.
             wxGetApp().preset_bundle->get_ams_cobox_infos(m_ams_combo_info);
         }
         for (size_t i = 0; i < m_ams_combo_info.ams_filament_colors.size(); i++) {
@@ -1221,6 +1225,19 @@ void SyncAmsInfoDialog::sync_ams_mapping_result(std::vector<FilamentInfo> &resul
     }
 }
 
+// Orca: ported FTS "selector" check — a Filament Track Switch, once installed and ready, feeds both
+// nozzles from one AMS set, so the mapping collapses to a single dynamic panel and skips ext spools.
+bool SyncAmsInfoDialog::has_selector(MachineObject *obj_) const
+{
+    if (!obj_) {
+        DeviceManager *dev_manager = Slic3r::GUI::wxGetApp().getDeviceManager();
+        if (!dev_manager)
+            return false;
+        obj_ = dev_manager->get_selected_machine();
+    }
+    return obj_ && obj_->GetFilaSwitch()->IsInstalled() && obj_->GetFilaSwitch()->IsReady();
+}
+
 bool SyncAmsInfoDialog::do_ams_mapping(MachineObject *obj_)
 {
     if (!obj_) return false;
@@ -1237,6 +1254,10 @@ bool SyncAmsInfoDialog::do_ams_mapping(MachineObject *obj_)
     std::vector<bool> map_opt; // four values: use_left_ams, use_right_ams, use_left_ext, use_right_ext
     if (nozzle_nums > 1) {
         map_opt         = {true, true, true, true}; // four values: use_left_ams, use_right_ams, use_left_ext, use_right_ext
+        if (has_selector(obj_)) { // Orca: with a Filament Track Switch the ext spools route through the switch — don't map them
+            map_opt[2] = false;
+            map_opt[3] = false;
+        }
         filament_result = DevMappingUtil::ams_filament_mapping(obj_, m_filaments, m_ams_mapping_result, map_opt, std::vector<int>(),
                                                      wxGetApp().app_config->get_bool("ams_sync_match_full_use_color_dist") ? false : true);
     }
@@ -2638,8 +2659,14 @@ void SyncAmsInfoDialog::reset_and_sync_ams_list()
             DeviceManager *dev_manager = Slic3r::GUI::wxGetApp().getDeviceManager();
             if (!dev_manager) return;
             MachineObject *obj_        = dev_manager->get_selected_machine();
+            bool is_selector = false;
             if (get_is_double_extruder()) {
-                m_mapping_popup.set_show_type(ShowType::LEFT_AND_RIGHT);//special
+                if (has_selector(obj_)) { // Orca: ported FTS combined view — one dynamic panel when a switch is installed+ready
+                    m_mapping_popup.set_show_type(ShowType::LEFT_AND_RIGHT_DYNAMIC);
+                    is_selector = true;
+                } else {
+                    m_mapping_popup.set_show_type(ShowType::LEFT_AND_RIGHT);//special
+                }
             }
             // m_mapping_popup.set_show_type(ShowType::RIGHT);
             if (obj_) {
@@ -2666,7 +2693,7 @@ void SyncAmsInfoDialog::reset_and_sync_ams_list()
                     m_mapping_popup.set_reset_callback(reset_call_back);
                     m_mapping_popup.set_tag_texture(materials[extruder]);
                     m_mapping_popup.set_send_win(this);
-                    m_mapping_popup.update(obj_, m_ams_mapping_result);
+                    m_mapping_popup.update(obj_, m_ams_mapping_result, is_selector); // Orca: dynamic combined view when FTS installed
                     m_mapping_popup.Popup();
                 }
             }

@@ -220,10 +220,34 @@ PrintOptionsDialog::PrintOptionsDialog(wxWindow* parent)
         if (!obj || !obj->GetPrintOptions()) { evt.Skip(); return; }
         int sel = m_smart_nozzle_blob_mode_switch->GetSelection();
         // UI: 0=Auto, 1=On, 2=Off -> protocol: 0=off, 1=on, 2=auto
-        // Orca: the reference's Auto->On in-print confirmation is omitted here, as its
-        //       stringing-prone helper is not available in this codebase.
         int mode_map[] = {2, 1, 0};
         if (sel < 0 || sel > 2) { evt.Skip(); return; }
+
+        // Orca: Auto->On in-print confirmation (backing helper landed in cluster 2). If currently in
+        // Auto (current_detect_value == 2), a print is running, and a loaded filament is stringing-prone,
+        // confirm before enabling — turning blob detection on mid-print with such filament can degrade quality.
+        const auto* blob_opt = obj->GetPrintOptions()->GetDetectionOption(PrintOptionEnum::Smart_Nozzle_Blob_Detection);
+        const bool was_auto = blob_opt && blob_opt->current_detect_value == 2;
+        if (sel == 1 /*On*/ && was_auto && obj->is_in_printing()
+            && obj->any_loaded_filament_is_stringing_prone()) {
+            wxString message = _L("There is stringing-prone filament in the current print job. "
+                                  "Enabling nozzle clumping detection now may degrade print quality. "
+                                  "Are you sure you want to enable it?");
+            wxString caption = _L("Enable Nozzle Clumping Detection");
+            // Themed warning dialog with Cancel as the highlighted default, so the safe choice (leave
+            // detection off) is the default and Confirm must be actively picked.
+            MessageDialog dialog(this, message, caption, wxICON_WARNING);
+            dialog.AddButton(wxID_CANCEL, _L("Cancel"),  true);
+            dialog.AddButton(wxID_OK,     _L("Confirm"), false);
+            if (dialog.ShowModal() != wxID_OK) {
+                // User cancelled: roll the switch back to Auto without sending the command.
+                m_smart_nozzle_blob_mode_switch->SetSelection(0);
+                update_smart_nozzle_blob_mode_desc(0);
+                evt.Skip();
+                return;
+            }
+        }
+
         obj->GetPrintOptions()->command_smart_nozzle_blob_detect_mode(mode_map[sel]);
         update_smart_nozzle_blob_mode_desc(sel);
         evt.Skip();
@@ -1078,7 +1102,7 @@ wxBoxSizer* PrintOptionsDialog::create_settings_group(wxWindow* parent)
     line_sizer->Add(FromDIP(5), 0, 0, 0);
     line_sizer->Add(m_cb_save_remote_print_file_to_storage, 0, wxALL | wxALIGN_CENTER_VERTICAL, FromDIP(5));
     line_sizer->Add(text_save_remote_print_file_to_storage, 1, wxALL | wxALIGN_CENTER_VERTICAL, FromDIP(5));
-    text_save_remote_print_file_to_storage_explain = new Label(parent, _L("Save the printing files initiated from Bambu Studio, Bambu Handy and MakerWorld on External Storage"));
+    text_save_remote_print_file_to_storage_explain = new Label(parent, _L("Save the printing files sent from the slicer and other apps on External Storage")); // Orca: neutral wording (vendor app names removed)
     text_save_remote_print_file_to_storage_explain->SetForegroundColour(STATIC_TEXT_EXPLAIN_COL);
     text_save_remote_print_file_to_storage_explain->SetFont(Label::Body_12);
     text_save_remote_print_file_to_storage_explain->Wrap(FromDIP(400));

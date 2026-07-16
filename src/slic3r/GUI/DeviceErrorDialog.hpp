@@ -37,6 +37,7 @@ public:
         JUMP_TO_LIVEVIEW,
 
         NO_REMINDER_NEXT_TIME = 23,
+        REFRESH_NOZZLE = 24, // Orca: ported REF error action (recheck nozzle)
         IGNORE_NO_REMINDER_NEXT_TIME = 25,
         //LOAD_FILAMENT = 26*/
         IGNORE_RESUME = 27,
@@ -48,6 +49,8 @@ public:
         CANCEL = 37,
         REMOVE_CLOSE_BTN = 39, // special case, do not show close button
         PROCEED = 41,
+        OK_JUMP_RACK = 49, // Orca: ported REF error action (jump to the nozzle rack)
+        ABORT = 51,        // Orca: ported REF error action (abort)
         DISABLE_PURIFICATION = 54,
         DONT_REMIND_NEXT_TIME = 57,
 

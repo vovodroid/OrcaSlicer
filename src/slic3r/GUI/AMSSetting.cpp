@@ -644,7 +644,7 @@ void AMSSettingTypePanel::Update(const MachineObject* obj)
     }
 
     if (ptr->IsSwitching())  {
-        int display_percent = obj->get_upgrade_percent();
+        int display_percent = obj->get_upgrade_percent(); // Orca: read upgrade progress via the kept MachineObject accessor
         if (display_percent == 100 || display_percent == 0) {
             display_percent = 1;// special case, sometimes it's switching but percent is 0 or 100
         }
@@ -735,6 +735,7 @@ void AMSSettingTypePanel::OnAmsTypeChanged(wxCommandEvent& event)
     event.Skip();
 }
 
+// Orca: AMSSettingArrangeAMSOrder impl kept compiled-out (feature intentionally not shipped).
 #if 0 /*used option*/
 AMSSettingArrangeAMSOrder::AMSSettingArrangeAMSOrder(wxWindow* parent)
     : wxPanel(parent)
