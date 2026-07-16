@@ -61,6 +61,14 @@ static std::string _get_string_from_fantype(int type)
 int Slic3r::DevFan::command_control_fan(int fan_type, int val)
 {
     std::string gcode = (boost::format("M106 P%1% S%2% \n") % (int) fan_type % (val)).str();
+    try {
+        json j;
+        j["ctrl_type"] = _get_string_from_fantype(fan_type);
+        j["value"]     = val;
+
+        NetworkAgent *agent = GUI::wxGetApp().getAgent();
+        if (agent) agent->track_event("printer_control", j.dump());
+    } catch (...) {}
     return m_owner->publish_gcode(gcode);
 }
 
@@ -166,8 +174,6 @@ void Slic3r::DevFan::ParseV3_0(const json &device)
         m_air_duct_data.modes.clear();
         m_air_duct_data.parts.clear();
 
-        m_air_duct_data.curren_mode = device["airduct"]["modeCur"].get<int>();
-
         const json &airduct = device["airduct"];
         if (airduct.contains("modeCur")) { m_air_duct_data.curren_mode = airduct["modeCur"].get<int>(); }
         if (airduct.contains("subMode")) { m_air_duct_data.m_sub_mode = airduct["subMode"].get<int>(); }
@@ -193,7 +199,7 @@ void Slic3r::DevFan::ParseV3_0(const json &device)
                     }
                 }
 
-                if (AIR_DUCT(mode.id) == AIR_DUCT::AIR_DUCT_EXHAUST) { continue; } /*STUDIO-12796*/
+                if (AIR_DUCT(mode.id) == AIR_DUCT::AIR_DUCT_EXHAUST) { continue; }
                 m_air_duct_data.modes[mode.id] = mode;
             }
         }
