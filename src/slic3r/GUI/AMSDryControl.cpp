@@ -42,7 +42,7 @@ static std::string get_humidity_level_img_path(int humidity_percent)
     }
 
     if (wxGetApp().dark_mode()) {
-        return "hum_level" + std::to_string(hum_level) + "_no_num_dark";
+        return "hum_level" + std::to_string(hum_level) + "_no_num_dark"; // Orca: use the dark-mode humidity glyph in dark mode
     } else {
         return "hum_level" + std::to_string(hum_level) + "_no_num_light";
     }

@@ -64,6 +64,7 @@ bool AMSinfo::parse_ams_info(MachineObject *obj, DevAms *ams, bool remain_flag, 
     this->ams_type = AMSModel(ams->GetAmsType());
 
     nozzle_id = ams->GetExtruderId();
+    switch_pos = ams->GetSwitcherPos(); // Orca: carry the switch inlet for inlet-aware panel placement
     cans.clear();
     for (int i = 0; i < ams->GetTrays().size(); i++) {
         auto    it = ams->GetTrays().find(std::to_string(i));
@@ -232,6 +233,19 @@ int AMSinfo::get_humidity_display_idx() const
 
     //assert(false && "Invalid AMS type for humidity display");
     return 1;
+}
+
+// Orca: inlet-aware panel routing. REF placed AMS by switch inlet (POS_IN_A/B) via a tray-level binding
+// that Orca's pull-mode fila model does not carry; the AMS-level DevAms::GetSwitcherPos() does, and it is
+// stashed in switch_pos. When a Filament Track Switch is installed the device pins nozzle_id to MAIN for
+// command consumers, so placement follows the inlet here instead (POS_IN_B -> main/right, POS_IN_A ->
+// deputy/left). switch_pos is empty on switch-less machines and for ext spools (no tray-level inlet in the
+// kept model), so this reduces to the original nozzle_id == MAIN_EXTRUDER_ID test — identical behavior.
+bool AMSinfo::routes_to_main_extruder() const
+{
+    if (switch_pos.has_value())
+        return switch_pos.value() == DevFilaSwitch::SwitchPos::POS_IN_B;
+    return nozzle_id == MAIN_EXTRUDER_ID;
 }
 
 /*************************************************
