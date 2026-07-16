@@ -267,8 +267,18 @@ void DevCalib::ExtrusionCalibGetResultParse(const json &jj)
                     auto ams_id = f.value("ams_id", 0);
                     auto slot_id = f.value("slot_id", 0);
                     if(f.contains("tray_id")){
-                        // Orca: no GetTrayIdByAmsSlotId in Orca DevFilaSystem; standard AMS tray formula
-                        f["tray_id"] = ams_id * 4 + slot_id;
+                        // Orca: Orca's DevFilaSystem has no GetTrayIdByAmsSlotId; mirror its
+                        // semantics via a reverse lookup over GetTrayIndexMap() (correct for
+                        // non-4-slot AMS layouts, unlike a fixed ams_id*4+slot_id formula).
+                        int mapped_tray_id = -1;
+                        const auto tray_ams_slot_map = GetOwner()->GetFilaSystem()->GetTrayIndexMap();
+                        for (const auto& item : tray_ams_slot_map) {
+                            if (item.second.first == ams_id && item.second.second == slot_id) {
+                                mapped_tray_id = item.first;
+                                break;
+                            }
+                        }
+                        f["tray_id"] = mapped_tray_id;
                     }
                 }
             }

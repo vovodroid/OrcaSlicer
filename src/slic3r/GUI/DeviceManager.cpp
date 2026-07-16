@@ -74,6 +74,46 @@ int get_tray_id_by_ams_id_and_slot_id(int ams_id, int slot_id)
     }
 }
 
+// Orca: REF-additive stringing-prone filament chain, now ported (post-review).
+// Consumers arrive in resync clusters 5 (PrintOptionsDialog) and 7 (SelectMachine).
+namespace {
+
+// Stringing-prone filament IDs per nozzle-diameter bucket.
+// Mirrors the printer firmware tables (see g_leak_pron_idx_for_0_4 / _0_6_0_8).
+// Keep these in sync with firmware when new stringing-prone filaments are added.
+const std::unordered_set<std::string> g_stringing_prone_for_0_4 = {
+    "GFA11", // PLA Aero
+    "GFU90", // TPU 90A
+    "GFU00", // TPU 95A HF
+    "GFU02", // Generic TPU for AMS
+    "GFU98", // TPU for AMS
+};
+
+const std::unordered_set<std::string> g_stringing_prone_for_0_6_0_8 = {
+    "GFA11", // PLA Aero
+    "GFU00", // TPU 95A HF
+};
+
+// Pick the right table for the given nozzle diameter; returns nullptr if the
+// nozzle bucket has no entries (e.g. 0.2 mm) or the diameter is invalid.
+const std::unordered_set<std::string>* pick_stringing_set(float nozzle_diameter)
+{
+    if (!(nozzle_diameter > 0.f)) return nullptr;
+    if (nozzle_diameter < 0.3f) return nullptr;            // 0.2 nozzle: empty
+    if (nozzle_diameter < 0.5f) return &g_stringing_prone_for_0_4;
+    return &g_stringing_prone_for_0_6_0_8;                 // 0.6 / 0.8 nozzles
+}
+
+} // namespace
+
+bool Slic3r::is_stringing_prone_filament(const std::string& filament_id, float nozzle_diameter)
+{
+    if (filament_id.empty()) return false;
+    const auto* set = pick_stringing_set(nozzle_diameter);
+    if (!set) return false;
+    return set->count(filament_id) > 0;
+}
+
 wxString Slic3r::get_stage_string(int stage)
 {
     switch(stage) {
@@ -719,6 +759,35 @@ std::string MachineObject::get_filament_display_type(const std::string& ams_id, 
     return this->get_tray(ams_id, tray_id).get_display_filament_type();
 }
 
+// Orca: REF-additive, now ported (post-review). Adapted to Orca's kept fila model:
+// filament id resolved via MachineObject::get_filament_id (tray setting_id / tray_info_idx).
+bool MachineObject::any_loaded_filament_is_stringing_prone() const
+{
+    if (print_job_filament_mapping.empty()) return false;
+
+    std::vector<float> nozzle_diameters;
+    if (m_extder_system) {
+        for (const auto& ext : m_extder_system->GetExtruders()) {
+            const float d = ext.GetNozzleDiameter();
+            if (d > 0.f) nozzle_diameters.push_back(d);
+        }
+    }
+    if (nozzle_diameters.empty()) return false;
+
+    for (uint16_t v : print_job_filament_mapping) {
+        if (v == 0xFFFF) continue;
+        const int ams_id  = (v >> 8) & 0xFF;
+        const int slot_id = v & 0xFF;
+        const std::string fid = this->get_filament_id(std::to_string(ams_id), std::to_string(slot_id));
+        if (fid.empty()) continue;
+        for (float d : nozzle_diameters) {
+            if (Slic3r::is_stringing_prone_filament(fid, d))
+                return true;
+        }
+    }
+    return false;
+}
+
 void MachineObject::_parse_ams_status(int ams_status)
 {
     ams_status_sub = ams_status & 0xFF;
@@ -737,6 +806,8 @@ void MachineObject::_parse_ams_status(int ams_status)
         ams_status_main = AmsStatusMain::AMS_STATUS_MAIN_SELF_CHECK;
     } else if (ams_status_main_int == (int) AmsStatusMain::AMS_STATUS_MAIN_DEBUG) {
         ams_status_main = AmsStatusMain::AMS_STATUS_MAIN_DEBUG;
+    } else if (ams_status_main_int == (int) AmsStatusMain::AMS_STATUS_MAIN_COLD_PULL) { // Orca: REF-additive, now ported (post-review)
+        ams_status_main = AmsStatusMain::AMS_STATUS_MAIN_COLD_PULL;
     } else {
         ams_status_main = AmsStatusMain::AMS_STATUS_MAIN_UNKNOWN;
     }
@@ -888,6 +959,10 @@ void MachineObject::clear_version_info()
     laser_version_info = DevFirmwareVersionInfo();
     cutting_module_version_info = DevFirmwareVersionInfo();
     extinguish_version_info = DevFirmwareVersionInfo();
+    // Orca: REF-additive accessory firmware versions, now ported (post-review)
+    rotary_version_info = DevFirmwareVersionInfo();
+    exhaustfan_version_info = DevFirmwareVersionInfo();
+    amshub_version_info = DevFirmwareVersionInfo();
     filatrack_version_info = DevFirmwareVersionInfo();
     module_vers.clear();
     // Drop cached rack-hotend (WTM) firmware alongside the module list.
@@ -905,11 +980,17 @@ void MachineObject::store_version_info(const DevFirmwareVersionInfo& info)
         cutting_module_version_info = info;
     } else if (info.isExtinguishSystem()) {
         extinguish_version_info = info;
+    } else if (info.isRotary()) { // Orca: REF-additive, now ported (post-review)
+        rotary_version_info = info;
     } else if (info.isWTM()) {
         // Route rack-hotend / extruder-nozzle firmware into the nozzle system so
         // the rack upgrade UI can read per-nozzle versions. isWTM() is false for every non-rack
         // printer's modules, so this branch never fires outside H2C.
         m_nozzle_system->AddFirmwareInfoWTM(info);
+    } else if (info.isExhaustFan()) { // Orca: REF-additive, now ported (post-review)
+        exhaustfan_version_info = info;
+    } else if (info.isHmshub()) { // Orca: REF-additive, now ported (post-review)
+        amshub_version_info = info;
     } else if (info.isFilaTrackSwitch()) {
         filatrack_version_info = info;
     }
@@ -3283,6 +3364,7 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
                             int flag3 = jj["flag3"].get<int>();
                             is_support_filament_setting_inprinting =  get_flag_bits(flag3, 3);
                             is_enable_ams_np =  get_flag_bits(flag3, 9);
+                            is_support_filament_32_colors = get_flag_bits(flag3, 17); // Orca: REF-additive, now ported (post-review)
                         }
                     }
                     if (!key_field_only) {
@@ -5076,6 +5158,16 @@ bool MachineObject::check_enable_np(const json& print) const
     return false;
 }
 
+// Orca: REF-additive, now ported (post-review). Consumer is the SelectMachine
+// color-quantity send gate (arrives in cluster 7). 0 = no explicit upper bound.
+int MachineObject::get_max_filament_color_count() const
+{
+    if (is_support_filament_32_colors) return 32;
+    if (is_enable_ams_np && !is_series_x())              return 20;
+    if (!is_series_x() && !is_series_o()) return 16;
+    return 0;
+}
+
 void MachineObject::parse_new_info(json print)
 {
     is_enable_np = check_enable_np(print);
@@ -5236,6 +5328,17 @@ void MachineObject::parse_new_info(json print)
         if (DevPrinterConfigUtil::support_print_check_firmware_for_tpu_left(printer_type)) {
             m_firmware_support_print_tpu_left = get_flag_bits_no_border(fun2, 7) == 1;
         }
+    }
+
+    /* Orca: REF-additive, now ported (post-review). Per-filament-index AMS slot mapping
+       (task-level state). Consumers arrive in clusters 5/7. */
+    if (print.contains("mapping") && print["mapping"].is_array()) {
+        std::vector<uint16_t> new_mapping;
+        new_mapping.reserve(print["mapping"].size());
+        for (const auto& v : print["mapping"]) {
+            new_mapping.push_back(static_cast<uint16_t>(v.get<unsigned>()));
+        }
+        print_job_filament_mapping = std::move(new_mapping);
     }
 
     /*aux*/

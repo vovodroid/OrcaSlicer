@@ -96,6 +96,11 @@ class DevStorage;
 class DevUpgrade;   // Orca: adopt DeviceCore split
 struct DevPrintTaskRatingInfo;
 
+// Orca: REF-additive, now ported (post-review). Returns true when filament_id (e.g. "GFA11",
+// "GFU00") is on the stringing-prone list for the given nozzle diameter (mm), bucketed per
+// nozzle size to mirror the printer firmware.
+bool is_stringing_prone_filament(const std::string& filament_id, float nozzle_diameter);
+
 
 class MachineObject
 {
@@ -398,6 +403,10 @@ public:
     DevFirmwareVersionInfo laser_version_info;
     DevFirmwareVersionInfo cutting_module_version_info;
     DevFirmwareVersionInfo extinguish_version_info;
+    // Orca: REF-additive accessory firmware versions, now ported (post-review)
+    DevFirmwareVersionInfo rotary_version_info;
+    DevFirmwareVersionInfo exhaustfan_version_info;
+    DevFirmwareVersionInfo amshub_version_info;
     DevFirmwareVersionInfo filatrack_version_info;
     std::map<std::string, DevFirmwareVersionInfo> module_vers;
     std::map<std::string, DevFirmwareVersionInfo> new_ver_list;
@@ -695,6 +704,12 @@ public:
     boost::thread* get_slice_info_thread { nullptr };
     boost::thread* get_model_task_thread { nullptr };
 
+    // Orca: REF-additive, now ported (post-review). Per-filament-index AMS slot mapping
+    // reported by the printer in print.mapping. Up to 32 entries, each value packs
+    // (ams_id << 8) | slot_id; 0xFFFF means unused.
+    std::vector<uint16_t> print_job_filament_mapping;
+    bool any_loaded_filament_is_stringing_prone() const;
+
     /* job attr */
     int jobState_ = 0;
 
@@ -912,6 +927,11 @@ public:
     /*for more extruder*/
     bool                        is_enable_np{ false };
     bool                        is_enable_ams_np{ false };
+    bool                        is_support_filament_32_colors{ false }; // Orca: REF-additive, now ported (post-review)
+
+    // Orca: REF-additive, now ported (post-review). Max filament color count for the send
+    // gate; returns 0 when there is no explicit upper bound.
+    int get_max_filament_color_count() const;
 
     /**
      * Virtual Tray (vt_slot) - External/manual filament loading slots.
