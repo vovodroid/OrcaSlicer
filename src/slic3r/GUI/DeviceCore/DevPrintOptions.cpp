@@ -1,6 +1,8 @@
 #include "DevPrintOptions.h"
 #include "DevUtil.h"
 
+#include <cassert>
+
 #include "slic3r/GUI/DeviceManager.hpp"
 
 namespace Slic3r
@@ -354,6 +356,76 @@ int DevPrintOptions::command_set_filament_tangle_detect(bool filament_tangle_det
     j["print"]["filament_tangle_detect"] = filament_tangle_detect;
 
     return obj->publish_json(j);
+}
+
+int DevPrintOptions::command_xcam_control_build_plate_align_detector(bool on_off)
+{
+    m_buildplate_align_detection.current_detect_value = on_off;
+    m_buildplate_align_detection.detect_hold_start    = time(nullptr);
+    return command_xcam_control("plate_offset_switch", on_off, m_obj);
+}
+
+int DevPrintOptions::command_xcam_control_fod_check(bool on_off)
+{
+    m_fod_check_detection.current_detect_value = on_off;
+    m_fod_check_detection.detect_hold_start    = time(nullptr);
+    return command_xcam_control("fod_check", on_off, m_obj);
+}
+
+int DevPrintOptions::command_xcam_control_displacement_detection(bool on_off)
+{
+    m_displacement_detection.current_detect_value = on_off;
+    m_displacement_detection.detect_hold_start    = time(nullptr);
+    return command_xcam_control("model_movement_check", on_off, m_obj);
+}
+
+int DevPrintOptions::command_xcam_control_purify_air_at_print_end(int on_off)
+{
+    m_purify_air_at_print_end.current_detect_value = on_off;
+    m_purify_air_at_print_end.detect_hold_start    = time(nullptr);
+    return command_set_purify_air_at_print_end((PurifyAirAtPrintEndState) on_off, m_obj);
+}
+
+int DevPrintOptions::command_set_purify_air_at_print_end(PurifyAirAtPrintEndState state, MachineObject *obj)
+{
+    json j;
+    j["print"]["command"]     = "print_option";
+    j["print"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);
+    switch (state)
+    {
+        case PurifyAirAtPrintEndState::PurifyAirDisable:   j["print"]["air_purification"] = 0; break;
+        case PurifyAirAtPrintEndState::PurifyAirByInside:  j["print"]["air_purification"] = 1; break;
+        case PurifyAirAtPrintEndState::PurifyAirByOutside: j["print"]["air_purification"] = 2; break;
+        default: assert(0);
+    }
+    return obj->publish_json(j);
+}
+
+int DevPrintOptions::command_snapshot_control(int on_off)
+{
+    m_snapshot_detection.current_detect_value = on_off;
+    m_snapshot_detection.detect_hold_start    = time(nullptr);
+    return command_set_snapshot_control(on_off, m_obj);
+}
+
+int DevPrintOptions::command_set_snapshot_control(int on_off, MachineObject *obj)
+{
+    json j;
+    j["camera"]["command"]     = "ipcam_cap_pic_set";
+    j["camera"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);
+    j["camera"]["control"]     = on_off ? "enable" : "disable";
+    return obj->publish_json(j);
+}
+
+int DevPrintOptions::command_smart_nozzle_blob_detect_mode(int mode)
+{
+    json j;
+    j["print"]["command"]               = "print_option";
+    j["print"]["sequence_id"]           = std::to_string(MachineObject::m_sequence_id++);
+    j["print"]["nozzle_blob_detect_v2"] = mode;  // int: 0=off, 1=on, 2=auto
+    m_smart_nozzle_blob_detection.current_detect_value = mode;
+    m_smart_nozzle_blob_detection.detect_hold_start    = time(nullptr);
+    return m_obj->publish_json(j);
 }
 
 }

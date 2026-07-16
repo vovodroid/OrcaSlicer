@@ -43,6 +43,12 @@ class DevPrintOptions
 public:
     DevPrintOptions(MachineObject* obj);
 
+    // Tri-state for the purify-air-at-print-end firmware option (matches the MQTT air_purification value).
+    enum class PurifyAirAtPrintEndState : int {
+        PurifyAirDisable   = 0,
+        PurifyAirByInside  = 1,
+        PurifyAirByOutside = 2,
+    };
 
 public:
     void SetPrintingSpeedLevel(DevPrintingSpeedLevel speed_level);
@@ -60,6 +66,13 @@ public:
     int command_xcam_control_filament_tangle_detect(bool on_off);
     int command_xcam_control_idelheatingprotect_detector(bool on_off);
 
+    // Firmware print-option toggles (each gated on a fun2 capability bit).
+    int command_xcam_control_build_plate_align_detector(bool on_off);
+    int command_xcam_control_fod_check(bool on_off);
+    int command_xcam_control_displacement_detection(bool on_off);
+    int command_xcam_control_purify_air_at_print_end(int on_off);
+    int command_smart_nozzle_blob_detect_mode(int mode);  // 0=off, 1=on, 2=auto
+    int command_snapshot_control(int on_off);
 
     int command_xcam_control(std::string module_name, bool on_off,  MachineObject *obj ,std::string lvl = "");
     // set print option
@@ -70,6 +83,8 @@ public:
     int command_set_filament_tangle_detect(bool fliament_tangle_detect, MachineObject *obj);
 
     int command_set_against_continued_heating_mode(bool on_off);
+    int command_set_purify_air_at_print_end(PurifyAirAtPrintEndState state, MachineObject *obj);
+    int command_set_snapshot_control(int on_off, MachineObject *obj);
 
     void parse_auto_recovery_step_loss_status(int flag);
     void parse_allow_prompt_sound_status(int flag);
