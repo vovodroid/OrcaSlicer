@@ -3129,6 +3129,8 @@ void SelectMachineDialog::show_timelapse_storage_dialog(MachineObject* obj)
 
 void SelectMachineDialog::navigate_to_timelapse_page()
 {
+    if (m_timelapse_check_timer) m_timelapse_check_timer->Stop();
+
     // EndModal closes the dialog; schedule navigation after the dialog is fully destroyed
     wxGetApp().CallAfter([]() {
         auto* main_frame = wxGetApp().mainframe;
