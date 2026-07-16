@@ -1,11 +1,11 @@
 #include "ActionRegistry.hpp"
 
+#include "GUI.hpp"
 #include "GUI_App.hpp"
-#include "PluginScriptRunner.hpp"
+#include "I18N.hpp"
 #include "slic3r/plugin/PluginManager.hpp"
 
 #include <libslic3r/AppConfig.hpp>
-#include <slic3r/plugin/PluginLoader.hpp>
 #include <slic3r/plugin/PythonPluginInterface.hpp>
 
 #include <wx/thread.h>
@@ -59,11 +59,11 @@ double frecency_score(int count, long long last, long long now)
 
 // ---- script-plugin action source (the one and only source) ------------------
 
-std::string find_loaded_source_name(PluginLoader& loader, const std::string& plugin_key)
+std::string find_loaded_source_name(PluginManager& manager, const std::string& plugin_key)
 {
-    for (const PluginDescriptor& desc : loader.get_all_loaded_plugin_descriptors())
-        if (desc.plugin_key == plugin_key)
-            return desc.name.empty() ? plugin_key : desc.name;
+    PluginDescriptor descriptor;
+    if (manager.try_get_plugin_descriptor(plugin_key, descriptor) && !descriptor.name.empty())
+        return descriptor.name;
     return plugin_key;
 }
 
@@ -93,15 +93,15 @@ struct PluginScriptAction : AppAction
 
     AppActionRunResult run() const override
     {
-        ScriptRunOutcome outcome = run_script_plugin_capability(plugin_key, capability);
-        AppActionRunResult::Level level = AppActionRunResult::Level::Info;
-        switch (outcome.level) {
-            case ScriptRunOutcome::Level::Success: level = AppActionRunResult::Level::Success; break;
-            case ScriptRunOutcome::Level::Error:   level = AppActionRunResult::Level::Error;   break;
-            case ScriptRunOutcome::Level::Busy:    level = AppActionRunResult::Level::Busy;    break;
-            case ScriptRunOutcome::Level::Info:    break;
-        }
-        return {level, outcome.message};
+        std::string error;
+        const ExecutionResult result = PluginManager::instance().run_script_capability(plugin_key, capability, error);
+        if (!error.empty())
+            return {AppActionRunResult::Level::Error, from_u8(error)};
+
+        const bool skipped = result.status == PluginResult::Skipped;
+        const wxString fallback = skipped ? _L("Script plugin skipped.") : _L("Script plugin finished.");
+        return {skipped ? AppActionRunResult::Level::Info : AppActionRunResult::Level::Success,
+                result.message.empty() ? fallback : from_u8(result.message)};
     }
 };
 
@@ -110,11 +110,11 @@ struct PluginScriptAction : AppAction
 std::unique_ptr<AppAction> make_action(const std::string& plugin_key, const std::string& capability,
                                        const std::string& source_name)
 {
-    PluginLoader& loader = PluginManager::instance().get_loader();
-    if (!loader.is_plugin_loaded(plugin_key))
+    PluginManager& manager = PluginManager::instance();
+    if (!manager.is_plugin_loaded(plugin_key))
         return nullptr;
-    auto loaded = loader.get_plugin_capability_by_name(plugin_key, PluginCapabilityType::Script, capability);
-    if (!loaded || !loaded->enabled)
+    // only_enabled defaults true, so a disabled capability resolves to nullptr here.
+    if (!manager.get_plugin_capability(plugin_key, capability, PluginCapabilityType::Script))
         return nullptr;
     return std::make_unique<PluginScriptAction>(plugin_key, capability, source_name);
 }
@@ -127,7 +127,7 @@ void ActionRegistry::init()
     assert(!m_started);
     m_started = true;
 
-    PluginLoader& loader = PluginManager::instance().get_loader();
+    PluginManager& manager = PluginManager::instance();
 
     auto on_source = [this](const std::string& plugin_key, ActionChange change) {
         if (!wxTheApp || wxGetApp().is_closing())
@@ -137,7 +137,7 @@ void ActionRegistry::init()
                 this->refresh_source(plugin_key, change);
         });
     };
-    auto on_capability = [this](const PluginCapabilityIdentifier& capability, ActionChange change) {
+    auto on_capability = [this](const PluginCapabilityId& capability, ActionChange change) {
         if (capability.type != PluginCapabilityType::Script || !wxTheApp || wxGetApp().is_closing())
             return;
         const std::string plugin_key = capability.plugin_key;
@@ -151,31 +151,32 @@ void ActionRegistry::init()
     // Subscribe before enumerating so a concurrent load cannot land between the initial
     // snapshot and callback registration. Duplicate notifications are safe: upsert is by
     // id and the m_actions scan in refresh_source is idempotent.
-    loader.subscribe_on_load_callback(
+    manager.subscribe_on_load_callback(
         [on_source](const std::string& key) { on_source(key, ActionChange::Added); });
-    loader.subscribe_on_unload_callback(
+    manager.subscribe_on_unload_callback(
         [on_source](const std::string& key) { on_source(key, ActionChange::Removed); });
-    loader.subscribe_on_capability_load_callback(
-        [on_capability](const PluginCapabilityIdentifier& capability) {
+    manager.subscribe_on_capability_load_callback(
+        [on_capability](const PluginCapabilityId& capability) {
             on_capability(capability, ActionChange::Added);
         });
-    loader.subscribe_on_capability_unload_callback(
-        [on_capability](const PluginCapabilityIdentifier& capability) {
+    manager.subscribe_on_capability_unload_callback(
+        [on_capability](const PluginCapabilityId& capability) {
             on_capability(capability, ActionChange::Removed);
         });
 
     // enumerate current script capabilities
     std::unordered_map<std::string, std::string> source_names;
-    for (const PluginDescriptor& desc : loader.get_all_loaded_plugin_descriptors())
+    for (const PluginDescriptor& desc : manager.get_plugin_descriptors())
         if (!desc.name.empty())
             source_names.emplace(desc.plugin_key, desc.name);
 
-    for (const auto& capability : loader.get_plugin_capabilities_by_type(PluginCapabilityType::Script)) {
-        if (!capability || !capability->enabled)
+    for (const auto& capability : manager.get_plugin_capabilities("", PluginCapabilityType::Script)) {
+        if (!capability)
             continue;
-        auto it = source_names.find(capability->plugin_key);
-        const std::string& source_name = it == source_names.end() ? capability->plugin_key : it->second;
-        if (auto action = make_action(capability->plugin_key, capability->name, source_name))
+        const std::string& key = capability->audit_plugin_key();
+        auto it = source_names.find(key);
+        const std::string& source_name = it == source_names.end() ? key : it->second;
+        if (auto action = make_action(key, capability->name(), source_name))
             upsert(std::move(action));
     }
 }
@@ -197,12 +198,12 @@ void ActionRegistry::refresh_source(const std::string& plugin_key, ActionChange 
     if (change == ActionChange::Removed)
         return;
 
-    PluginLoader& loader = PluginManager::instance().get_loader();
-    const std::string source_name = find_loaded_source_name(loader, plugin_key);
-    for (const auto& capability : loader.get_plugin_capabilities_by_type(plugin_key, PluginCapabilityType::Script)) {
-        if (!capability || !capability->enabled)
+    PluginManager& manager = PluginManager::instance();
+    const std::string source_name = find_loaded_source_name(manager, plugin_key);
+    for (const auto& capability : manager.get_plugin_capabilities(plugin_key, PluginCapabilityType::Script)) {
+        if (!capability)
             continue;
-        if (auto action = make_action(plugin_key, capability->name, source_name))
+        if (auto action = make_action(plugin_key, capability->name(), source_name))
             upsert(std::move(action));
     }
 }
@@ -218,8 +219,8 @@ void ActionRegistry::refresh_capability(const std::string& plugin_key, const std
         return;
     }
 
-    PluginLoader& loader = PluginManager::instance().get_loader();
-    if (auto action = make_action(plugin_key, capability, find_loaded_source_name(loader, plugin_key)))
+    PluginManager& manager = PluginManager::instance();
+    if (auto action = make_action(plugin_key, capability, find_loaded_source_name(manager, plugin_key)))
         upsert(std::move(action));
     else
         remove(id);
