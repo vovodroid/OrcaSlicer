@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <nlohmann/json.hpp>
 #include "slic3r/Utils/json_diff.hpp"
 #include <wx/string.h>
@@ -9,16 +10,46 @@ namespace Slic3r {
 
 class MachineObject;
 
+// Identifies a print-detection option tracked in DevPrintOptions::m_detection_list.
+enum class PrintOptionEnum
+{
+    AI_Monitoring,
+    First_Layer_Detection,
+    Buildplate_Mark_Detection,
+    Buildplate_Align_Detection,
+    Auto_Recovery_Detection,
+    Allow_Prompt_Sound_Detection,
+    Filament_Tangle_Detection,
+    Idle_Heating_Protect_Detection,
+    Purify_Air_At_Print_End,
+    Snapshot_Detection,
+    FOD_Check_Detection,
+    Displacement_Detection,
+    Smart_Nozzle_Blob_Detection,
+};
+
+// State of a single print-detection option.
+struct PrintOptionData
+{
+    bool        is_support_detect{false};        // some detections have no supporting field
+    int         current_detect_value{-1};        // -1 until parsed; otherwise the reported value
+    std::string current_detect_sensitivity_value;
+    time_t      detect_hold_start{0};            // suppresses parsed overwrites for a short hold
+};
+
 class DevPrintOptions
 {
     friend class DevPrintOptionsParser;
 public:
-    DevPrintOptions(MachineObject* obj): m_obj(obj) {}
+    DevPrintOptions(MachineObject* obj);
 
 
 public:
     void SetPrintingSpeedLevel(DevPrintingSpeedLevel speed_level);
     DevPrintingSpeedLevel GetPrintingSpeedLevel() const { return m_speed_level;}
+
+    // Returns the holder for a tracked detection option, or nullptr if not tracked.
+    PrintOptionData* GetDetectionOption(PrintOptionEnum print_option);
 
     // detect options
     int command_xcam_control_ai_monitoring(bool on_off, std::string lvl);
@@ -44,37 +75,37 @@ public:
     void parse_allow_prompt_sound_status(int flag);
     void parse_filament_tangle_detect_status(int flag);
 
-    bool GetAiMonitoring() const { return xcam_ai_monitoring; }
-    bool GetFirstLayerInspector() const{ return xcam_first_layer_inspector; }
-    bool GetBuildplateMarkerDetector() const { return xcam_buildplate_marker_detector; }
-    bool GetAutoRecoveryStepLoss() const { return xcam_auto_recovery_step_loss; }
-    bool GetAllowPromptSound() const { return xcam_allow_prompt_sound; }
-    bool GetFilamentTangleDetect() const { return xcam_filament_tangle_detect; }
-    int  GetIdelHeatingProtectEenabled() const { return idel_heating_protect_enabled; }
-    string GetAiMonitoringSensitivity() const { return xcam_ai_monitoring_sensitivity; }
+    // Thin wrappers preserved for existing callers; read from the detection-option map.
+    bool GetAiMonitoring() const { return m_ai_monitoring_detection.current_detect_value == 1; }
+    bool GetFirstLayerInspector() const{ return m_first_layer_detection.current_detect_value == 1; }
+    bool GetBuildplateMarkerDetector() const { return m_buildplate_mark_detection.current_detect_value == 1; }
+    bool GetAutoRecoveryStepLoss() const { return m_auto_recovery_detection.current_detect_value == 1; }
+    bool GetAllowPromptSound() const { return m_allow_prompt_sound_detection.current_detect_value == 1; }
+    bool GetFilamentTangleDetect() const { return m_filament_tangle_detection.current_detect_value == 1; }
+    int  GetIdelHeatingProtectEenabled() const { return m_idel_heating_protect_detection.current_detect_value; }
+    std::string GetAiMonitoringSensitivity() const { return m_ai_monitoring_detection.current_detect_sensitivity_value; }
 
 
 private:
     // print option
     DevPrintingSpeedLevel m_speed_level = SPEED_LEVEL_INVALID;
 
-    // detect options
-    bool        xcam_ai_monitoring{false};
+    // detection options (7 existing + 6 newly parsed)
+    PrintOptionData m_ai_monitoring_detection;
+    PrintOptionData m_first_layer_detection;
+    PrintOptionData m_buildplate_mark_detection;
+    PrintOptionData m_buildplate_align_detection;
+    PrintOptionData m_auto_recovery_detection;
+    PrintOptionData m_allow_prompt_sound_detection;
+    PrintOptionData m_filament_tangle_detection;
+    PrintOptionData m_idel_heating_protect_detection;
+    PrintOptionData m_purify_air_at_print_end;
+    PrintOptionData m_snapshot_detection;
+    PrintOptionData m_fod_check_detection;
+    PrintOptionData m_displacement_detection;
+    PrintOptionData m_smart_nozzle_blob_detection;
 
-    std::string xcam_ai_monitoring_sensitivity;
-    bool        xcam_buildplate_marker_detector{false};
-    bool        xcam_first_layer_inspector{false};
-    bool        xcam_auto_recovery_step_loss{false};
-    bool        xcam_allow_prompt_sound{false};
-    bool        xcam_filament_tangle_detect{false};
-    int         idel_heating_protect_enabled           = -1;
-    time_t      xcam_ai_monitoring_hold_start          = 0;
-    time_t      xcam_buildplate_marker_hold_start      = 0;
-    time_t      xcam_first_layer_hold_start            = 0;
-    time_t      xcam_auto_recovery_hold_start          = 0;
-    time_t      xcam_prompt_sound_hold_start           = 0;
-    time_t      xcam_filament_tangle_detect_hold_start = 0;
-    time_t      idel_heating_protect_hold_strat        = 0;
+    std::map<PrintOptionEnum, PrintOptionData*> m_detection_list;
 
     MachineObject* m_obj;/*owner*/
 };
