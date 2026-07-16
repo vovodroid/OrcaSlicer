@@ -87,7 +87,7 @@ class ModelMallDialog;
 class PingCodeBindDialog;
 class NetworkErrorDialog;
 class PluginsDialog;
-class SpeedDialWebPopup;
+class SpeedDialWebDialog;
 class TerminalDialog;
 
 
@@ -555,7 +555,7 @@ public:
 
     PresetBundleDialog* m_preset_bundle_dlg{nullptr};
     PluginsDialog* m_plugins_dlg{nullptr};
-    SpeedDialWebPopup* m_speed_dial_popup{nullptr};
+    SpeedDialWebDialog* m_speed_dial_dialog{nullptr};
     TerminalDialog* m_terminal_dlg{nullptr};
     ActionRegistry  m_action_registry;
 

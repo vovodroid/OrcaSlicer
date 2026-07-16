@@ -3,6 +3,7 @@
 
 #include "Widgets/PopupWindow.hpp"
 
+#include <slic3r/GUI/Widgets/WebViewHostDialog.hpp>
 #include <wx/webview.h>
 #include <nlohmann/json_fwd.hpp>
 #include <string>
@@ -30,6 +31,21 @@ private:
     wxWebView* m_browser{nullptr};
     bool       m_page_ready{false};
     bool       m_pending_show{false};
+};
+
+class SpeedDialWebDialog : public WebViewHostDialog
+{
+public:
+    explicit SpeedDialWebDialog(wxWindow* parent);
+    void request_show();
+
+private:
+    void on_script_message(const nlohmann::json& payload) override;
+    void resize_to_content(int height);
+    void run_action(const std::string& id, const std::string& title);
+    void send_actions();
+
+    bool m_page_ready{false};
 };
 
 }}
