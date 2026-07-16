@@ -52,7 +52,6 @@ public:
                                                    MessageHandler  on_message,
                                                    CloseHandler    on_close,
                                                    CloseHandler    on_destroyed);
-    static void show_modeless_dialog(PluginWebDialog* dialog);
     static void post_message(PluginWebDialog* dialog, const nlohmann::json& data);
     static void request_close(PluginWebDialog* dialog);
 

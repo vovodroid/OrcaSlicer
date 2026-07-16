@@ -163,14 +163,6 @@ PluginWebDialog* PluginWebDialog::create_modeless_dialog(wxWindow*       parent,
                                std::move(on_destroyed));
 }
 
-void PluginWebDialog::show_modeless_dialog(PluginWebDialog* dialog)
-{
-    if (dialog == nullptr)
-        return;
-    dialog->Show();
-    dialog->Raise();
-}
-
 void PluginWebDialog::post_message(PluginWebDialog* dialog, const nlohmann::json& data)
 {
     if (dialog != nullptr && dialog->is_open())

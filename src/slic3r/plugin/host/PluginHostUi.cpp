@@ -339,8 +339,35 @@ py::object ui_create_window(const std::string& html, const std::string& title, i
     const int         w            = width > 0 ? width : 820;
     const int         h            = height > 0 ? height : 600;
 
-    const int id = run_on_ui_blocking([&]() -> int {
-        const int new_id = UiRegistry::instance().reserve_id();
+    if (wxTheApp == nullptr)
+        throw std::runtime_error("OrcaSlicer application is not initialized");
+
+    // The whole wxWindow/webview creation is deferred to a clean main-loop iteration.
+    // The WebKit backends deliver script messages synchronously from inside the native
+    // callback (GTK: HandleWindowEvent in wxgtk_webview_webkit_script_message_received,
+    // wx src/gtk/webview_webkit2.cpp; macOS: ProcessWindowEvent in the
+    // WKScriptMessageHandler delegate, src/osx/webview_webkit.mm), so a script-triggered
+    // create_window otherwise runs with the plugins-dialog webview's signal/delegate
+    // frame still on the stack — creating and presenting a second webview window from
+    // there crashed on Linux (observed at a since-removed Raise(): gtk_window_present
+    // right after a Show() whose real map can still be deferred behind the X11
+    // frame-extents handshake, wx src/gtk/toplevel.cpp). WebView2 already queues script
+    // messages (AddPendingEvent), so on Windows this deferral merely matches wx's own
+    // delivery model.
+    //
+    // The id is pre-bound with a null window so the returned handle is live at once:
+    // is_open() keys on registry presence, post()/close() are CallAfter-marshaled and
+    // FIFO-ordered after the creation below, and a plugin teardown claims the pending
+    // id (take_for_plugin), which the creation detects and skips — no orphan window.
+    const int new_id = UiRegistry::instance().reserve_id();
+    UiRegistry::instance().bind(new_id, nullptr, plugin_key);
+
+    GUI::wxGetApp().CallAfter([new_id, plugin_key, html, title, w, h,
+                               msg_adapter = std::move(msg_adapter),
+                               close_holder = std::move(close_holder)]() mutable {
+        // Torn down (plugin unload / app shutdown) before the window materialized.
+        if (!UiRegistry::instance().is_open(new_id))
+            return;
 
         // Plugin's on_close: fired only on a user/JS-initiated close (not forced
         // teardown), while the dialog is alive. Empty if the plugin passed None.
@@ -365,11 +392,10 @@ py::object ui_create_window(const std::string& html, const std::string& title, i
                                                                  wxSize(w, h), std::move(msg_adapter),
                                                                  std::move(on_close), std::move(on_destroyed));
         UiRegistry::instance().bind(new_id, dlg, plugin_key);
-        GUI::PluginWebDialog::show_modeless_dialog(dlg);
-        return new_id;
+        dlg->Show();
     });
 
-    return py::cast(UiWindowHandle{id});
+    return py::cast(UiWindowHandle{new_id});
 }
 
 void handle_post(int id, py::object data)
