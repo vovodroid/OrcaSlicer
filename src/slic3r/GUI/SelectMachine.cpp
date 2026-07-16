@@ -1367,38 +1367,31 @@ bool SelectMachineDialog::build_nozzles_info(std::string& nozzles_info)
     return true;
 }
 
-bool SelectMachineDialog::can_hybrid_mapping(DevExtderSystem data) {
-    // Mixed mappings are not allowed
-    return false;
+bool SelectMachineDialog::can_hybrid_mapping(MachineObject* obj_) const {
+    return obj_ && obj_->GetFilaSwitch()->IsInstalled();
+}
 
-    if (data.GetTotalExtderCount() <= 1 || !wxGetApp().preset_bundle)
-        return false;
+ShowType SelectMachineDialog::get_filament_mapping_show_type(MachineObject* obj_, int fila_logic_id) const
+{
+    try {
+        const auto& full_config = wxGetApp().preset_bundle->full_config();
+        size_t total_ext_count = full_config.option<ConfigOptionFloats>("nozzle_diameter")->values.size();
+        if (total_ext_count < 2) {
+            return ShowType::RIGHT;
+        }
 
-    //The default two extruders are left, right, but the order of the extruders on the machine is right, left.
-    //Therefore, some adjustments need to be made.
-    std::vector<std::string>flow_type_of_machine;
-    for (const auto& ext : data.GetExtruders())
-    {
-        std::string type_str = ext.GetNozzleFlowType() == NozzleFlowType::H_FLOW ? "High Flow" : "Standard";
-        flow_type_of_machine.push_back(type_str);
+        if (can_hybrid_mapping(obj_)) {
+            return ShowType::LEFT_AND_RIGHT_DYNAMIC;
+        } else if (m_filaments_map.at(fila_logic_id) == 1) {
+            return ShowType::LEFT;
+        } else if (m_filaments_map.at(fila_logic_id) == 2) {
+            return ShowType::RIGHT;
+        }
+    } catch (const std::exception& e) {
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": exception: " << e.what();
     }
 
-    //get the nozzle type of preset --> flow_types
-    const Preset& current_printer = wxGetApp().preset_bundle->printers.get_selected_preset();
-    const Preset* base_printer = wxGetApp().preset_bundle->printers.get_preset_base(current_printer);
-    std::string base_name = base_printer->name;
-    auto flow_data = wxGetApp().app_config->get_nozzle_volume_types_from_config(base_name);
-    std::vector<string> flow_types;
-    boost::split(flow_types, flow_data, boost::is_any_of(","));
-    if (flow_types.size() <= 1 || flow_types.size() != flow_type_of_machine.size()) return false;
-
-    //Only when all preset nozzle types and machine nozzle types are exactly the same, return true.
-    auto type = flow_types[0];
-    for (int i = 0; i < flow_types.size(); i++){
-        if (flow_types[i] != type || flow_type_of_machine[i] != type)
-            return false;
-    }
-    return true;
+    return ShowType::LEFT_AND_RIGHT;
 }
 
 //When filaments cannot be matched automatically, whether to use ext for automatic supply
@@ -4761,25 +4754,7 @@ void SelectMachineDialog::reset_and_sync_ams_list()
             DeviceManager *dev_manager = Slic3r::GUI::wxGetApp().getDeviceManager();
             if (!dev_manager) return;
             MachineObject *obj_ = dev_manager->get_selected_machine();
-            const auto& full_config = wxGetApp().preset_bundle->full_config();
-            size_t nozzle_nums = full_config.option<ConfigOptionFloats>("nozzle_diameter")->values.size();
-            if (nozzle_nums > 1)
-            {
-                if (obj_ && can_hybrid_mapping(*obj_->GetExtderSystem()))
-                {
-                    m_mapping_popup.set_show_type(ShowType::LEFT_AND_RIGHT);
-                }
-                else if (m_filaments_map[extruder] == 1)
-                {
-                    m_mapping_popup.set_show_type(ShowType::LEFT);
-                }
-                else if(m_filaments_map[extruder] == 2)
-                {
-                    m_mapping_popup.set_show_type(ShowType::RIGHT);
-                }
-            } else {
-                m_mapping_popup.set_show_type(ShowType::RIGHT);
-            }
+            m_mapping_popup.set_show_type(get_filament_mapping_show_type(obj_, extruder));
             if (obj_) {
                 if (m_mapping_popup.IsShown()) return;
                 wxPoint pos = item->ClientToScreen(wxPoint(0, 0));
@@ -4846,7 +4821,103 @@ void SelectMachineDialog::reset_and_sync_ams_list()
         m_filament_panel_sizer->Layout();
     }
 
+    // Orca: a filament switch feeds both extruders, so the per-nozzle material items collapse into
+    // the single panel. Reposition once the selected machine's switch state is known (no-op otherwise).
+    DeviceManager* dev = wxGetApp().getDeviceManager();
+    update_material_item_pos(dev ? dev->get_selected_machine() : nullptr);
+
     // reset_ams_material();//show "-"
+}
+
+// Orca: collapse the per-nozzle material items into the single panel when the printer has one
+// extruder or a filament switch (both feed a single logical mapping surface); otherwise keep the
+// left/right split. Early-returns unless an item is actually in the wrong panel.
+void SelectMachineDialog::update_material_item_pos(MachineObject* obj_)
+{
+    if (!obj_) {
+        return;
+    }
+
+    const bool is_single_head = obj_->GetExtderSystem()->GetTotalExtderCount() < 2;
+    const bool has_switcher = obj_->GetFilaSwitch()->IsInstalled();
+    const bool use_single_panel = is_single_head || has_switcher;
+
+    bool to_change_pos = false;
+    for (const auto& iter : m_materialList) {
+        const auto& material_id = iter.second->id;
+        const auto& material_item = iter.second->item;
+        if (use_single_panel) {
+            if (!m_sizer_ams_mapping->IsShown(material_item)) {
+                to_change_pos = true;
+            }
+        } else {
+            if (m_filaments_map[material_id] == 1 && !m_sizer_ams_mapping_left->IsShown(material_item)) {
+                to_change_pos = true;
+            } else if (m_filaments_map[material_id] == 2 && !m_sizer_ams_mapping_right->IsShown(material_item)) {
+                to_change_pos = true;
+            }
+        }
+
+        if (to_change_pos) break;
+    }
+
+    if (!to_change_pos) {
+        return;
+    }
+
+    m_sizer_ams_mapping->Clear(false);
+    m_sizer_ams_mapping_left->Clear(false);
+    m_sizer_ams_mapping_right->Clear(false);
+
+    int sizer_count = 0;
+    int left_sizer_count = 0;
+    int right_sizer_count = 0;
+    for (const auto& iter : m_materialList) {
+        const auto& material_id = iter.second->id;
+        const auto& material_item = iter.second->item;
+        if (use_single_panel) {
+            if (!m_sizer_ams_mapping->IsShown(material_item)) {
+                material_item->Reparent(m_filament_panel);
+                m_sizer_ams_mapping->Add(material_item, 0, wxALL, FromDIP(5));
+                sizer_count++;
+            }
+        } else {
+            if (m_filaments_map[material_id] == 1) {
+                material_item->Reparent(m_filament_left_panel);
+                m_sizer_ams_mapping_left->Add(material_item, 0, wxALL, FromDIP(5));
+                left_sizer_count++;
+            } else if(m_filaments_map[material_id] == 2){
+                material_item->Reparent(m_filament_right_panel);
+                m_sizer_ams_mapping_right->Add(material_item, 0, wxALL, FromDIP(5));
+                right_sizer_count++;
+            }
+        }
+    }
+
+    if (sizer_count > 0) {
+        m_sizer_ams_mapping->SetCols(8);
+        m_sizer_ams_mapping->Layout();
+        m_filament_panel_sizer->Layout();
+    }
+
+    if (left_sizer_count > 0) {
+        m_sizer_ams_mapping_left->SetCols(4);
+        m_sizer_ams_mapping_left->Layout();
+        m_filament_panel_left_sizer->Layout();
+        m_filament_left_panel->Layout();
+    }
+
+    if (right_sizer_count > 0) {
+        m_sizer_ams_mapping_right->SetCols(4);
+        m_sizer_ams_mapping_right->Layout();
+        m_filament_panel_right_sizer->Layout();
+        m_filament_right_panel->Layout();
+    }
+
+    m_filament_panel->Show(sizer_count > 0);
+    m_filament_left_panel->Show(left_sizer_count > 0 || right_sizer_count > 0);
+    m_filament_right_panel->Show(left_sizer_count > 0 || right_sizer_count > 0);
+    Layout();
 }
 
 void SelectMachineDialog::clone_thumbnail_data() {
@@ -5297,17 +5368,7 @@ void SelectMachineDialog::set_default_from_sdcard()
                 pos.y += item->GetRect().height;
                 m_mapping_popup.Move(pos);
 
-                if (diameters_count > 1) {
-                    if (obj_ && can_hybrid_mapping(*obj_->GetExtderSystem())) {
-                        m_mapping_popup.set_show_type(ShowType::LEFT_AND_RIGHT);
-                    } else if (m_filaments_map[m_current_filament_id] == 1) {
-                        m_mapping_popup.set_show_type(ShowType::LEFT);
-                    } else if (m_filaments_map[m_current_filament_id] == 2) {
-                        m_mapping_popup.set_show_type(ShowType::RIGHT);
-                    }
-                } else {
-                    m_mapping_popup.set_show_type(ShowType::RIGHT);
-                }
+                m_mapping_popup.set_show_type(get_filament_mapping_show_type(obj_, m_current_filament_id));
 
                 if (obj_ && obj_->get_dev_id() == m_printer_last_select)
                 {

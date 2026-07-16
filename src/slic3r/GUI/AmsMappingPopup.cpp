@@ -976,7 +976,8 @@ void AmsMapingPopup::on_left_down(wxMouseEvent &evt)
 
         if (pos.x > p_rect.x && pos.y > p_rect.y && pos.x < (p_rect.x + item->GetSize().x) && pos.y < (p_rect.y + item->GetSize().y)) {
             // Orca: the external spool is un-pickable while a Filament Track Switch is installed (Apple hit-tests here).
-            if (m_fila_switch_installed && (item->m_ams_id == VIRTUAL_TRAY_MAIN_ID || item->m_ams_id == VIRTUAL_TRAY_DEPUTY_ID)) { return; }
+            // The combined (dynamic) view also routes filament through the switch, so its virtual slots stay un-pickable too.
+            if ((m_fila_switch_installed || m_show_type == ShowType::LEFT_AND_RIGHT_DYNAMIC) && (item->m_ams_id == VIRTUAL_TRAY_MAIN_ID || item->m_ams_id == VIRTUAL_TRAY_DEPUTY_ID)) { return; }
             if (item->m_tray_data.type == TrayType::NORMAL) {
                 if (!m_ext_mapping_filatype_check && (item->m_ams_id == VIRTUAL_TRAY_MAIN_ID || item->m_ams_id == VIRTUAL_TRAY_DEPUTY_ID)) {
                     // Do nothing
@@ -988,7 +989,8 @@ void AmsMapingPopup::on_left_down(wxMouseEvent &evt)
             if (item->m_tray_data.type == TrayType::EMPTY) return;
             if ((m_show_type == ShowType::LEFT && item->GetParent()->GetName() == "left") ||
                 (m_show_type == ShowType::RIGHT && item->GetParent()->GetName() == "right") ||
-                m_show_type == ShowType::LEFT_AND_RIGHT) {
+                m_show_type == ShowType::LEFT_AND_RIGHT ||
+                m_show_type == ShowType::LEFT_AND_RIGHT_DYNAMIC) {
                 item->send_event(m_current_filament_id);
                 Dismiss();
                 break;
@@ -1249,6 +1251,14 @@ void AmsMapingPopup::update(MachineObject* obj, const std::vector<FilamentInfo>&
             }
             m_right_extra_slot->Show();
         }
+        else if (m_show_type == ShowType::LEFT_AND_RIGHT_DYNAMIC)
+        {
+            // Orca: kept inside the monolithic update() instead of a separate update TU.
+            // A filament switch feeds both extruders, so every AMS and both external spools render
+            // in one combined panel (the right/main area). The left panel and the ext slots stay
+            // hidden (set above); the ext spools are added as containers in the AMS block below.
+            m_right_marea_panel->Show();
+        }
     }
 
     for (int i = 0; i < obj->vt_slot.size(); i++) {
@@ -1282,13 +1292,17 @@ void AmsMapingPopup::update(MachineObject* obj, const std::vector<FilamentInfo>&
             }
         }
 
-        if (obj->vt_slot[i].id == std::to_string(VIRTUAL_TRAY_MAIN_ID)) {
-            m_right_extra_slot->send_win = send_win;
-            add_ext_ams_mapping(td, m_right_extra_slot);
-        }
-        else if (obj->vt_slot[i].id == std::to_string(VIRTUAL_TRAY_DEPUTY_ID)) {
-            m_left_extra_slot->send_win = send_win;
-            add_ext_ams_mapping(td, m_left_extra_slot);
+        // Orca: in the combined (switch) view the external spools render as containers inside the
+        // single panel (handled in the AMS block below), not in the separate left/right ext slots.
+        if (m_show_type != ShowType::LEFT_AND_RIGHT_DYNAMIC) {
+            if (obj->vt_slot[i].id == std::to_string(VIRTUAL_TRAY_MAIN_ID)) {
+                m_right_extra_slot->send_win = send_win;
+                add_ext_ams_mapping(td, m_right_extra_slot);
+            }
+            else if (obj->vt_slot[i].id == std::to_string(VIRTUAL_TRAY_DEPUTY_ID)) {
+                m_left_extra_slot->send_win = send_win;
+                add_ext_ams_mapping(td, m_left_extra_slot);
+            }
         }
     }
 
@@ -1305,11 +1319,22 @@ void AmsMapingPopup::update(MachineObject* obj, const std::vector<FilamentInfo>&
             int ams_indx  = atoi(ams_iter->first.c_str());
             int nozzle_id = ams_iter->second->GetExtruderId();
 
+            // Orca: with a filament switch an AMS feeds both extruders and is shown in the single
+            // combined panel (the right/main area); iterate the binding set instead of the single
+            // extruder id and skip AMS with no usable binding. Without a switch this resolves to the
+            // original left/right pin (a non-switch AMS carries exactly its one bound extruder).
+            wxPanel* target_panel = nullptr;
+            if (m_show_type == ShowType::LEFT_AND_RIGHT_DYNAMIC) {
+                if (ams_iter->second->GetBindedExtruderSet().empty()) { continue; }
+                target_panel = m_right_marea_panel;
+            } else {
+                target_panel = (nozzle_id == 0) ? m_right_marea_panel : m_left_marea_panel;
+            }
 
             auto sizer_mapping_list         = new wxBoxSizer(wxHORIZONTAL);
-            auto ams_mapping_item_container = new MappingContainer(nozzle_id == 0 ? m_right_marea_panel : m_left_marea_panel, ams_iter->second->GetDisplayName(),
+            auto ams_mapping_item_container = new MappingContainer(target_panel, ams_iter->second->GetDisplayName(),
                                                                    ams_iter->second->GetSlotCount());
-            ams_mapping_item_container->SetName(nozzle_id == 0 ? m_right_marea_panel->GetName() : m_left_marea_panel->GetName());
+            ams_mapping_item_container->SetName(target_panel->GetName());
             ams_mapping_item_container->SetSizer(sizer_mapping_list);
             ams_mapping_item_container->Layout();
 
@@ -1357,14 +1382,14 @@ void AmsMapingPopup::update(MachineObject* obj, const std::vector<FilamentInfo>&
             m_amsmapping_container_sizer_list.push_back(sizer_mapping_list);
             m_amsmapping_container_list.push_back(ams_mapping_item_container);
 
-            if (nozzle_id == 0) {
+            if (target_panel == m_right_marea_panel) {
                 has_right_ams = true;
                 if (ams_mapping_item_container->get_slots_num() == 1) {
                     right_one_slot_containers.push_back(ams_mapping_item_container);
                 } else {
                     right_four_slot_containers.push_back(ams_mapping_item_container);
                 }
-            } else if (nozzle_id == 1) {
+            } else if (target_panel == m_left_marea_panel) {
                 has_left_ams = true;
                 if (ams_mapping_item_container->get_slots_num() == 1) {
                     left_one_slot_containers.push_back(ams_mapping_item_container);
@@ -1374,10 +1399,52 @@ void AmsMapingPopup::update(MachineObject* obj, const std::vector<FilamentInfo>&
             }
         }
 
+        // Orca: with a filament switch, render the external spools as containers inside the single
+        // combined panel (mirroring the AMS containers) instead of the separate left/right ext slots.
+        if (m_show_type == ShowType::LEFT_AND_RIGHT_DYNAMIC) {
+            for (int i = obj->vt_slot.size() - 1; i >= 0; i--) {
+                DevAmsTray* tray_data = &obj->vt_slot[i];
+                TrayData    td;
+                td.id      = std::stoi(tray_data->id);
+                td.ams_id  = std::stoi(tray_data->id);
+                td.slot_id = 0;
+                if (!tray_data->is_tray_info_ready()) {
+                    td.type = THIRD;
+                } else {
+                    td.type          = NORMAL;
+                    td.remain        = tray_data->remain;
+                    td.colour        = DevAmsTray::decode_color(tray_data->color);
+                    td.name          = tray_data->get_display_filament_type();
+                    td.filament_type = tray_data->get_filament_type();
+                    td.ctype         = tray_data->ctype;
+                    for (auto col : tray_data->cols) { td.material_cols.push_back(DevAmsTray::decode_color(col)); }
+                }
+
+                auto     sizer_mapping_list     = new wxBoxSizer(wxHORIZONTAL);
+                wxString shown_name             = (td.ams_id == VIRTUAL_TRAY_MAIN_ID) ? wxString("Ext-R") : wxString("Ext-L");
+                auto ams_mapping_item_container = new MappingContainer(m_right_marea_panel, shown_name, 1);
+                ams_mapping_item_container->SetName(m_right_marea_panel->GetName());
+                ams_mapping_item_container->SetSizer(sizer_mapping_list);
+                ams_mapping_item_container->Layout();
+
+                std::vector<TrayData> tray_datas{td};
+                add_ams_mapping(tray_datas, false, ams_mapping_item_container, sizer_mapping_list);
+                m_amsmapping_container_sizer_list.push_back(sizer_mapping_list);
+                m_amsmapping_container_list.push_back(ams_mapping_item_container);
+                right_one_slot_containers.push_back(ams_mapping_item_container);
+                has_right_ams = true;
+            }
+        }
+
         _add_containers(this, left_one_slot_containers, left_four_slots_containers, m_sizer_ams_basket_left);
         _add_containers(this, right_one_slot_containers, right_four_slot_containers, m_sizer_ams_basket_right);
-        m_left_split_ams_sizer->Show(has_left_ams);
-        m_right_split_ams_sizer->Show(has_right_ams);
+        if (m_show_type == ShowType::LEFT_AND_RIGHT_DYNAMIC) {
+            m_left_split_ams_sizer->Show(false);
+            m_right_split_ams_sizer->Show(false);
+        } else {
+            m_left_split_ams_sizer->Show(has_left_ams);
+            m_right_split_ams_sizer->Show(has_right_ams);
+        }
         update_items_check_state(ams_mapping_result);
     } else {
         m_right_split_ams_sizer->Show(false);

@@ -1447,39 +1447,6 @@ bool SyncAmsInfoDialog::build_nozzles_info(std::string &nozzles_info)
     return true;
 }
 
-bool SyncAmsInfoDialog::can_hybrid_mapping(DevExtderSystem data)
-{
-    // Mixed mappings are not allowed
-    return false;
-
-    if (data.GetTotalExtderCount() <= 1 || !wxGetApp().preset_bundle) return false;
-
-    // The default two extruders are left, right, but the order of the extruders on the machine is right, left.
-    // Therefore, some adjustments need to be made.
-    std::vector<std::string> flow_type_of_machine;
-    for (auto it = data.GetExtruders().rbegin(); it != data.GetExtruders().rend(); it++) {
-        // exist field is not updated, wait add
-        // if (it->exist < 3) return false;
-        std::string type_str = it->GetNozzleFlowType() ? "High Flow" : "Standard";
-        flow_type_of_machine.push_back(type_str);
-    }
-    // get the nozzle type of preset --> flow_types
-    const Preset &      current_printer = wxGetApp().preset_bundle->printers.get_selected_preset();
-    const Preset *      base_printer    = wxGetApp().preset_bundle->printers.get_preset_base(current_printer);
-    std::string         base_name       = base_printer->name;
-    auto                flow_data       = wxGetApp().app_config->get_nozzle_volume_types_from_config(base_name);
-    std::vector<string> flow_types;
-    boost::split(flow_types, flow_data, boost::is_any_of(","));
-    if (flow_types.size() <= 1 || flow_types.size() != flow_type_of_machine.size()) return false;
-
-    // Only when all preset nozzle types and machine nozzle types are exactly the same, return true.
-    auto type = flow_types[0];
-    for (int i = 0; i < flow_types.size(); i++) {
-        if (flow_types[i] != type || flow_type_of_machine[i] != type) return false;
-    }
-    return true;
-}
-
 // When filaments cannot be matched automatically, whether to use ext for automatic supply
 void SyncAmsInfoDialog::auto_supply_with_ext(std::vector<DevAmsTray> slots)
 {

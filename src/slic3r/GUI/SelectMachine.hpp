@@ -510,7 +510,9 @@ public:
     bool do_ams_mapping(MachineObject *obj_,bool use_ams);
     bool get_ams_mapping_result(std::string& mapping_array_str, std::string& mapping_array_str2, std::string& ams_mapping_info) const;
     bool build_nozzles_info(std::string& nozzles_info);
-    bool can_hybrid_mapping(DevExtderSystem data);
+    bool can_hybrid_mapping(MachineObject* obj_) const;
+    ShowType get_filament_mapping_show_type(MachineObject* obj_, int fila_logic_id) const;
+    void update_material_item_pos(MachineObject* obj_);
     void auto_supply_with_ext(std::vector<DevAmsTray> slots);
     int  convert_filament_map_nozzle_id_to_task_nozzle_id(int nozzle_id) const;
 

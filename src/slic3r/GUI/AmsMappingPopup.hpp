@@ -64,7 +64,8 @@ enum TrayType {
 enum ShowType {
     LEFT,   //  only show left ams and left ext
     RIGHT,  //only show right ams and right ext
-    LEFT_AND_RIGHT  //show left and right ams at the same time
+    LEFT_AND_RIGHT,  //show left and right ams at the same time
+    LEFT_AND_RIGHT_DYNAMIC  //show all left and right at one panel when use_dynamic_switch
 };
 
 struct TrayData
