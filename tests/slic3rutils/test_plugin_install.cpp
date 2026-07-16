@@ -135,7 +135,7 @@ TEST_CASE("install-state sidecar is the source of truth for a cloud plugin's ins
     CHECK(state.installed_version == "1.2.0");
 
     // Reading the sidecar back onto a freshly-scanned descriptor (whose header version is still
-    // 1.0.0) must surface the cloud-installed 1.2.0. This is what lets update_cloud_catalog compare
+    // 1.0.0) must surface the cloud-installed 1.2.0. This is what lets update_cloud_metadata compare
     // the cloud's latest version against the installed version instead of the stale header, so an
     // already-updated plugin no longer looks perpetually out of date.
     PluginDescriptor scanned;

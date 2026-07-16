@@ -725,7 +725,7 @@ TEST_CASE("Signing out drops every cloud plugin row, installed or not", "[Plugin
     installed.plugin_root = (data_dir_guard.plugins_dir() / "_subscribed" / "user" / installed.plugin_key).string();
     installed.cloud       = CloudPluginState{installed.plugin_key, /*installed=*/true, false, false, false};
 
-    manager.update_cloud_catalog({available, installed});
+    manager.update_cloud_metadata({available, installed});
 
     const auto has_key = [&manager](const std::string& key) {
         PluginDescriptor descriptor;
@@ -739,7 +739,7 @@ TEST_CASE("Signing out drops every cloud plugin row, installed or not", "[Plugin
     // Sign out. The per-user _subscribed directory stops being scanned, so both cloud rows are now
     // stale and must go — not just the one with nothing installed behind it.
     manager.unload_cloud_plugins();
-    manager.clear_cloud_plugin_catalog();
+    manager.clear_cloud_plugin_metadata();
     manager.set_cloud_user("");
 
     CHECK_FALSE(has_key(available.plugin_key));
