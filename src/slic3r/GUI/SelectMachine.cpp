@@ -2854,6 +2854,8 @@ void SelectMachineDialog::update_timelapse_folder_btn_icon()
 
 void SelectMachineDialog::show_timelapse_folder_popup()
 {
+    // Orca: this popup is an Orca-themed implementation (RadioBox + Label, mirroring the
+    // SendToPrinter storage selector) rather than a straight port of the upstream widget.
     if (m_timelapse_storage_popup && m_timelapse_storage_popup->IsShown()) {
         m_timelapse_storage_popup->Dismiss();
         return;
@@ -4525,6 +4527,8 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
     // H2-series firmware gate: block Send when TPU is mapped to the left (deputy) extruder on firmware
     // that can't print it. Inert unless the printer JSON opts in via support_print_check_firmware_for_tpu_left.
     if (DevPrinterConfigUtil::support_print_check_firmware_for_tpu_left(obj_->printer_type)) {
+        // Orca: read the raw string members fila.ams_id/fila.slot_id (no int round-trip, which would throw on an
+        // unmapped filament); upstream's jump-to-upgrade button styling on the message is dropped for the plain message.
         bool has_tpu_left = false;
         for (const auto& fila : m_ams_mapping_result) {
             const auto& ams_id  = fila.ams_id;
