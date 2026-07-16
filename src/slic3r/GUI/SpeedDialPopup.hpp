@@ -1,5 +1,5 @@
-#ifndef slic3r_GUI_SpeedDialDialog_hpp_
-#define slic3r_GUI_SpeedDialDialog_hpp_
+#ifndef slic3r_GUI_SpeedDialPopup_hpp_
+#define slic3r_GUI_SpeedDialPopup_hpp_
 
 #include <wx/string.h>
 

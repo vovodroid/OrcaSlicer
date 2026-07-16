@@ -141,7 +141,7 @@
 #include "slic3r/Utils/bambu_networking.hpp"
 
 #include "PluginsDialog.hpp"
-#include "SpeedDialDialog.hpp"
+#include "SpeedDialPopup.hpp"
 #include "TerminalDialog.hpp"
 
 //#ifdef WIN32

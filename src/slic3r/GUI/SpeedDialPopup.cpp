@@ -1,4 +1,4 @@
-#include "SpeedDialDialog.hpp"
+#include "SpeedDialPopup.hpp"
 
 #include "ActionRegistry.hpp"
 #include "GUI.hpp"
