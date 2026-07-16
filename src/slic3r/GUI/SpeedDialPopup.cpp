@@ -130,199 +130,174 @@ if(document.documentElement)
 })();)JS";
 }
 
-class SpeedDialWebPopup : public ::PopupWindow
-{
-public:
-    explicit SpeedDialWebPopup(wxWindow* parent)
-        : ::PopupWindow(parent, wxBORDER_NONE | wxPU_CONTAINS_CONTROLS)
-    {
-        SetBackgroundColour(bg_color());
-
-        auto* sizer = new wxBoxSizer(wxVERTICAL);
-        m_browser = WebView::CreateWebView(this, wxEmptyString);
-        if (m_browser) {
-            m_browser->AddUserScript(wxString::FromUTF8(host_theme_user_script()));
-            m_browser->Bind(EVT_WEBVIEW_RECREATED, &SpeedDialWebPopup::on_webview_recreated, this);
-            sizer->Add(m_browser, wxSizerFlags().Expand().Proportion(1));
-            Bind(wxEVT_WEBVIEW_SCRIPT_MESSAGE_RECEIVED, &SpeedDialWebPopup::on_script_message, this, m_browser->GetId());
-        } else {
-            auto* fallback = new wxStaticText(this, wxID_ANY, wxS("wxWebView unavailable"));
-            sizer->Add(fallback, wxSizerFlags().Border(wxALL, 20));
-        }
-        SetSizer(sizer);
-        SetClientSize(FromDIP(wxSize(kPopupWidth, kPopupMaxHeight)));   // DIP -> physical (see resize_to_content)
-        if (m_browser)
-            WebView::LoadUrl(m_browser, dialog_url());
-    }
-
-    void request_show()
-    {
-        if (IsShown()) {
-            focus_browser();
-            return;
-        }
-        m_pending_show = true;
-        if (m_browser && m_page_ready)
-            send_actions();
-        else if (!m_browser)
-            show_ready();
-    }
-
-    void focus_browser()
-    {
-        if (m_browser)
-            m_browser->SetFocus();
-    }
-
-private:
-    void OnDismiss() override {}
-
-    void on_script_message(wxWebViewEvent& event)
-    {
-        nlohmann::json p = nlohmann::json::parse(event.GetString().utf8_string(), nullptr, false);
-        if (!p.is_object())
-            return;
-        const std::string cmd = p.value("command", "");
-        if      (cmd == "request_actions") {
-            m_page_ready = true;
-            send_actions();
-        }
-        else if (cmd == "toggle_favourite") wxGetApp().action_registry().set_favourite(p.value("id", ""), p.value("fav", false));
-        else if (cmd == "reorder_favourites") {
-            std::vector<std::string> ids;
-            if (p.contains("ids") && p["ids"].is_array())
-                for (auto& e : p["ids"]) if (e.is_string()) ids.push_back(e.get<std::string>());
-            wxGetApp().action_registry().reorder_favourites(ids);
-        }
-        else if (cmd == "run_action")       run_action(p.value("id", ""), p.value("title", ""));
-        else if (cmd == "resize")           resize_to_content(json_int_or(p, "height", 0));
-        else if (cmd == "close_page")       Dismiss();
-    }
-
-    void on_webview_recreated(wxCommandEvent&)
-    {
-        apply_host_theme();
-    }
-
-    void apply_host_theme()
-    {
-        if (m_browser)
-            WebView::RunScript(m_browser, wxString::FromUTF8(host_theme_apply_js()));
-    }
-
-    void resize_to_content(int height)
-    {
-        if (height <= 0)
-            return;
-        // why: HTML is the source of truth - size the popup to the measured content height so
-        // the window always contains the WebView and never clips. `height` arrives in CSS px
-        // (DIP); wx SetClientSize wants physical px, so on a scaled display (e.g. 125%) applying
-        // DIP as physical shrinks the popup below the content and clips it. Clamp in DIP, then
-        // FromDIP -> physical. The only ceiling is a screen fraction; normal growth is already
-        // bounded by the list's own max-height.
-        int disp = wxDisplay::GetFromPoint(IsShown() ? GetPosition() : wxGetMousePosition());
-        if (disp == wxNOT_FOUND)
-            disp = 0;
-        const int screen_dip = ToDIP(wxDisplay(disp).GetClientArea().GetHeight());
-        const int max_dip    = std::max(kPopupMinHeight, screen_dip * 85 / 100);
-        const int height_dip = std::max(kPopupMinHeight, std::min(height, max_dip));
-        SetClientSize(FromDIP(wxSize(kPopupWidth, height_dip)));
-        Layout();
-        if (m_pending_show)
-            show_ready();
-        else if (IsShown())
-            SetPosition(clamped_position(GetPosition(), GetSize()));
-    }
-
-    void show_ready()
-    {
-        if (!m_pending_show)
-            return;
-        SetPosition(clamped_position(popup_position(GetSize()), GetSize()));
-        Popup();
-        focus_browser();
-        m_pending_show = false;
-    }
-
-    // Hide FIRST (scripts may open their own modals that must not stack under this
-    // launcher), gate on a native run-confirm unless suppressed, then run on the next
-    // tick via the registry (which re-resolves the capability and bumps stats).
-    void run_action(const std::string& id, const std::string& title)
-    {
-        ActionRegistry& reg = wxGetApp().action_registry();
-        const AppAction* a = reg.by_id(id);
-        if (!a)
-            return;
-        const bool        ask    = reg.should_ask(id);
-        const std::string atitle = a->title(); // capture before Dismiss; `a` may not outlive it
-        Dismiss(); // launcher gone before the modal / the script's own UI
-
-        if (ask) {
-            const wxString label = title.empty() ? from_u8(atitle) : from_u8(title);
-            RichMessageDialog dlg(wxGetApp().mainframe, wxString::Format(_L("Run \"%s\"?"), label),
-                                  _L("Run plugin"), wxOK | wxCANCEL);
-            dlg.ShowCheckBox(_L("Don't ask again for this action"));
-            if (dlg.ShowModal() != wxID_OK)
-                return;
-            if (dlg.IsCheckBoxChecked())
-                wxGetApp().action_registry().suppress_ask(id);
-        }
-        // why: value-capture only. Script execution may outlive this popup if the app is closing.
-        wxGetApp().CallAfter([id] {
-            // why: the queue may drain during shutdown, after MainFrame/Plater teardown;
-            //      skip like the registry's loader callbacks do instead of running into it.
-            if (wxGetApp().is_closing())
-                return;
-            AppActionRunResult o = wxGetApp().action_registry().run(id);
-            if (o.level == AppActionRunResult::Level::Busy)
-                return;
-            if (!o.message.IsEmpty() && wxGetApp().plater())
-                wxGetApp().plater()->get_notification_manager()->push_notification(
-                    NotificationType::CustomNotification,
-                    o.level == AppActionRunResult::Level::Error ? NotificationManager::NotificationLevel::ErrorNotificationLevel :
-                                                                NotificationManager::NotificationLevel::RegularNotificationLevel,
-                    into_u8(o.message));
-        });
-    }
-
-    // C++ -> JS push. Same escaping as WebViewHostDialog::call_web_handler: the ignore error
-    // handler keeps a stray non-UTF-8 byte in a plugin name from throwing and aborting the send;
-    // concatenation (not wxString::Format) avoids a '%' in a title being read as a format token.
-    void push(const nlohmann::json& j)
-    {
-        if (!m_browser)
-            return;
-        const wxString payload = wxString::FromUTF8(j.dump(-1, ' ', false, nlohmann::json::error_handler_t::ignore));
-        WebView::RunScript(m_browser, wxT("window.HandleStudio(") + payload + wxT(")"));
-    }
-
-    void send_actions()
-    {
-        nlohmann::json snap = wxGetApp().action_registry().snapshot();
-        push({{"command", "list_actions"},
-              {"actions", std::move(snap["actions"])},
-              {"favourites", std::move(snap["favourites"])}});
-    }
-
-    wxWebView* m_browser{nullptr};
-    bool       m_page_ready{false};
-    bool       m_pending_show{false};
-};
-
 }
 
-void open_speed_dial_popup()
+SpeedDialWebPopup::SpeedDialWebPopup(wxWindow* parent)
+    : ::PopupWindow(parent, wxBORDER_NONE | wxPU_CONTAINS_CONTROLS)
 {
-    wxWindow* parent = wxGetApp().mainframe;
-    if (!parent)
-        return;
+    SetBackgroundColour(bg_color());
 
-    static SpeedDialWebPopup* popup = nullptr;
-    if (!popup) {
-        popup = new SpeedDialWebPopup(parent);
-        popup->Bind(wxEVT_DESTROY, [](wxWindowDestroyEvent&) { popup = nullptr; });
+    auto* sizer = new wxBoxSizer(wxVERTICAL);
+    m_browser = WebView::CreateWebView(this, wxEmptyString);
+    if (m_browser) {
+        m_browser->AddUserScript(wxString::FromUTF8(host_theme_user_script()));
+        m_browser->Bind(EVT_WEBVIEW_RECREATED, &SpeedDialWebPopup::on_webview_recreated, this);
+        sizer->Add(m_browser, wxSizerFlags().Expand().Proportion(1));
+        Bind(wxEVT_WEBVIEW_SCRIPT_MESSAGE_RECEIVED, &SpeedDialWebPopup::on_script_message, this, m_browser->GetId());
+    } else {
+        auto* fallback = new wxStaticText(this, wxID_ANY, wxS("wxWebView unavailable"));
+        sizer->Add(fallback, wxSizerFlags().Border(wxALL, 20));
     }
-    popup->request_show();
+    SetSizer(sizer);
+    SetClientSize(FromDIP(wxSize(kPopupWidth, kPopupMaxHeight)));   // DIP -> physical (see resize_to_content)
+    if (m_browser)
+        WebView::LoadUrl(m_browser, dialog_url());
+}
+
+void SpeedDialWebPopup::request_show()
+{
+    if (IsShown()) {
+        focus_browser();
+        return;
+    }
+    m_pending_show = true;
+    if (m_browser && m_page_ready)
+        send_actions();
+    else if (!m_browser)
+        show_ready();
+}
+
+void SpeedDialWebPopup::focus_browser()
+{
+    if (m_browser)
+        m_browser->SetFocus();
+}
+
+void SpeedDialWebPopup::on_script_message(wxWebViewEvent& event)
+{
+    nlohmann::json p = nlohmann::json::parse(event.GetString().utf8_string(), nullptr, false);
+    if (!p.is_object())
+        return;
+    const std::string cmd = p.value("command", "");
+    if      (cmd == "request_actions") {
+        m_page_ready = true;
+        send_actions();
+    }
+    else if (cmd == "toggle_favourite") wxGetApp().action_registry().set_favourite(p.value("id", ""), p.value("fav", false));
+    else if (cmd == "reorder_favourites") {
+        std::vector<std::string> ids;
+        if (p.contains("ids") && p["ids"].is_array())
+            for (auto& e : p["ids"]) if (e.is_string()) ids.push_back(e.get<std::string>());
+        wxGetApp().action_registry().reorder_favourites(ids);
+    }
+    else if (cmd == "run_action")       run_action(p.value("id", ""), p.value("title", ""));
+    else if (cmd == "resize")           resize_to_content(json_int_or(p, "height", 0));
+    else if (cmd == "close_page")       Dismiss();
+}
+
+void SpeedDialWebPopup::on_webview_recreated(wxCommandEvent&)
+{
+    apply_host_theme();
+}
+
+void SpeedDialWebPopup::apply_host_theme()
+{
+    if (m_browser)
+        WebView::RunScript(m_browser, wxString::FromUTF8(host_theme_apply_js()));
+}
+
+void SpeedDialWebPopup::resize_to_content(int height)
+{
+    if (height <= 0)
+        return;
+    // why: HTML is the source of truth - size the popup to the measured content height so
+    // the window always contains the WebView and never clips. `height` arrives in CSS px
+    // (DIP); wx SetClientSize wants physical px, so on a scaled display (e.g. 125%) applying
+    // DIP as physical shrinks the popup below the content and clips it. Clamp in DIP, then
+    // FromDIP -> physical. The only ceiling is a screen fraction; normal growth is already
+    // bounded by the list's own max-height.
+    int disp = wxDisplay::GetFromPoint(IsShown() ? GetPosition() : wxGetMousePosition());
+    if (disp == wxNOT_FOUND)
+        disp = 0;
+    const int screen_dip = ToDIP(wxDisplay(disp).GetClientArea().GetHeight());
+    const int max_dip    = std::max(kPopupMinHeight, screen_dip * 85 / 100);
+    const int height_dip = std::max(kPopupMinHeight, std::min(height, max_dip));
+    SetClientSize(FromDIP(wxSize(kPopupWidth, height_dip)));
+    Layout();
+    if (m_pending_show)
+        show_ready();
+    else if (IsShown())
+        SetPosition(clamped_position(GetPosition(), GetSize()));
+}
+
+void SpeedDialWebPopup::show_ready()
+{
+    if (!m_pending_show)
+        return;
+    SetPosition(clamped_position(popup_position(GetSize()), GetSize()));
+    Popup();
+    focus_browser();
+    m_pending_show = false;
+}
+
+// Hide FIRST (scripts may open their own modals that must not stack under this
+// launcher), gate on a native run-confirm unless suppressed, then run on the next
+// tick via the registry (which re-resolves the capability and bumps stats).
+void SpeedDialWebPopup::run_action(const std::string& id, const std::string& title)
+{
+    ActionRegistry& reg = wxGetApp().action_registry();
+    const AppAction* a = reg.by_id(id);
+    if (!a)
+        return;
+    const bool        ask    = reg.should_ask(id);
+    const std::string atitle = a->title(); // capture before Dismiss; `a` may not outlive it
+    Dismiss(); // launcher gone before the modal / the script's own UI
+
+    if (ask) {
+        const wxString label = title.empty() ? from_u8(atitle) : from_u8(title);
+        RichMessageDialog dlg(wxGetApp().mainframe, wxString::Format(_L("Run \"%s\"?"), label),
+                              _L("Run plugin"), wxOK | wxCANCEL);
+        dlg.ShowCheckBox(_L("Don't ask again for this action"));
+        if (dlg.ShowModal() != wxID_OK)
+            return;
+        if (dlg.IsCheckBoxChecked())
+            wxGetApp().action_registry().suppress_ask(id);
+    }
+    // why: value-capture only. Script execution may outlive this popup if the app is closing.
+    wxGetApp().CallAfter([id] {
+        // why: the queue may drain during shutdown, after MainFrame/Plater teardown;
+        //      skip like the registry's loader callbacks do instead of running into it.
+        if (wxGetApp().is_closing())
+            return;
+        AppActionRunResult o = wxGetApp().action_registry().run(id);
+        if (o.level == AppActionRunResult::Level::Busy)
+            return;
+        if (!o.message.IsEmpty() && wxGetApp().plater())
+            wxGetApp().plater()->get_notification_manager()->push_notification(
+                NotificationType::CustomNotification,
+                o.level == AppActionRunResult::Level::Error ? NotificationManager::NotificationLevel::ErrorNotificationLevel :
+                                                            NotificationManager::NotificationLevel::RegularNotificationLevel,
+                into_u8(o.message));
+    });
+}
+
+// C++ -> JS push. Same escaping as WebViewHostDialog::call_web_handler: the ignore error
+// handler keeps a stray non-UTF-8 byte in a plugin name from throwing and aborting the send;
+// concatenation (not wxString::Format) avoids a '%' in a title being read as a format token.
+void SpeedDialWebPopup::push(const nlohmann::json& j)
+{
+    if (!m_browser)
+        return;
+    const wxString payload = wxString::FromUTF8(j.dump(-1, ' ', false, nlohmann::json::error_handler_t::ignore));
+    WebView::RunScript(m_browser, wxT("window.HandleStudio(") + payload + wxT(")"));
+}
+
+void SpeedDialWebPopup::send_actions()
+{
+    nlohmann::json snap = wxGetApp().action_registry().snapshot();
+    push({{"command", "list_actions"},
+          {"actions", std::move(snap["actions"])},
+          {"favourites", std::move(snap["favourites"])}});
 }
 
 }}

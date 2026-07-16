@@ -8277,7 +8277,20 @@ void GUI_App::open_terminal_dialog()
     m_terminal_dlg->Raise();
 }
 
-void GUI_App::open_speed_dial() { open_speed_dial_popup(); }
+void GUI_App::open_speed_dial()
+{
+    if (!mainframe)
+        return;
+    if (!m_speed_dial_popup) {
+        m_speed_dial_popup = new SpeedDialWebPopup(mainframe);
+        m_speed_dial_popup->Bind(wxEVT_DESTROY, [this](wxWindowDestroyEvent& event) {
+            if (event.GetEventObject() == m_speed_dial_popup)
+                m_speed_dial_popup = nullptr;
+            event.Skip();
+        });
+    }
+    m_speed_dial_popup->request_show();
+}
 
 void GUI_App::open_exportpresetbundledialog(size_t open_on_tab, const std::string& highlight_option)
 {
