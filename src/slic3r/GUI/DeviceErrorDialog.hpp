@@ -48,6 +48,8 @@ public:
         CANCEL = 37,
         REMOVE_CLOSE_BTN = 39, // special case, do not show close button
         PROCEED = 41,
+        DISABLE_PURIFICATION = 54,
+        DONT_REMIND_NEXT_TIME = 57,
 
         ERROR_BUTTON_COUNT,
 

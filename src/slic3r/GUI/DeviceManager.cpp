@@ -2207,11 +2207,65 @@ int MachineObject::command_ack_proceed(json& proceed) {
     } else {
         proceed["err_ignored"] = std::vector<int>{proceed["err_index"]};
     }
+
+    for (auto& item : proceed["err_ignored"]) {
+        json error_item;
+        error_item["idx"] = item.get<int>();
+        error_item["mode"] = 0;
+        proceed["rm_idx"].push_back(error_item);
+    }
+
     proceed["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);
 
     json j;
     j["print"] = proceed;
     return this->publish_json(j);
+}
+
+int MachineObject::command_purification_disable()
+{
+    json j;
+    j["print"]["command"] = "close_air_filt";
+    j["print"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);
+
+    return this->publish_json(j, 1);
+}
+
+int MachineObject::command_dont_remind_next_time(json& mqtt_guard_json)
+{
+    if (!mqtt_guard_json.contains("command") ||
+        !mqtt_guard_json.contains("err_index") ||
+        mqtt_guard_json["err_index"].empty()) return -1;
+
+    json j;
+    j["print"]["command"] = mqtt_guard_json["command"].get<std::string>();
+    j["print"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);
+
+    try {
+        int err_index = mqtt_guard_json["err_index"].get<int>();
+
+        if (mqtt_guard_json.contains("err_ignored") &&
+            mqtt_guard_json["err_ignored"].is_array()) {
+            j["print"]["err_ignored"] = mqtt_guard_json["err_ignored"];
+            j["print"]["err_ignored"].push_back(err_index);
+        } else {
+            j["print"]["err_ignored"] = std::vector<int>{err_index};
+        }
+
+        for (auto& item : j["print"]["err_ignored"]) {
+            if (!item.is_number_integer()) continue;
+
+            json item_json;
+            item_json["idx"] = item.get<int>();
+            item_json["mode"] = 1; // 1-next time ignore, 2-always ignore
+            j["print"]["rm_idx"].push_back(item_json);
+        }
+    } catch (const json::exception& e) {
+        BOOST_LOG_TRIVIAL(error) << "JSON parsing error in command_dont_remind_next_time: " << e.what();
+        return -1;
+    }
+
+    return this->publish_json(j, 1);
 }
 
 int MachineObject::command_xcam_control_ai_monitoring(bool on_off, std::string lvl)
