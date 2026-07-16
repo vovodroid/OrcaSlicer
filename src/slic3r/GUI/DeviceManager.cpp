@@ -2264,10 +2264,10 @@ int MachineObject::command_dont_remind_next_time(json& mqtt_guard_json)
         mqtt_guard_json["err_index"].empty()) return -1;
 
     json j;
-    j["print"]["command"] = mqtt_guard_json["command"].get<std::string>();
     j["print"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);
 
     try {
+        j["print"]["command"] = mqtt_guard_json["command"].get<std::string>();
         int err_index = mqtt_guard_json["err_index"].get<int>();
 
         if (mqtt_guard_json.contains("err_ignored") &&

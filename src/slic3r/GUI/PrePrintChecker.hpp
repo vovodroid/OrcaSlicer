@@ -26,7 +26,7 @@ struct prePrintInfo
     wxString wiki_url;
     wxString              link_label;      // optional: clickable text appended after msg
     std::function<void()> link_callback;   // optional: internal action for link_label click
-    int index;
+    int index{0};
 
 public:
     bool operator==(const prePrintInfo& other) const {
