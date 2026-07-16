@@ -594,8 +594,6 @@ set(SLIC3R_GUI_SOURCES
     GUI/wxExtensions.hpp
     plugin/PythonInterpreter.cpp
     plugin/PythonInterpreter.hpp
-    plugin/PythonFileUtils.cpp
-    plugin/PythonFileUtils.hpp
     plugin/PythonPluginBridge.cpp
     plugin/PythonPluginBridge.hpp
     plugin/PythonPluginInterface.hpp

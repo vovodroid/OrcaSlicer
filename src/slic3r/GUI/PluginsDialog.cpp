@@ -121,8 +121,8 @@ struct PluginDialogItem
     PluginAvailableActions available_actions;
 };
 
-constexpr bool kFetchCloudCatalog      = true;
-constexpr bool kUseCurrentCloudCatalog = false;
+constexpr bool kFetchCloudMeta      = true;
+constexpr bool kUseCurrentCloudMeta = false;
 
 // The type of a package's first loaded capability. A package that is not loaded has no type.
 PluginCapabilityType primary_capability_type_of(PluginManager& manager, const std::string& plugin_key)
@@ -131,7 +131,7 @@ PluginCapabilityType primary_capability_type_of(PluginManager& manager, const st
     return capabilities.empty() ? PluginCapabilityType::Unknown : capabilities.front()->type();
 }
 
-std::vector<PluginDescriptor> current_cloud_catalog_snapshot()
+std::vector<PluginDescriptor> current_cloud_metadata_snapshot()
 {
     std::vector<PluginDescriptor> cloud_entries;
     for (const PluginDescriptor& entry : PluginManager::instance().get_plugin_descriptors(/*include_invalid=*/true))
@@ -152,21 +152,18 @@ PluginDescriptor as_cloud_only_descriptor(PluginDescriptor descriptor)
     return descriptor;
 }
 
-// rescan_plugins() clears the whole catalog and rediscovers only local packages. When
-// callers do not need fresh cloud data, reuse the current cloud rows after the local
-// rescan so cloud-only rows and cloud-derived UI state do not disappear.
-void refresh_plugin_catalog_blocking(bool fetch_cloud)
+void refresh_plugin_metadata_blocking(bool fetch_cloud)
 {
     PluginManager& manager = PluginManager::instance();
 
     std::vector<std::string> not_found, unauthorized;
-    const std::vector<PluginDescriptor> current_cloud_catalog = fetch_cloud ? std::vector<PluginDescriptor>{} :
-                                                                             current_cloud_catalog_snapshot();
+    const std::vector<PluginDescriptor> current_cloud_metadata = fetch_cloud ? std::vector<PluginDescriptor>{} :
+                                                                             current_cloud_metadata_snapshot();
 
     manager.rescan_plugins();
 
     if (!fetch_cloud) {
-        manager.update_cloud_catalog(current_cloud_catalog);
+        manager.update_cloud_metadata(current_cloud_metadata);
         return;
     }
 
@@ -452,7 +449,7 @@ void PluginsDialog::set_open_terminal_dlg_fn()
 
 void PluginsDialog::update_plugin_dialog_ui()
 {
-    // Called after the shared catalog is already updated, for example from the
+    // Called after the any metadata is already updated, for example from the
     // cloud-plugin state callback. Do not fetch here or the callback can re-enter.
     send_plugins();
     resolve_pending_activation();
@@ -486,10 +483,6 @@ void PluginsDialog::on_script_message(const nlohmann::json& payload)
 
     const std::string command = payload.value("command", "");
     if (command == "request_plugins") {
-        // The web page finished loading and is asking for the current catalog. Plugin
-        // discovery already runs at startup and on login, so the shared catalog is up to
-        // date by the time the dialog opens. Just render it here - no blocking fetch on
-        // open. The Refresh button (refresh_plugins) is what triggers a fresh discovery.
         send_plugins();
     } else if (command == "refresh_plugins") {
         refresh_plugins();
@@ -502,8 +495,8 @@ void PluginsDialog::on_script_message(const nlohmann::json& payload)
         install_plugin_from_file();
     } else if (command == "plugin_menu_action") {
         handle_plugin_menu_action(payload.value("plugin_key", ""), payload.value("action", ""));
-    } else if (command == "run_script_plugin") {
-        run_script_plugin(payload.value("plugin_key", ""), payload.value("capability_name", ""));
+    } else if (command == "run_script_plugin_capability") {
+        run_script_plugin_capability(payload.value("plugin_key", ""), payload.value("capability_name", ""));
     } else if (command == "open_terminal") {
         m_open_terminal_dlg_fn();
     } else if (command == "update_plugin") {
@@ -574,16 +567,16 @@ std::shared_ptr<PluginCapabilityInterface> PluginsDialog::get_capability(const s
     return PluginManager::instance().get_plugin_capability(plugin_key, capability_name, type, /*only_enabled=*/false);
 }
 
-void PluginsDialog::refresh_plugin_catalog_async(const wxString& title, const wxString& message, bool fetch_cloud)
+void PluginsDialog::refresh_plugin_metadata_async(const wxString& title, const wxString& message, bool fetch_cloud)
 {
-    run_with_dialog([fetch_cloud]() { refresh_plugin_catalog_blocking(fetch_cloud); }, [this]() { send_plugins(); }, title, message);
+    run_with_dialog([fetch_cloud]() { refresh_plugin_metadata_blocking(fetch_cloud); }, [this]() { send_plugins(); }, title, message);
 }
 
 void PluginsDialog::refresh_plugins()
 {
     BOOST_LOG_TRIVIAL(info) << "Refreshing plugins from Plugins dialog";
 
-    refresh_plugin_catalog_async(_L("Refreshing"), _L("Refreshing plugins data"), kFetchCloudCatalog);
+    refresh_plugin_metadata_async(_L("Refreshing"), _L("Refreshing plugins data"), kFetchCloudMeta);
 }
 
 void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
@@ -595,9 +588,6 @@ void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
 
     PluginDescriptor row_data;
     if (!get_descriptor(plugin_key, row_data)) {
-        // The row no longer maps to a catalog entry (the catalog changed under the UI).
-        // Toggling is a local action, so just re-render from the current catalog; a cloud
-        // fetch (or clearing rescan) adds nothing here.
         send_plugins();
         return;
     }
@@ -688,9 +678,6 @@ void PluginsDialog::toggle_plugin_capability(const std::string& plugin_key, Plug
 
     PluginDescriptor row_data;
     if (!get_descriptor(plugin_key, row_data)) {
-        // The row no longer maps to a catalog entry (the catalog changed under the UI).
-        // Toggling is a local action, so just re-render from the current catalog; a cloud
-        // fetch (or clearing rescan) adds nothing here.
         send_plugins();
         return;
     }
@@ -829,7 +816,7 @@ bool PluginsDialog::install_plugin_package(const std::string& package_path)
     BOOST_LOG_TRIVIAL(info) << "Plugin package installed successfully from " << package_path;
     const wxString installed_name = from_u8(plugin_descriptor.name.empty() ? package_file.filename().string() : plugin_descriptor.name);
     show_status(wxString::Format(_L("Installed \"%s\"."), installed_name), "success");
-    refresh_plugin_catalog_async(_L("Refreshing"), _L("Refreshing plugins data"), kUseCurrentCloudCatalog);
+    refresh_plugin_metadata_async(_L("Refreshing"), _L("Refreshing plugins data"), kUseCurrentCloudMeta);
     return true;
 }
 
@@ -883,9 +870,8 @@ wxString PluginsDialog::plugin_display_name(const std::string& plugin_key) const
     return from_u8(plugin_key);
 }
 
-void PluginsDialog::run_script_plugin(const std::string& plugin_key, const std::string& capability_name)
+void PluginsDialog::run_script_plugin_capability(const std::string& plugin_key, const std::string& capability_name)
 {
-    
     PluginManager& manager = PluginManager::instance();
 
     std::string error;
@@ -1028,11 +1014,11 @@ void PluginsDialog::delete_local_plugin(const PluginDescriptor& plugin)
 
     auto state = std::make_shared<PluginOperationState>();
     run_with_dialog(
-        [plugin_key = plugin.plugin_key, refresh_catalog = plugin.is_cloud_plugin(), state]() {
+        [plugin_key = plugin.plugin_key, should_refresh = plugin.is_cloud_plugin(), state]() {
             std::string error;
             const bool succeeded = PluginManager::instance().delete_plugin(plugin_key, error);
-            if (succeeded && refresh_catalog)
-                refresh_plugin_catalog_blocking(kFetchCloudCatalog);
+            if (succeeded && should_refresh)
+                refresh_plugin_metadata_blocking(kFetchCloudMeta);
             store_plugin_operation_result(state, succeeded, std::move(error));
         },
         [this, state, plugin_name]() {
@@ -1137,7 +1123,7 @@ void PluginsDialog::reinstall_cloud_plugin(const PluginDescriptor& plugin)
             return;
         }
 
-        manager.update_cloud_catalog(std::vector<PluginDescriptor>{as_cloud_only_descriptor(plugin)});
+        manager.update_cloud_metadata(std::vector<PluginDescriptor>{as_cloud_only_descriptor(plugin)});
     }
 
     if (!install_cloud_plugin(plugin_key, plugin.version, from_u8(plugin.name))) {
@@ -1195,10 +1181,6 @@ void PluginsDialog::delete_mine_local_and_cloud_plugin(const std::string& plugin
         return;
     }
 
-    // delete_mine_local_and_cloud_plugin already updated the in-memory catalog
-    // (finalize_cloud_plugin_removal removes the row and, when a local package existed,
-    // re-syncs the cloud list itself), so a UI refresh is sufficient here - an extra
-    // clearing rescan + cloud fetch would be redundant.
     send_plugins();
     show_status(wxString::Format(_L("Deleted \"%s\"."), plugin_name), "success");
 }

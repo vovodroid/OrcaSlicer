@@ -6,7 +6,6 @@
 #include "PluginManager.hpp"
 
 #include "PluginFsUtils.hpp"
-#include "PythonFileUtils.hpp"
 #include "PythonInterpreter.hpp"
 #include "PythonPluginBridge.hpp"
 #include "libslic3r/Utils.hpp"

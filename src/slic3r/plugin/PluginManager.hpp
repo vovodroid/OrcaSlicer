@@ -194,8 +194,8 @@ public:
     bool clear_plugin_error(const std::string& plugin_key);
 
     void fetch_plugins_from_cloud(std::vector<std::string>* out_not_found = nullptr, std::vector<std::string>* out_unauthorized = nullptr);
-    void update_cloud_catalog(const std::vector<PluginDescriptor>& cloud_list);
-    void clear_cloud_plugin_catalog();
+    void update_cloud_metadata(const std::vector<PluginDescriptor>& cloud_list);
+    void clear_cloud_plugin_metadata();
 
     bool download_and_install_cloud_plugin(const std::string& plugin_key, const std::string& version, std::string& error);
     bool subscribe_and_install_cloud_plugin(const std::string& plugin_key, std::string& error);

@@ -4775,7 +4775,7 @@ void GUI_App::request_user_logout(const std::string& provider/* = ORCA_CLOUD_PRO
             remove_user_presets();
             enable_user_preset_folder(false);
             Slic3r::PluginManager::instance().unload_cloud_plugins();
-            Slic3r::PluginManager::instance().clear_cloud_plugin_catalog();
+            Slic3r::PluginManager::instance().clear_cloud_plugin_metadata();
             Slic3r::PluginManager::instance().set_cloud_user("");
             preset_bundle->load_user_presets(DEFAULT_USER_FOLDER_NAME, ForwardCompatibilitySubstitutionRule::Enable);
             mainframe->update_side_preset_ui();

@@ -60,7 +60,7 @@ private:
     bool get_descriptor(const std::string& plugin_key, Slic3r::PluginDescriptor& descriptor) const;
     std::shared_ptr<PluginCapabilityInterface> get_capability(const std::string& plugin_key, PluginCapabilityType type, const std::string& capability_name) const;
 
-    void refresh_plugin_catalog_async(const wxString& title, const wxString& message, bool fetch_cloud);
+    void refresh_plugin_metadata_async(const wxString& title, const wxString& message, bool fetch_cloud);
     void refresh_plugins();
     void toggle_plugin(const std::string& plugin_key, bool enabled);
     void toggle_plugin_capability(const std::string& plugin_key, PluginCapabilityType type, const std::string& capability_name, bool enabled);
@@ -69,7 +69,7 @@ private:
     void install_plugin_from_file();
     bool install_plugin_package(const std::string& package_path);
     bool install_cloud_plugin(const std::string& uuid, const std::string& version, const wxString& name);
-    void run_script_plugin(const std::string& plugin_key, const std::string& capability_name);
+    void run_script_plugin_capability(const std::string& plugin_key, const std::string& capability_name);
     // Pushes a one-line result into the web footer status bar (level: "success" | "warn" | "error" | "info"),
     // used for every plugin/capability operation instead of a modal box so the dialog stays non-disruptive.
     void show_status(const wxString& message, const char* level);
@@ -234,9 +234,9 @@ private:
     PluginSortKey m_plugin_sort_key       = PluginSortKey::None;
     PluginSortOrder m_plugin_sort_order   = PluginSortOrder::Asc;
 
-    // Serializes run_script_plugin. With main-thread execution a plugin's orca.host.ui modal
+    // Serializes run_script_plugin_capability. With main-thread execution a plugin's orca.host.ui modal
     // (message/show_dialog) or the result message box pumps a nested event loop, which could
-    // re-dispatch the web "run_script_plugin" command and start a second, overlapping run.
+    // re-dispatch the web "run_script_plugin_capability" command and start a second, overlapping run.
     bool m_script_running = false;
 
     // Plugin whose asynchronous activation is in flight, awaited by resolve_pending_activation().

@@ -3,7 +3,7 @@
 #include <libslic3r/Utils.hpp>
 #include <slic3r/plugin/PluginLoader.hpp>
 #include <slic3r/plugin/PluginDescriptor.hpp>
-#include <slic3r/plugin/PythonFileUtils.hpp>
+#include <slic3r/plugin/PluginFsUtils.hpp>
 
 #include <boost/filesystem.hpp>
 

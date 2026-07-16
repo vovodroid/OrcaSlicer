@@ -2,7 +2,7 @@
 #include "SlicingPipelinePluginCapability.hpp"
 #include "slic3r/plugin/PyPluginTrampoline.hpp"
 #include "slic3r/plugin/PluginAuditManager.hpp"
-#include <filesystem>
+#include <boost/filesystem.hpp>
 
 namespace Slic3r {
 class PySlicingPipelinePluginCapabilityTrampoline : public PyPluginCommonTrampoline<SlicingPipelinePluginCapability> {
@@ -20,7 +20,7 @@ public:
                 // granted to the geometry hooks.
                 if (!ctx.gcode_path.empty())
                     ::Slic3r::PluginAuditManager::instance().add_scoped_allowed_root(
-                        std::filesystem::path(ctx.gcode_path).parent_path());
+                        boost::filesystem::path(ctx.gcode_path).parent_path());
             },
             PYBIND11_OVERRIDE_PURE,
             ExecutionResult, SlicingPipelinePluginCapability, execute, ctx);
