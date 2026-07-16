@@ -927,6 +927,7 @@ void AMSControl::UpdateAms(const std::string   &series_name,
                            std::vector<AMSinfo> ext_info,
                            DevExtderSystem           data,
                            std::string          dev_id,
+                           MachineObject*       obj,
                            bool                 is_reset,
                            bool                 test)
 {
@@ -993,6 +994,18 @@ void AMSControl::UpdateAms(const std::string   &series_name,
                         cans->show_sn_value(m_ams_model == AMSModel::AMS_LITE ? false : true);
                     }
                 }
+            }
+        }
+
+        // 2D mode (laser/cut) makes every spool view-only: show the read-only (eye) icon while the spool
+        // stays clickable to open the read-only filament dialog.
+        // Orca: gated on the device mode via MachineObject::is_fdm_type(); obj is null for callers that do
+        // not supply it, leaving spools editable.
+        const bool view_only = obj && !obj->is_fdm_type();
+        for (auto ams_item : m_ams_item_list) {
+            if (ams_item.second == nullptr) { continue; }
+            for (auto lib_it : ams_item.second->get_can_lib_list()) {
+                if (lib_it.second) { lib_it.second->set_view_only(view_only); }
             }
         }
 

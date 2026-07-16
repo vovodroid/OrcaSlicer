@@ -3,6 +3,7 @@
 #include "../BitmapCache.hpp"
 #include "../I18N.hpp"
 #include "../GUI_App.hpp"
+#include "../FilamentBitmapUtils.hpp"
 #include "../Utils/WxFontUtils.hpp"
 
 #include "slic3r/GUI/DeviceTab/uiAmsHumidityPopup.h"
@@ -1374,6 +1375,11 @@ void AMSLib::render_lite_lib(wxDC& dc)
         }
     }
 
+    // View-only mode forces the read-only (eye) icon even for third-party spools.
+    if (m_view_only) {
+        temp_bitmap_third = temp_bitmap_brand;
+    }
+
     dc.SetPen(wxPen(*wxTRANSPARENT_PEN));
     if (m_info.material_cols.size() > 1) {
         int left = FromDIP(10);
@@ -1382,7 +1388,7 @@ void AMSLib::render_lite_lib(wxDC& dc)
         if (m_info.ctype == 0) {
             for (int i = 0; i < m_info.material_cols.size() - 1; i++) {
                 auto rect = wxRect(left, FromDIP(10), libsize.x - FromDIP(18), libsize.y - FromDIP(18));
-                dc.GradientFillLinear(rect, m_info.material_cols[i], m_info.material_cols[i + 1], wxEAST);
+                fill_gradient_rect_east(dc, rect, m_info.material_cols[i], m_info.material_cols[i + 1]);
                 left += gwidth;
             }
         }
@@ -1463,6 +1469,11 @@ void AMSLib::render_generic_lib(wxDC &dc)
     if (tmp_lib_colour.Alpha() == 0) {
         temp_bitmap_third = m_bitmap_editable;
         temp_bitmap_brand = m_bitmap_readonly;
+    }
+
+    // View-only mode forces the read-only (eye) icon even for third-party spools.
+    if (m_view_only) {
+        temp_bitmap_third = temp_bitmap_brand;
     }
 
     dc.SetPen(wxPen(tmp_lib_colour, 1, wxPENSTYLE_SOLID));
@@ -1575,7 +1586,7 @@ void AMSLib::render_generic_lib(wxDC &dc)
                     }
 
                     auto rect = wxRect(left, height - curr_height, gwidth, curr_height);
-                    dc.GradientFillLinear(rect, m_info.material_cols[i], m_info.material_cols[i + 1], wxEAST);
+                    fill_gradient_rect_east(dc, rect, m_info.material_cols[i], m_info.material_cols[i + 1]);
                     left += gwidth;
                 }
             }
@@ -2749,7 +2760,7 @@ void AMSPreview::doRender(wxDC &dc)
                         }
 
                         auto rect = wxRect(fleft, (size.y - AMS_ITEM_CUBE_SIZE.y) / 2, gwidth, AMS_ITEM_CUBE_SIZE.y);
-                        dc.GradientFillLinear(rect, iter->material_cols[i], iter->material_cols[i + 1], wxEAST);
+                        fill_gradient_rect_east(dc, rect, iter->material_cols[i], iter->material_cols[i + 1]);
                         fleft += gwidth;
                     }
                 }
@@ -2821,7 +2832,7 @@ void AMSPreview::doRender(wxDC &dc)
                     }
 
                     auto rect = wxRect(fleft, (size.y - AMS_ITEM_CUBE_SIZE.y) / 2, gwidth, AMS_ITEM_CUBE_SIZE.y);
-                    dc.GradientFillLinear(rect, iter.material_cols[i], iter.material_cols[i + 1], wxEAST);
+                    fill_gradient_rect_east(dc, rect, iter.material_cols[i], iter.material_cols[i + 1]);
                     fleft += gwidth;
                 }
             }
