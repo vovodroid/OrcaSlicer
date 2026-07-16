@@ -22,6 +22,7 @@
 #include "DeviceCore/DevDefs.h"
 #include "DeviceCore/DevConfigUtil.h"
 #include "DeviceCore/DevFirmware.h"
+#include "DeviceCore/DevCalib.h" // Orca: adopt DeviceCore split (defines DevCalib, CalibStatus, ManualPaCaliMethod)
 #include "DeviceErrorDialog.hpp"
 
 #include <wx/object.h>
@@ -63,11 +64,7 @@ class DeviceErrorDialog; // Previous definitions
 }
 
 class NetworkAgent;
-enum ManualPaCaliMethod {
-    PA_LINE = 0,
-    PA_PATTERN,
-};
-
+// Orca: ManualPaCaliMethod now provided by DeviceCore/DevCalib.h (enum class)
 
 #define UpgradeNoError          0
 #define UpgradeDownloadFailed   -1
@@ -78,7 +75,9 @@ enum ManualPaCaliMethod {
 // Previous definitions
 class DevAms;
 class DevAmsTray;
+class DevAxis;      // Orca: adopt DeviceCore split
 class DevBed;
+class DevChamber;   // Orca: adopt DeviceCore split
 class DevConfig;
 class DevCtrl;
 class DevExtensionTool;
@@ -92,7 +91,9 @@ class DevLamp;
 class DevNozzleSystem;
 class DevNozzleMappingCtrl;
 class DeviceManager;
+class DevStatus;    // Orca: adopt DeviceCore split
 class DevStorage;
+class DevUpgrade;   // Orca: adopt DeviceCore split
 struct DevPrintTaskRatingInfo;
 
 
@@ -124,6 +125,15 @@ private:
     DevBed *          m_bed;
     DevStorage*       m_storage;
 
+    /* Orca: adopt DeviceCore split — axis/calib/chamber/status/upgrade modules.
+       Provide the reference-shape surface for later resync clusters; MachineObject's inline
+       handling of these concerns stays authoritative during the transition (removed in cluster 8). */
+    std::shared_ptr<DevAxis>    m_axis;
+    std::shared_ptr<DevChamber> m_chamber;
+    DevCalib*                   m_calib{ nullptr };
+    DevStatus*                  m_status{ nullptr };
+    std::shared_ptr<DevUpgrade> m_upgrade;
+
     /*Ctrl*/
     DevCtrl* m_ctrl;
 
@@ -146,6 +156,14 @@ public:
     ~MachineObject();
 
     void set_agent(NetworkAgent* agent) { m_agent = agent; }
+    NetworkAgent* get_agent() const { return m_agent; } // Orca: needed by DeviceCore modules (DevAxisCtrl)
+
+    // Orca: adopt DeviceCore split — reference-shape accessors for the new modules
+    std::shared_ptr<DevAxis>    GetAxis() const { return m_axis; }
+    std::shared_ptr<DevChamber> GetChamber() const { return m_chamber; }
+    DevCalib*                   GetCalib() const { return m_calib; }
+    DevStatus*                  GetStatus() const { return m_status; }
+    std::weak_ptr<DevUpgrade>   GetUpgrade() const { return m_upgrade; }
 
 public:
     enum ActiveState {

@@ -44,6 +44,12 @@
 #include "DeviceCore/DevManager.h"
 #include "DeviceCore/DevUtil.h"
 
+// Orca: adopt DeviceCore split — axis/calib/chamber/status/upgrade modules
+#include "DeviceCore/DevAxis.h"
+#include "DeviceCore/DevChamber.h"
+#include "DeviceCore/DevStatus.h"
+#include "DeviceCore/DevUpgrade.h"
+
 
 #define CALI_DEBUG
 #define MINUTE_30 1800000    //ms
@@ -578,6 +584,13 @@ MachineObject::MachineObject(DeviceManager* manager, NetworkAgent* agent, std::s
         m_print_options = new DevPrintOptions(this);
 
         m_nozzle_mapping_ptr = std::make_shared<DevNozzleMappingCtrl>(this);
+
+        // Orca: adopt DeviceCore split — axis/calib/chamber/status/upgrade modules
+        m_axis    = DevAxis::Create(this);
+        m_chamber = DevChamber::Create(this);
+        m_upgrade = DevUpgrade::Create(this);
+        m_status  = new DevStatus(this);
+        m_calib   = new DevCalib(this);
     }
 }
 
@@ -630,6 +643,13 @@ MachineObject::~MachineObject()
 
         delete m_print_options;
         m_print_options = nullptr;
+
+        // Orca: adopt DeviceCore split
+        delete m_calib;
+        m_calib = nullptr;
+
+        delete m_status;
+        m_status = nullptr;
     }
 }
 
@@ -3003,6 +3023,7 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
 
                 //supported function
                 m_config->ParseConfig(jj);
+                m_status->ParseStatus(jj); // Orca: adopt DeviceCore split — populate DevStatus module
 
                 if (jj.contains("support_build_plate_marker_detect")) {
                     if (jj["support_build_plate_marker_detect"].is_boolean()) {
@@ -3426,6 +3447,11 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
 #pragma region status
                     if (!key_field_only) {
                         /* temperature */
+
+                        // Orca: adopt DeviceCore split — populate DevAxis/DevChamber modules
+                        // alongside the inline handling (side-effect-free; inline stays authoritative)
+                        m_axis->ParseAxis(jj);
+                        m_chamber->ParseChamber(jj);
 
                         DevBed::ParseV1_0(jj,m_bed);
 
