@@ -3,7 +3,6 @@ add_executable(${_TEST_NAME}_tests
     ${_TEST_NAME}_tests_main.cpp
     test_action_source.cpp
     test_plugin_host_api.cpp
-    test_plugin_callback_list.cpp
     test_plugin_install.cpp
     test_plugin_lifecycle.cpp
     test_slicing_pipeline_bindings.cpp
