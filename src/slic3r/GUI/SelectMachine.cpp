@@ -14,6 +14,7 @@
 #include "Widgets/StaticBox.hpp"
 #include "Widgets/CheckBox.hpp"
 #include "Widgets/Label.hpp"
+#include "Widgets/RadioBox.hpp"
 #include "ConnectPrinter.hpp"
 #include "Jobs/BoostThreadWorker.hpp"
 #include "Jobs/PlaterWorker.hpp"
@@ -543,6 +544,29 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
 
 
     auto option_timelapse = new PrintOption(m_options_other, _L("Timelapse"), wxEmptyString, ops_no_auto, "timelapse");
+
+    // timelapse storage location folder button (shown only when is_support_internal_timelapse)
+    m_timelapse_folder_btn = new ScalableButton(m_options_other, wxID_ANY, "folder-closed", wxEmptyString,
+        wxDefaultSize, wxDefaultPosition, wxBU_EXACTFIT | wxNO_BORDER, true);
+    m_timelapse_folder_btn->SetBackgroundColour(*wxWHITE);
+    m_timelapse_folder_btn->SetToolTip(_L("Select timelapse storage location"));
+    m_timelapse_folder_btn->Hide();
+    m_timelapse_folder_btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        show_timelapse_folder_popup();
+    });
+    m_timelapse_folder_btn->Bind(wxEVT_ENTER_WINDOW, [this](wxMouseEvent& e) {
+        // hover: only switch if popup is not open (popup open = active state)
+        if (!m_timelapse_storage_popup || !m_timelapse_storage_popup->IsShown())
+            m_timelapse_folder_btn->SetBitmap(create_scaled_bitmap("folder-closed-hover", m_timelapse_folder_btn, 16));
+        e.Skip();
+    });
+    m_timelapse_folder_btn->Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent& e) {
+        // restore normal (popup open state is handled separately)
+        if (!m_timelapse_storage_popup || !m_timelapse_storage_popup->IsShown())
+            update_timelapse_folder_btn_icon();
+        e.Skip();
+    });
+    option_timelapse->insert_extra_widget(m_timelapse_folder_btn);
 
         auto option_auto_bed_level = new PrintOption(
         m_options_other, _L("Auto Bed Leveling"),
@@ -2657,6 +2681,16 @@ void SelectMachineDialog::update_option_opts(MachineObject *obj)
 
     /*timelapse*/
     m_checkbox_list["timelapse"]->Show();
+    if (obj->is_support_internal_timelapse) {
+        m_timelapse_folder_btn->Show();
+        if (m_timelapse_storage.empty()) {
+            m_timelapse_storage = "internal";
+        }
+        update_timelapse_folder_btn_icon();
+    } else {
+        m_timelapse_folder_btn->Hide();
+        m_timelapse_storage.clear();
+    }
 
     /*bed_leveling*/
     if (obj->is_support_bed_leveling == 2) {
@@ -2790,6 +2824,99 @@ void SelectMachineDialog::Enable_Auto_Refill(bool enable)
         m_ams_backup_tip->SetForegroundColour(wxColour(0x90, 0x90, 0x90));
     }
     m_ams_backup_tip->Refresh();
+}
+
+void SelectMachineDialog::update_timelapse_folder_btn_icon()
+{
+    if (!m_timelapse_folder_btn) return;
+    // always restore to normal (grey) - active state is managed by popup open/close
+    m_timelapse_folder_btn->SetBitmap(create_scaled_bitmap("folder-closed", m_timelapse_folder_btn, 16));
+    m_timelapse_folder_btn->Refresh();
+}
+
+void SelectMachineDialog::show_timelapse_folder_popup()
+{
+    if (m_timelapse_storage_popup && m_timelapse_storage_popup->IsShown()) {
+        m_timelapse_storage_popup->Dismiss();
+        return;
+    }
+
+    // build popup with rounded corners + light border
+    m_timelapse_storage_popup = new PopupWindow(this, wxBORDER_NONE);
+    m_timelapse_storage_popup->SetBackgroundColour(wxColour(0xF0, 0xF0, 0xF0));
+    m_timelapse_storage_popup->Bind(wxEVT_PAINT, [this](wxPaintEvent&) {
+        wxPaintDC dc(m_timelapse_storage_popup);
+        auto size = m_timelapse_storage_popup->GetSize();
+        dc.SetPen(wxPen(wxColour(0xCE, 0xCE, 0xCE)));
+        dc.SetBrush(wxBrush(wxColour(0xF0, 0xF0, 0xF0)));
+        dc.DrawRoundedRectangle(0, 0, size.x, size.y, FromDIP(8));
+    });
+
+    auto* panel = new wxPanel(m_timelapse_storage_popup, wxID_ANY);
+    panel->SetBackgroundColour(wxColour(0xF0, 0xF0, 0xF0));
+
+    // horizontal layout: [ Internal]  [External]
+    auto* sizer = new wxBoxSizer(wxHORIZONTAL);
+
+    DeviceManager* dev_popup = wxGetApp().getDeviceManager();
+    MachineObject* obj_popup = dev_popup ? dev_popup->get_selected_machine() : nullptr;
+    bool has_sdcard = obj_popup && obj_popup->GetStorage()->get_sdcard_state() == DevStorage::SdcardState::HAS_SDCARD_NORMAL;
+    // if external was previously selected but sdcard is now absent, fall back to internal
+    if (!has_sdcard && m_timelapse_storage == "external")
+        m_timelapse_storage = "internal";
+
+    // Reuse the themed RadioBox widget (radio_on / radio_off bitmaps) instead of the
+    // native wxRadioButton: the selected state shows a clear filled dot with good
+    // contrast on every platform, matching the storage selector in SendToPrinter.
+    auto make_item = [&](const wxString& label, const std::string& val, bool enabled) {
+        auto* radio = new RadioBox(panel);
+        radio->SetValue(m_timelapse_storage == val);
+        if (enabled) radio->Enable(); else radio->Disable();
+
+        auto* text = new Label(panel, Label::Body_14, label);
+        text->SetForegroundColour(enabled ? wxColour(0x5C, 0x5C, 0x5C) : wxColour(0xAC, 0xAC, 0xAC));
+
+        if (enabled) {
+            auto on_select = [this, val](wxMouseEvent&) {
+                m_timelapse_storage = val;
+                update_timelapse_folder_btn_icon();
+                if (m_timelapse_storage_popup) m_timelapse_storage_popup->Dismiss();
+            };
+            radio->Bind(wxEVT_LEFT_DOWN, on_select);
+            text->Bind(wxEVT_LEFT_DOWN, on_select);
+        }
+
+        sizer->Add(radio, 0, wxALIGN_CENTER_VERTICAL);
+        sizer->Add(text, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(6));
+    };
+
+    make_item(_L("Internal"), "internal", true);
+    sizer->AddSpacer(FromDIP(16));
+    make_item(_L("External"), "external", has_sdcard);
+
+    panel->SetSizer(sizer);
+    panel->Fit();
+
+    auto* outer = new wxBoxSizer(wxVERTICAL);
+    outer->Add(panel, 0, wxALL, FromDIP(10));
+    m_timelapse_storage_popup->SetSizer(outer);
+    m_timelapse_storage_popup->Fit();
+
+    // restore normal icon when popup is dismissed
+    m_timelapse_storage_popup->Bind(wxEVT_SHOW, [this](wxShowEvent& e) {
+        if (!e.IsShown())
+            update_timelapse_folder_btn_icon();
+        e.Skip();
+    });
+
+    wxPoint pos = m_timelapse_folder_btn->ClientToScreen(wxPoint(0, m_timelapse_folder_btn->GetSize().GetHeight()));
+    m_timelapse_storage_popup->Position(pos, wxSize(0, 0));
+
+    // switch to active icon before showing popup
+    m_timelapse_folder_btn->SetBitmap(create_scaled_bitmap("folder-closed-active", m_timelapse_folder_btn, 16));
+    m_timelapse_folder_btn->Refresh();
+
+    m_timelapse_storage_popup->Popup();
 }
 
 void SelectMachineDialog::on_send_print()
@@ -2963,6 +3090,10 @@ void SelectMachineDialog::on_send_print()
     int pa_manual_mode = -1;
     if (obj_->is_support_pa_mode) {
         pa_manual_mode = (m_checkbox_list["pa_value"]->getValue() == "on") ? 0 : 1;
+    }
+
+    if (timelapse_option && obj_->is_support_internal_timelapse && !m_timelapse_storage.empty()) {
+        m_print_job->task_timelapse_use_internal = (m_timelapse_storage == "internal");
     }
 
     m_print_job->set_print_config(
@@ -5772,6 +5903,18 @@ void PrintOption::msw_rescale()
     m_printoption_item->msw_rescale();
     m_printoption_tips->msw_rescale();
     update_title_display();
+}
+
+void PrintOption::insert_extra_widget(wxWindow* widget)
+{
+    // insert after title (index 0), before tips (index 1)
+    // sizer layout: [title][tips][stretch][item]
+    // after insert:  [title][widget][tips][stretch][item]
+    wxSizer* sizer = GetSizer();
+    if (!sizer || !widget) return;
+    widget->Reparent(this);
+    sizer->Insert(1, widget, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(4));
+    Layout();
 }
 
 PrintOptionItem::PrintOptionItem(wxWindow* parent, std::vector<POItem> ops, std::string param)

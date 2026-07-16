@@ -228,6 +228,7 @@ public:
     void        update_options(std::vector<POItem> ops, const wxString &tips);
     void        update_tooltip(const wxString &tips);
     void        update_title_display();
+    void        insert_extra_widget(wxWindow* widget);
 
     void  msw_rescale();
 
@@ -334,6 +335,11 @@ private:
     Slic3r::PlateDataPtrs               m_required_data_plate_data_list;
     std::string                         m_required_data_file_name;
     std::string                         m_required_data_file_path;
+
+    // timelapse internal storage selection
+    std::string                         m_timelapse_storage;   // "internal" or "external"; empty = unsupported
+    ScalableButton*                     m_timelapse_folder_btn { nullptr };
+    PopupWindow*                        m_timelapse_storage_popup { nullptr };
 
     std::vector<POItem> ops_auto;
     std::vector<POItem> ops_no_auto;
@@ -571,6 +577,10 @@ private:
     /* update option area*/
     void update_option_opts(MachineObject *obj);
     void update_options_layout();
+
+    /* timelapse storage-location selector */
+    void update_timelapse_folder_btn_icon();
+    void show_timelapse_folder_popup();
 
     // save and restore from config
     void load_option_vals(MachineObject* obj);

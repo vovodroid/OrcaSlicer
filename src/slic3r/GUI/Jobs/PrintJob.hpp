@@ -80,6 +80,7 @@ public:
     bool        task_flow_cali;
     bool        task_vibration_cali;
     bool        task_record_timelapse;
+    bool        task_timelapse_use_internal { false };
     bool        task_layer_inspect;
     bool        cloud_print_only { false };
     bool        has_sdcard { false };
