@@ -101,7 +101,7 @@ public:
     bool dirty() const;
 
     static nlohmann::json capabilities_payload(const std::vector<PluginCapabilityId>& caps);
-    static nlohmann::json get_config_response(const PluginCapabilityId& id);tom UI.
+    static nlohmann::json get_config_response(const PluginCapabilityId& id);
     static nlohmann::json save_config_response(const PluginCapabilityId& id, const nlohmann::json& config);
     static nlohmann::json restore_config_response(const PluginCapabilityId& id);
 
