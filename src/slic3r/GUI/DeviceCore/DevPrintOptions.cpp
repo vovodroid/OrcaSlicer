@@ -39,6 +39,31 @@ void DevPrintOptionsParser::Parse(DevPrintOptions* opts, const nlohmann::json& p
             const std::string& cfg = print_json["cfg"].get<std::string>();
             opts->m_speed_level = (DevPrintingSpeedLevel)DevUtil::get_flag_bits(cfg, 8, 3);
         }
+
+        // Orca: xcam.cfg is an integer bitfield (distinct from the top-level cfg string) that
+        //       carries the plate-align/FOD/displacement current values.
+        if (print_json.contains("xcam") && print_json["xcam"].contains("cfg")) {
+            int xcam_cfg = print_json["xcam"]["cfg"].get<int>();
+            if (time(nullptr) - opts->m_buildplate_align_detection.detect_hold_start > HOLD_TIME_3SEC)
+                opts->m_buildplate_align_detection.current_detect_value = DevUtil::get_flag_bits(xcam_cfg, 20);
+            if (time(nullptr) - opts->m_fod_check_detection.detect_hold_start > HOLD_TIME_3SEC)
+                opts->m_fod_check_detection.current_detect_value = DevUtil::get_flag_bits(xcam_cfg, 21);
+            if (time(nullptr) - opts->m_displacement_detection.detect_hold_start > HOLD_TIME_3SEC)
+                opts->m_displacement_detection.current_detect_value = DevUtil::get_flag_bits(xcam_cfg, 22);
+        }
+
+        // Orca: fun2 support bits (distinct from the top-level cfg/fun fields). ORCA's DevUtil has no
+        //       no-border extractor, so the MachineObject helper is used here instead.
+        if (print_json.contains("fun2") && print_json["fun2"].is_string()) {
+            std::string fun2 = print_json["fun2"].get<std::string>();
+            if (!fun2.empty()) {
+                opts->m_buildplate_align_detection.is_support_detect  = opts->m_obj->get_flag_bits_no_border(fun2, 2) == 1;
+                opts->m_purify_air_at_print_end.is_support_detect     = opts->m_obj->get_flag_bits_no_border(fun2, 4);
+                opts->m_fod_check_detection.is_support_detect         = opts->m_obj->get_flag_bits_no_border(fun2, 13);
+                opts->m_displacement_detection.is_support_detect      = opts->m_obj->get_flag_bits_no_border(fun2, 14);
+                opts->m_smart_nozzle_blob_detection.is_support_detect = opts->m_obj->get_flag_bits_no_border(fun2, 15);
+            }
+        }
     }
     catch (const std::exception& e)
     {
@@ -69,18 +94,6 @@ void DevPrintOptionsParser::ParseDetectionV1_0(DevPrintOptions *opts, MachineObj
                 }
             }
 
-            // Orca: xcam.cfg is an integer bitfield (distinct from the top-level cfg string) that
-            //       carries the plate-align/FOD/displacement current values.
-            if (print_json["xcam"].contains("cfg")) {
-                int xcam_cfg = print_json["xcam"]["cfg"].get<int>();
-                if (time(nullptr) - opts->m_buildplate_align_detection.detect_hold_start > HOLD_TIME_3SEC)
-                    opts->m_buildplate_align_detection.current_detect_value = DevUtil::get_flag_bits(xcam_cfg, 20);
-                if (time(nullptr) - opts->m_fod_check_detection.detect_hold_start > HOLD_TIME_3SEC)
-                    opts->m_fod_check_detection.current_detect_value = DevUtil::get_flag_bits(xcam_cfg, 21);
-                if (time(nullptr) - opts->m_displacement_detection.detect_hold_start > HOLD_TIME_3SEC)
-                    opts->m_displacement_detection.current_detect_value = DevUtil::get_flag_bits(xcam_cfg, 22);
-            }
-
             if (time(nullptr) - opts->m_first_layer_detection.detect_hold_start > HOLD_TIME_3SEC) {
                 if (print_json["xcam"].contains("first_layer_inspector")) { opts->m_first_layer_detection.current_detect_value = print_json["xcam"]["first_layer_inspector"].get<bool>(); }
             }
@@ -96,19 +109,6 @@ void DevPrintOptionsParser::ParseDetectionV1_0(DevPrintOptions *opts, MachineObj
         }
     } catch (...) {
         ;
-    }
-
-    // Orca: fun2 support bits (distinct from the top-level cfg/fun fields). ORCA's DevUtil has no
-    //       no-border extractor, so the MachineObject helper is used here instead.
-    if (print_json.contains("fun2") && print_json["fun2"].is_string()) {
-        std::string fun2 = print_json["fun2"].get<std::string>();
-        if (!fun2.empty()) {
-            opts->m_buildplate_align_detection.is_support_detect  = obj->get_flag_bits_no_border(fun2, 2) == 1;
-            opts->m_purify_air_at_print_end.is_support_detect     = obj->get_flag_bits_no_border(fun2, 4);
-            opts->m_fod_check_detection.is_support_detect         = obj->get_flag_bits_no_border(fun2, 13);
-            opts->m_displacement_detection.is_support_detect      = obj->get_flag_bits_no_border(fun2, 14);
-            opts->m_smart_nozzle_blob_detection.is_support_detect = obj->get_flag_bits_no_border(fun2, 15);
-        }
     }
 }
 
