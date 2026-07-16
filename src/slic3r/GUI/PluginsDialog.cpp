@@ -481,6 +481,19 @@ void PluginsDialog::on_script_message(const nlohmann::json& payload)
     if (handle_common_script_command(payload))
         return;
 
+    // Defer command handling out of the webview script-message callback: GTK and macOS
+    // deliver it synchronously inside the native webview callback (see ui_create_window
+    // in PluginHostUi.cpp), and window work on that stack is the crash class fixed in
+    // b779a7bfed/f2ccbfc8b5. Deferring at this single entry point keeps every command
+    // handler, current and future, off that stack by construction.
+    wxGetApp().CallAfter([this, alive = m_alive, payload]() {
+        if (alive->load(std::memory_order_acquire))
+            handle_web_command(payload);
+    });
+}
+
+void PluginsDialog::handle_web_command(const nlohmann::json& payload)
+{
     const std::string command = payload.value("command", "");
     if (command == "request_plugins") {
         send_plugins();
@@ -730,12 +743,24 @@ void PluginsDialog::handle_plugin_menu_action(const std::string& plugin_key, con
     }
 }
 
+void PluginsDialog::restore_z_order()
+{
+    // Deferred so it runs on a clean stack after the modal has fully torn down; the
+    // alive guard covers the dialog being destroyed while the CallAfter is queued.
+    wxGetApp().CallAfter([this, alive = m_alive]() {
+        if (alive->load(std::memory_order_acquire) && IsShown())
+            Raise();
+    });
+}
+
 void PluginsDialog::install_plugin_from_file()
 {
     wxFileDialog dialog(this, _L("Select plugin package"), wxEmptyString, wxEmptyString, _L("Plugin files (*.py;*.whl)|*.py;*.whl"),
                         wxFD_OPEN | wxFD_FILE_MUST_EXIST);
 
-    if (dialog.ShowModal() != wxID_OK)
+    const int rc = dialog.ShowModal();
+    restore_z_order();
+    if (rc != wxID_OK)
         return;
 
     if (!install_plugin_package(dialog.GetPath().ToUTF8().data())) {
@@ -788,7 +813,9 @@ bool PluginsDialog::install_plugin_package(const std::string& package_path)
                              plugin_name),
             kOverwritePluginTitle, wxOK | wxCANCEL | wxCANCEL_DEFAULT | wxICON_WARNING);
         dialog.SetOKCancelLabels(_L("Overwrite"), _L("Cancel"));
-        if (dialog.ShowModal() != wxID_OK) {
+        const int overwrite_rc = dialog.ShowModal();
+        restore_z_order();
+        if (overwrite_rc != wxID_OK) {
             BOOST_LOG_TRIVIAL(info) << "Plugin package installation cancelled before overwrite. package=" << package_path
                                     << " plugin=" << plugin_descriptor.name;
             return false;
@@ -1009,6 +1036,7 @@ void PluginsDialog::delete_local_plugin(const PluginDescriptor& plugin)
     const wxString plugin_name = from_u8(plugin.name);
     const int rc = wxMessageBox(wxString::Format(_L("Delete plugin \"%s\"?\n\nThis permanently removes the plugin folder."), plugin_name),
                                 kDeletePluginTitle, wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this);
+    restore_z_order();
     if (rc != wxYES)
         return;
 
@@ -1041,6 +1069,7 @@ void PluginsDialog::unsubscribe_cloud_plugin(const PluginDescriptor& plugin)
         wxString::Format(_L("Unsubscribe plugin \"%s\"?\n\nThis will stop tracking the plugin and delete any local plugin files."),
                          plugin_name),
         kUnsubscribeTitle, wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this);
+    restore_z_order();
     if (rc != wxYES)
         return;
 
@@ -1172,6 +1201,7 @@ void PluginsDialog::delete_mine_local_and_cloud_plugin(const std::string& plugin
                             "deletes the plugin from the cloud. This action cannot be undone."),
                          plugin_name),
         kDeletePluginTitle, wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this);
+    restore_z_order();
     if (rc != wxYES)
         return;
 

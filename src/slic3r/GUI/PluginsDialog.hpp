@@ -52,6 +52,13 @@ private:
     void open_plugin_on_cloud(const std::string& sharing_token);
     void open_plugin_hub();
     void on_script_message(const nlohmann::json& payload) override;
+    // Runs one web command on a clean main-loop stack; see on_script_message.
+    void handle_web_command(const nlohmann::json& payload);
+    // Re-raises this dialog after a transient modal it opened (file dialog, message box,
+    // progress dialog). Native macOS panels end by re-activating the app's main window
+    // (the mainframe) instead of this webview-hosting dialog, burying it; wx only
+    // compensates for generic wxDialog modals (wxDialog::EndModal raises the parent).
+    void restore_z_order();
 
     void send_plugins();
     void set_plugin_sort(const std::string& sort_key, const std::string& sort_order);
@@ -108,7 +115,8 @@ private:
 
         timer->Start(100);
 
-        std::thread([alive,
+        std::thread([this,
+                     alive,
                      progress,
                      timer,
                      run       = std::forward<Run>(run),
@@ -125,7 +133,8 @@ private:
             if (wxTheApp == nullptr)
                 return;
 
-            wxTheApp->CallAfter([alive,
+            wxTheApp->CallAfter([this,
+                                 alive,
                                  progress,
                                  timer,
                                  on_finish = std::move(on_finish),
@@ -135,6 +144,7 @@ private:
 
                 if (alive->load(std::memory_order_acquire)) {
                     progress->Destroy();
+                    restore_z_order();
                     on_finish();
                 } else if (finish_after_dialog_destroyed) {
                     on_finish();
