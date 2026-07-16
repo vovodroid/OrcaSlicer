@@ -374,15 +374,19 @@ std::string DevPrinterConfigUtil::get_toolhead_display_name(
         }
     }
 
-    // Fallback: all dual-extruder printers should have tool_head_display_names configured.
-    // This is a safety net only — return a generic name.
+    // Orca: models that ship no tool_head_display_names (e.g. H2D/H2S) must still get distinct
+    // per-extruder labels, so fall back to the previous programmatic Left/Right construction.
+    // Engages only when the config lookup above yields nothing, so models that ship the key
+    // behave exactly like the reference.
     if (result.empty()) {
-        static const std::map<ToolHeadComponent, std::string> fallback_names = {
-            { ToolHeadComponent::Extruder, "Extruder" },
-            { ToolHeadComponent::Nozzle,   "Nozzle" },
-            { ToolHeadComponent::Hotend,   "Hotend" }
-        };
-        result = fallback_names.at(component);
+        const std::string side = ext_id == DEPUTY_EXTRUDER_ID ? "Left" : "Right";
+        const std::string component_name = component == ToolHeadComponent::Extruder ? "Extruder" :
+                                           component == ToolHeadComponent::Hotend ? "Hotend" : "Nozzle";
+        result = side + " " + component_name;
+        if (name_case == ToolHeadNameCase::SentenceCase && result.size() > side.size() + 1)
+            result[side.size() + 1] = static_cast<char>(std::tolower(static_cast<unsigned char>(result[side.size() + 1])));
+        else if (name_case == ToolHeadNameCase::LowerCase)
+            std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     }
 
     // short_name: return only the role prefix (e.g. "Main" from "Main Nozzle")
