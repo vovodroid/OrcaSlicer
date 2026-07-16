@@ -30,6 +30,19 @@ if (WIN32)
         COMMENT "Copying Python runtime for slic3rutils plugin host API tests"
         VERBATIM
     )
+elseif (APPLE)
+    target_link_options(${_TEST_NAME}_tests PRIVATE
+        "LINKER:-rpath,@executable_path/python/lib")
+
+    add_custom_command(TARGET ${_TEST_NAME}_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
+            "$<TARGET_FILE_DIR:${_TEST_NAME}_tests>/python"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_PREFIX_PATH}/libpython"
+            "$<TARGET_FILE_DIR:${_TEST_NAME}_tests>/python"
+        COMMENT "Copying Python runtime for macOS plugin host API tests"
+        VERBATIM
+    )
 endif()
 
 orcaslicer_discover_tests(${_TEST_NAME}_tests)
