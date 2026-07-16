@@ -1858,10 +1858,17 @@ int MachineObject::command_axis_control(std::string axis, double unit, double in
 {
     if (m_support_mqtt_axis_control)
     {
+        int dir = input_val > 0 ? 1 : -1;
+        // i3-arch printers move the bed for Y/Z, so the on-screen direction is
+        // reversed — same negation the g-code fallback below applies.
+        if (!is_core_xy() && (axis.compare("Y") == 0 || axis.compare("Z") == 0)) {
+            dir = -dir;
+        }
+
         json j;
         j["print"]["command"] = "xyz_ctrl";
         j["print"]["axis"] = axis;
-        j["print"]["dir"] = input_val > 0 ? 1 : -1;
+        j["print"]["dir"] = dir;
         j["print"]["mode"] = (std::abs(input_val) >= 10) ? 1 : 0;
         j["print"]["sequence_id"] = std::to_string(MachineObject::m_sequence_id++);
         return this->publish_json(j);
