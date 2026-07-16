@@ -48,9 +48,6 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
     py::class_<SlicingPipelineContext>(slicing, "SlicingPipelineContext")
         .def_readonly("orca_version", &SlicingPipelineContext::orca_version)
         .def_readonly("step", &SlicingPipelineContext::step)
-        .def_readonly("params", &SlicingPipelineContext::params,
-            "read-only dict of this plugin's [tool.orcaslicer.plugin.settings] values "
-            "(string->string). Parse the values you need, e.g. float(ctx.params['rate']).")
         .def_readonly("gcode_path", &SlicingPipelineContext::gcode_path,
             "Path to the working G-code file, set ONLY at Step.psGCodePostProcess. Edit it in "
             "place; empty at every other step.")

@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <chrono>
 #include <mutex>
+#include <slic3r/plugin/PluginConfig.hpp>
 #include <slic3r/plugin/PluginLoader.hpp>
 #include <slic3r/plugin/PythonPluginInterface.hpp>
 #include <slic3r/plugin/pluginTypes/script/ScriptPluginCapability.hpp>
@@ -555,17 +556,6 @@ std::shared_ptr<PluginCapabilityInterface> PluginManager::get_plugin_capability(
     return nullptr;
 }
 
-std::map<std::string, std::string> PluginManager::get_plugin_settings(const std::string& plugin_key) const
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    const Plugin* plugin = find_plugin_locked(plugin_key);
-    if (plugin == nullptr || !plugin->is_loaded())
-        return {};
-
-    return plugin->descriptor.settings;
-}
-
 // ── Lifecycle ───────────────────────────────────────────────────────────────────────────────
 
 bool PluginManager::is_plugin_loaded(const std::string& plugin_key) const
@@ -856,6 +846,16 @@ void PluginManager::load_plugin_impl(const std::string& plugin_key, bool skip_de
             return; // cancelled: nothing materialized survives, and no error is recorded
         fail(std::move(error));
         return;
+    }
+
+    for (const auto& cap : plugin.capabilities) {
+        auto config = cap->get_default_config();
+        if (config.empty())
+            continue;
+        if (m_config.has_config(plugin_key, cap->name()))
+            continue;
+
+        m_config.save_config(plugin_key, cap->name(), plugin.descriptor.installed_version, config);
     }
 
     bool committed = false;

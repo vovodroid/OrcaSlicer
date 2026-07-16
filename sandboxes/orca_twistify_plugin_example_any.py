@@ -7,13 +7,6 @@
 # author = "OrcaSlicer"
 # version = "0.02"
 # type = "slicing-pipeline"
-#
-# [tool.orcaslicer.plugin.settings]
-# twist_deg_per_mm = "1.0"
-# taper_per_mm = "0.0"
-# wobble_ampl_mm = "0.0"
-# wobble_period_mm = "20.0"
-# min_scale = "0.05"
 # ///
 """Twistify -- twist/taper/wobble any model at slice time.
 
@@ -36,7 +29,7 @@ settings table above). The first object layer is untouched (z_rel = 0), so bed
 adhesion is unaffected.
 """
 import math
-
+import json
 import orca
 
 _DEFAULTS = {
@@ -48,9 +41,9 @@ _DEFAULTS = {
 }
 
 
-def _params(ctx):
+def _params(self):
     try:
-        src = dict(ctx.params)
+        src = json.loads(self.get_config())
     except (AttributeError, TypeError):
         src = {}
     out = {}
@@ -79,12 +72,15 @@ def _layer_params(z_rel, mm_to_scaled, p):
 class Twistify(orca.slicing.SlicingPipelineCapabilityBase):
     def get_name(self):
         return "Twistify"
+    
+    def get_default_config(self):
+        return _DEFAULTS
 
     def execute(self, ctx):
         if ctx.step != orca.slicing.Step.posSlice or ctx.object is None:
             return orca.ExecutionResult.success()
 
-        p = _params(ctx)
+        p = _params(self)
         if _is_identity(p):
             return orca.ExecutionResult.success("Twistify: identity parameters, nothing to do")
 

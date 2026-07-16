@@ -187,7 +187,6 @@ bool parse_pep723_toml(const std::string& toml_content,
                        std::string& out_description,
                        std::string& out_author,
                        std::string& out_version,
-                       std::map<std::string, std::string>& out_settings,
                        std::string& error)
 {
     out_deps.clear();
@@ -196,7 +195,6 @@ bool parse_pep723_toml(const std::string& toml_content,
     out_description.clear();
     out_author.clear();
     out_version.clear();
-    out_settings.clear();
 
     TomlSection section = TomlSection::Root;
 
@@ -274,10 +272,6 @@ bool parse_pep723_toml(const std::string& toml_content,
             else if (key == "description")  out_description = unquote_toml_string(val);
             else if (key == "author")       out_author = unquote_toml_string(val);
             else if (key == "version")      out_version = unquote_toml_string(val);
-        } else if (section == TomlSection::OrcaPluginSettings) {
-            // collect every key as a string; the plugin parses (int/float/...) what it needs.
-            if (!key.empty())
-                out_settings[key] = unquote_toml_string(val);
         }
     }
 
@@ -675,7 +669,6 @@ bool read_python_plugin_metadata(const boost::filesystem::path& py_path, PluginD
                                pep_desc,
                                pep_author,
                                pep_version,
-                               descriptor.settings,
                                pep723_error)) {
             error = "Failed to parse PEP 723 metadata: " + pep723_error;
             return false;

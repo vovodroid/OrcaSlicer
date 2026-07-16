@@ -25,21 +25,39 @@ A surface may split into several islands or vanish when shrunk; both are handled
 
 No numpy required: the whole edit is expressed with the host geometry classes.
 """
+import json
+
 import orca
 
-INSET_MM = 1.0
+_DEFAULTS = {
+    "inset_mm": 1.0,   # inward offset applied to every slice
+}
+
+
+def _inset_mm(self):
+    try:
+        return float(json.loads(self.get_config())["inset_mm"])
+    except (AttributeError, TypeError, ValueError, KeyError):
+        return _DEFAULTS["inset_mm"]
 
 
 class InsetEverySlice(orca.slicing.SlicingPipelineCapabilityBase):
     def get_name(self):
         return "Inset Every Slice"
 
+    def get_default_config(self):
+        return _DEFAULTS
+
     def execute(self, ctx):
         if ctx.step != orca.slicing.Step.posSlice or ctx.object is None:
             return orca.ExecutionResult.success()
 
+        inset_mm = _inset_mm(self)
+        if inset_mm <= 0.0:
+            return orca.ExecutionResult.success("Inset: zero inset, nothing to do")
+
         # Millimeters -> scaled integer units via the *live* scale (never hardcode 1e6).
-        inset_scaled = int(round(INSET_MM / orca.slicing.unscale(1)))
+        inset_scaled = int(round(inset_mm / orca.slicing.unscale(1)))
 
         regions_touched = 0
         for layer in ctx.object.layers():

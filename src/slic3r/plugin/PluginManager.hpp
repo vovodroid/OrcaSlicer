@@ -179,8 +179,6 @@ public:
 
     void set_capability_enabled(const std::string& plugin_key, const std::string& capability_name, bool enabled);
 
-    // The plugin's [tool.orcaslicer.plugin.settings] table (empty if the plugin is unknown). This will be replaced once the config is merged in.
-    std::map<std::string, std::string> get_plugin_settings(const std::string& plugin_key) const;
     // Sets the cloud user whose _subscribed/{user_id} directory is scanned and installed into.
     void set_cloud_user(const std::string& user_id);
 

@@ -70,9 +70,6 @@ void install_slicing_pipeline_hook()
                     const std::string plugin_key = ref.uuid.empty() ? ref.name : ref.uuid;
                     ExecutionResult r;
                     try {
-                        // Read manager state before acquiring the GIL so this path does not take
-                        // m_mutex in the opposite order to plugin teardown.
-                        const auto plugin_settings = PluginManager::instance().get_plugin_settings(plugin_key);
                         // GIL is acquired per capability (not once for the whole dispatch) so it
                         // is released between capabilities.
                         PythonGILState gil;
@@ -87,9 +84,6 @@ void install_slicing_pipeline_hook()
                         ctx.step   = step;
                         ctx.print  = &print;
                         ctx.object = object;
-                        // hand the plugin its own [tool.orcaslicer.plugin.settings] as ctx.params
-                        // (same plugin_key the capability was resolved by, so it always matches).
-                        ctx.params = plugin_settings;
                         r = cap->execute(ctx);
                     } catch (const CanceledException&) {
                         throw; // cancellation must reach process(), never become a slicing error
