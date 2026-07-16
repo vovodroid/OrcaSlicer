@@ -5,7 +5,10 @@ add_executable(${_TEST_NAME}_tests
     test_plugin_install.cpp
     test_plugin_lifecycle.cpp
     test_slicing_pipeline_bindings.cpp
+    test_slicing_pipeline_params.cpp
     test_plugin_sort.cpp
+    test_plugin_cloud_metadata.cpp
+    ../fff_print/test_helpers.cpp
     )
 
 if (MSVC)

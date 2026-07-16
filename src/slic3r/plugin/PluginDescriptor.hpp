@@ -157,6 +157,12 @@ inline void apply_plugin_metadata_fallbacks(PluginDescriptor& target, const Plug
         target.entry_package = fallback.entry_package;
     if (target.dependencies.empty())
         target.dependencies = fallback.dependencies;
+    // [tool.orcaslicer.plugin.settings] lives only in the local package's PEP-723 header;
+    // cloud catalog records never carry it. Without this, every cloud-metadata merge wipes
+    // the parsed settings and plugins silently run on their built-in defaults (ctx.params
+    // arrives empty).
+    if (target.settings.empty())
+        target.settings = fallback.settings;
 }
 
 // Sanitize a value for use as a filesystem name and as a local plugin_key:
