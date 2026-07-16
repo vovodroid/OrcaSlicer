@@ -471,6 +471,9 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
             return;
         }
 
+        if (m_timelapse_check_timer)
+            m_timelapse_check_timer->Stop();
+
         EndModal(wxID_CLOSE);
         Plater *       plater = wxGetApp().plater();
         wxCommandEvent evt(EVT_OPEN_FILAMENT_MAP_SETTINGS_DIALOG);
@@ -2178,6 +2181,9 @@ void SelectMachineDialog::on_cancel(wxCloseEvent &event)
     if (m_mapping_popup.IsShown())
         m_mapping_popup.Dismiss();
 
+    if (m_timelapse_check_timer)
+        m_timelapse_check_timer->Stop();
+
     m_worker->cancel_all();
     this->EndModal(wxID_CANCEL);
 }
@@ -3032,6 +3038,7 @@ void SelectMachineDialog::on_timelapse_storage_check_result()
 void SelectMachineDialog::show_timelapse_storage_dialog(MachineObject* obj)
 {
     bool is_internal     = (m_timelapse_storage == "internal");
+    // file_count < 0 is the printer's "no video files" sentinel; 0 or more means files exist (0 also covers replies that omit the key).
     bool has_video_files = obj->timelapse_storage_file_count >= 0;
     // internal:               2 buttons (Confirm & Print, Cancel Timelapse)
     // external + has files:   3 buttons (Confirm & Print, Cancel Timelapse, Clean Up)
@@ -5866,6 +5873,9 @@ void SelectMachineDialog::show_init() {
 SelectMachineDialog::~SelectMachineDialog()
 {
     delete m_refresh_timer;
+    if (m_timelapse_check_timer)
+        m_timelapse_check_timer->Stop();
+    delete m_timelapse_check_timer;
 }
 
 void SelectMachineDialog::UpdateStatusCheckWarning_ExtensionTool(MachineObject* obj_)
