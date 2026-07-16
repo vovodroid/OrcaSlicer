@@ -1875,6 +1875,22 @@ bool SelectMachineDialog::check_sdcard_for_timelpase(MachineObject* obj)
     return false;
 }
 
+bool SelectMachineDialog::CheckWarningFilamentCrossExtruder(MachineObject* obj_)
+{
+    if (!obj_ || m_print_type != PrintFromType::FROM_NORMAL) return true;
+    if (obj_->GetExtderSystem()->GetTotalExtderCount() != 2) return true;
+
+    for (const auto& fila : m_ams_mapping_result) {
+        std::set<int> used_extruder_ids;
+        for (const auto& [pos_id, nozzle] : get_mapped_nozzles(fila.id)) {
+            if (!nozzle.IsEmpty()) { used_extruder_ids.insert(nozzle.GetExtruderId()); }
+        }
+        if (used_extruder_ids.size() >= 2) { return false; }
+    }
+
+    return true;
+}
+
 void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxString> params, wxString wiki_url)
 {
     wxString msg;
@@ -2113,6 +2129,10 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
     } else if (status == PrintDialogStatus::PrintStatusRackNozzleNumUnmeetWarning ||
                status == PrintDialogStatus::PrintStatusHasUnreliableNozzleWarning) {
         // Advisory rack inventory shortfalls: allow Send.
+        Enable_Refresh_Button(true);
+        Enable_Send_Button(true);
+    } else if (status == PrintDialogStatus::PrintStatusFilamentCrossExtruderWarning) {
+        // Advisory only: per-nozzle K can't follow a filament across extruders.
         Enable_Refresh_Button(true);
         Enable_Send_Button(true);
     }
@@ -4246,6 +4266,11 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
             show_status(PrintDialogStatus::PrintStatusMixAmsAndVtSlotWarning);
           //  return;
         }
+    }
+    if (!CheckWarningFilamentCrossExtruder(obj_)) {
+        wxString warning_msg = _L("Some filaments may switch between extruders during printing. Manual K-value calibration cannot be applied throughout the entire print, which "
+                                  "may affect print quality. Enabling Flow Dynamics Calibration is recommended.");
+        show_status(PrintDialogStatus::PrintStatusFilamentCrossExtruderWarning, { warning_msg });
     }
     if (m_ams_mapping_res) {
         if (has_timelapse_warning()) {

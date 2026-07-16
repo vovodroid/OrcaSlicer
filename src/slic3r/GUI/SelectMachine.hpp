@@ -531,6 +531,9 @@ public:
     // Compare the slicing file's nozzle requirements (validity, flow, diameter) against the
     // printer; the rack extruder is checked against its whole inventory (mounted + rack).
     bool CheckErrorExtruderNozzleWithSlicing(MachineObject* obj_);//return true if no errors
+    // Warn (without blocking) when a mapped filament would be printed from both extruders on a
+    // dual-extruder printer, so per-nozzle manual K-value can't follow it across the whole print.
+    bool CheckWarningFilamentCrossExtruder(MachineObject* obj_);
 
     // Rack print-dispatch nozzle mapping (H2C): request the printer's auto-mapping and consume the
     // result, gating the Send button while the printer computes. Both are no-ops for non-rack printers.
