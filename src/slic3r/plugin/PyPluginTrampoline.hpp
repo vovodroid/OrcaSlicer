@@ -10,7 +10,7 @@
 
 #include "PythonPluginInterface.hpp"
 #include "PythonInterpreter.hpp"
-#include "PythonJsonUtils.hpp"
+#include "PluginFsUtils.hpp"
 #include "PluginAuditManager.hpp"
 
 // Trampoline variants of pybind11's override macros. Every C++->Python plugin call crosses a

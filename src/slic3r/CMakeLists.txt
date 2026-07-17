@@ -621,7 +621,6 @@ set(SLIC3R_GUI_SOURCES
     plugin/PluginFsUtils.hpp
     plugin/PluginConfig.cpp
     plugin/PluginConfig.hpp
-    plugin/PythonJsonUtils.hpp
     plugin/PluginLoader.cpp
     plugin/PluginLoader.hpp
     plugin/PluginDescriptor.hpp
