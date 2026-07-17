@@ -7,8 +7,8 @@
 namespace Slic3r {
 
 // Binds the `orca.host.ui` submodule: native message boxes, progress dialogs,
-// and interactive HTML windows for plugins. All calls run on the main/UI thread
-// (marshaled from the plugin worker thread) and the host owns every window.
+// and interactive HTML windows/dialogs for plugins. All calls run on the main/UI
+// thread (marshaled from the plugin worker thread) and the host owns every window.
 //
 // Not safe to call from a slicing pipeline hook (SlicingPipelinePluginCapability):
 // that hook runs on the slicing worker thread, which the UI thread can itself be

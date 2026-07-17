@@ -25,35 +25,27 @@ class PluginWebDialog : public Slic3r::GUI::WebViewHostDialog
 {
 public:
     using MessageHandler = std::function<void(const nlohmann::json& data)>;
+    using SubmitHandler  = std::function<void(const nlohmann::json& data)>;
     using CloseHandler   = std::function<void()>;
 
-    // on_close fires only on a user/JS-initiated close (while the window is
-    // alive). on_destroyed runs from the destructor on every path and must touch
-    // host-side state only (no Python / no derived members).
+    // on_submit fires once for window.orca.submit(). on_close fires only on a
+    // user/JS-initiated close (while the window is alive). on_destroyed runs from
+    // the destructor on every path and must touch host-side state only (no Python
+    // / no derived members).
     PluginWebDialog(wxWindow*          parent,
                     const wxString&    title,
                     const std::string& html,
                     const wxSize&      size,
                     MessageHandler     on_message,
+                    SubmitHandler      on_submit,
                     CloseHandler       on_close,
-                    CloseHandler       on_destroyed);
+                    CloseHandler       on_destroyed,
+                    long               wx_style = wxSYSTEM_MENU | wxCAPTION | wxCLOSE_BOX | wxMAXIMIZE_BOX | wxRESIZE_BORDER);
     ~PluginWebDialog() override;
 
-    // Convenience helpers for plugin-host callers. MAIN-THREAD ONLY.
-    static std::optional<nlohmann::json> show_modal_dialog(wxWindow*       parent,
-                                                           const wxString& title,
-                                                           const std::string& html,
-                                                           const wxSize&   size,
-                                                           MessageHandler  on_message);
-    static PluginWebDialog* create_modeless_dialog(wxWindow*       parent,
-                                                   const wxString& title,
-                                                   const std::string& html,
-                                                   const wxSize&   size,
-                                                   MessageHandler  on_message,
-                                                   CloseHandler    on_close,
-                                                   CloseHandler    on_destroyed);
     static void post_message(PluginWebDialog* dialog, const nlohmann::json& data);
     static void request_close(PluginWebDialog* dialog);
+    static void destroy_for_plugin(PluginWebDialog* dialog);
 
     // Push a payload to the page; delivered to handlers registered via
     // window.orca.onMessage(). MAIN-THREAD ONLY (the plugin layer marshals).
@@ -74,6 +66,7 @@ private:
     void on_bootstrap_event(wxWebViewEvent& event);
     void load_plugin_content();
     void on_close_window(wxCloseEvent& event);
+    void fire_submit(const nlohmann::json& data);
     void fire_close();
     void finish(bool submitted, const nlohmann::json& data);
 
@@ -83,6 +76,7 @@ private:
     bool                          m_close_fired{false};
     std::optional<nlohmann::json> m_result;
     MessageHandler                m_on_message;
+    SubmitHandler                 m_on_submit;
     CloseHandler                  m_on_close;
     CloseHandler                  m_on_destroyed;
 };

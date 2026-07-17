@@ -94,11 +94,14 @@ PluginWebDialog::PluginWebDialog(wxWindow*          parent,
                                  const std::string& html,
                                  const wxSize&      size,
                                  MessageHandler     on_message,
+                                 SubmitHandler      on_submit,
                                  CloseHandler       on_close,
-                                 CloseHandler       on_destroyed)
-    : WebViewHostDialog(parent, wxID_ANY, title, wxDefaultPosition, size)
+                                 CloseHandler       on_destroyed,
+                                 long               wx_style)
+    : WebViewHostDialog(parent, wxID_ANY, title, wxDefaultPosition, size, wx_style)
     , m_html(html)
     , m_on_message(std::move(on_message))
+    , m_on_submit(std::move(on_submit))
     , m_on_close(std::move(on_close))
     , m_on_destroyed(std::move(on_destroyed))
 {
@@ -140,29 +143,6 @@ PluginWebDialog::~PluginWebDialog()
         m_on_destroyed();
 }
 
-std::optional<nlohmann::json> PluginWebDialog::show_modal_dialog(wxWindow*       parent,
-                                                                 const wxString& title,
-                                                                 const std::string& html,
-                                                                 const wxSize&   size,
-                                                                 MessageHandler  on_message)
-{
-    PluginWebDialog dlg(parent, title, html, size, std::move(on_message), nullptr, nullptr);
-    dlg.ShowModal();
-    return dlg.result();
-}
-
-PluginWebDialog* PluginWebDialog::create_modeless_dialog(wxWindow*       parent,
-                                                         const wxString& title,
-                                                         const std::string& html,
-                                                         const wxSize&   size,
-                                                         MessageHandler  on_message,
-                                                         CloseHandler    on_close,
-                                                         CloseHandler    on_destroyed)
-{
-    return new PluginWebDialog(parent, title, html, size, std::move(on_message), std::move(on_close),
-                               std::move(on_destroyed));
-}
-
 void PluginWebDialog::post_message(PluginWebDialog* dialog, const nlohmann::json& data)
 {
     if (dialog != nullptr && dialog->is_open())
@@ -173,6 +153,20 @@ void PluginWebDialog::request_close(PluginWebDialog* dialog)
 {
     if (dialog != nullptr)
         dialog->Close();
+}
+
+void PluginWebDialog::destroy_for_plugin(PluginWebDialog* dialog)
+{
+    if (dialog == nullptr)
+        return;
+
+    // Forced plugin teardown must not invoke Python close callbacks. End a modal
+    // loop first, otherwise destroying the window can leave ShowModal() running.
+    if (dialog->IsModal()) {
+        dialog->m_open = false;
+        dialog->EndModal(wxID_CANCEL);
+    }
+    dialog->Destroy();
 }
 
 void PluginWebDialog::on_bootstrap_event(wxWebViewEvent& event)
@@ -226,10 +220,13 @@ void PluginWebDialog::finish(bool submitted, const nlohmann::json& data)
     if (!m_open)
         return;
     m_open = false;
-    if (submitted)
+    if (submitted) {
         m_result = data;
-    else
+        fire_submit(data);
+    } else {
         m_result.reset();
+        fire_close();
+    }
 
     if (IsModal())
         EndModal(submitted ? wxID_OK : wxID_CANCEL);
@@ -239,15 +236,30 @@ void PluginWebDialog::finish(bool submitted, const nlohmann::json& data)
 
 void PluginWebDialog::on_close_window(wxCloseEvent&)
 {
-    m_open = false;
-    if (IsModal()) {
-        EndModal(m_result.has_value() ? wxID_OK : wxID_CANCEL);
+    if (!m_open) {
+        // finish() already dispatched submit/close and requested the close.
+        // Modeless windows still need to be destroyed after that request.
+        if (!IsModal())
+            Destroy();
         return;
     }
-    // Modeless: the window is still fully alive here (unlike in wxEVT_DESTROY), so
-    // it is safe to invoke the plugin's on_close before destroying the window.
+
+    m_open = false;
+    m_result.reset();
     fire_close();
+    if (IsModal()) {
+        EndModal(wxID_CANCEL);
+        return;
+    }
     Destroy();
+}
+
+void PluginWebDialog::fire_submit(const nlohmann::json& data)
+{
+    if (m_on_submit) {
+        SubmitHandler cb = std::move(m_on_submit);
+        cb(data);
+    }
 }
 
 void PluginWebDialog::fire_close()
