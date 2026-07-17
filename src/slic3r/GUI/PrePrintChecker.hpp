@@ -119,6 +119,13 @@ enum PrintDialogStatus : unsigned int {
     PrintStatusWarningExtFilamentNotMatch,
     PrintStatusFilamentWarningNozzleHRC,
     PrintStatusFilamentCrossExtruderWarning,
+    // Orca: resynced pre-send-check statuses. SmartNozzleBlobNeedAuto + TPUUnsupportCaliOn are wired
+    // (see SelectMachine); FilamentWarningRemainNotEnough + PrintTimeEstimateWarning are declared for
+    // forward-compat but their feature wiring stays deferred (missing device-model surface).
+    PrintStatusTPUUnsupportCaliOn,
+    PrintStatusSmartNozzleBlobNeedAuto,
+    PrintStatusFilamentWarningRemainNotEnough,
+    PrintStatusPrintTimeEstimateWarning,
     PrintStatusFilamentWarningEnd,
 
     PrintStatusWarningEnd,//->end error<-

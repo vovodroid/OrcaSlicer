@@ -45,6 +45,9 @@
 #include "Widgets/ScrolledWindow.hpp"
 #include "Widgets/PopupWindow.hpp"
 #include "Widgets/HyperLink.hpp" // ORCA
+#include "DeviceTab/uiAMSBestPositionPopup.hpp"  // Orca: AMS best-position popup (resync)
+#include "DeviceCore/DevFilaSwitch.h"            // Orca: DevFilaSwitch::SwitchPos for best-position helpers
+#include <optional>
 #include <wx/simplebook.h>
 #include <wx/hashmap.h>
 
@@ -396,6 +399,7 @@ protected:
     wxStaticText*                       m_rename_text{nullptr};
     Label*                              m_stext_time{ nullptr };
     Label*                              m_stext_weight{ nullptr };
+    Label*                              m_saveTimeText{ nullptr }; // Orca: best-position "saves X" clickable tip (resync)
     PrinterMsgPanel *                   m_statictext_ams_msg{nullptr};
     Label*                              m_txt_change_filament_times{ nullptr };
     CheckBox*                           m_check_ext_change_assist{ nullptr };
@@ -442,6 +446,7 @@ protected:
     wxGridSizer*                        m_sizer_ams_mapping_right{ nullptr };
 
     PrePrintChecker                     m_pre_print_checker;
+    ReselectMachineDialog*              m_best_pos_dialog{ nullptr }; // Orca: AMS best-position popup (resync)
 
 public:
     static std::vector<wxString> MACHINE_BED_TYPE_STRING;
@@ -548,6 +553,22 @@ public:
     // Warn (without blocking) when a mapped filament would be printed from both extruders on a
     // dual-extruder printer, so per-nozzle manual K-value can't follow it across the whole print.
     bool CheckWarningFilamentCrossExtruder(MachineObject* obj_);
+    // Orca: smart-nozzle-blob pre-send suggestion (resync). Recommends switching nozzle clumping
+    // detection to Auto when the file has stringing-prone filament and the printer isn't in Auto.
+    bool CheckWarningSmartNozzleBlobAuto(MachineObject* obj_);
+    // Orca: AMS best-switch-position popup (resync). Suggests the filament arrangement that minimizes
+    // filament-change time on filament-switcher printers; no-op for printers without a switcher.
+    void on_reselect_dialog_btn_clicked(wxMouseEvent&);
+    void update_best_pos_dialog(wxCommandEvent& evt);
+    void refresh_save_time(MachineObject* obj);
+    std::optional<float> get_filament_change_gap_time(MachineObject* obj_) const;
+    std::map<int, DevFilaSwitch::SwitchPos> get_filament_suggest_pos(MachineObject* obj_) const;
+    std::optional<DevFilaSwitch::SwitchPos> get_filament_suggest_pos(MachineObject* obj_, int fila_logic_id) const;
+    bool is_at_suggested_pos(MachineObject* obj_, int fila_logic_id) const;
+    wxString FormatTime(float totalSeconds);
+    std::optional<FilamentInfo> get_slicing_filament_info(int fila_logic_id) const;
+    std::optional<FilamentInfo> get_mapped_filament_info(int fila_logic_id) const;
+    bool is_used_filament(int fila_logic_id) const;
 
     // Rack print-dispatch nozzle mapping (H2C): request the printer's auto-mapping and consume the
     // result, gating the Send button while the printer computes. Both are no-ops for non-rack printers.

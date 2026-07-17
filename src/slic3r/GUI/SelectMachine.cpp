@@ -31,6 +31,9 @@
 #include "DeviceCore/DevMapping.h"
 #include "DeviceCore/DevUtilBackend.h"
 #include "DeviceCore/DevMappingNozzle.h"
+#include "DeviceCore/DevPrintOptions.h" // Orca: smart-nozzle-blob detection option (resync)
+#include "libslic3r/MultiNozzleUtils.hpp" // Orca: filament-change-gap model for the best-position popup (resync)
+#include "BackgroundSlicingProcess.hpp"   // Orca: complete type for background_process().get_current_gcode_result() (resync)
 #include "DeviceCore/DevStorage.h"
 
 #include <wx/progdlg.h>
@@ -326,6 +329,17 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     m_text_printer_msg_tips->Hide();
     m_text_printer_msg_tips->GetAlignment();
 
+    // Orca: best-position "recommended arrangement saves X" clickable tip (resync). Hidden unless the
+    // printer has a filament switcher and a better arrangement exists; click opens the best-position popup.
+    m_saveTimeText = new Label(m_basic_panel, wxEmptyString);
+    m_saveTimeText->SetForegroundColour(wxColour("#FF6F00"));
+    m_saveTimeText->SetFont(::Label::Body_13);
+    m_saveTimeText->Hide();
+    m_saveTimeText->Bind(wxEVT_LEFT_UP, &SelectMachineDialog::on_reselect_dialog_btn_clicked, this);
+    m_saveTimeText->Bind(wxEVT_ENTER_WINDOW, [this](wxMouseEvent&) { m_saveTimeText->SetCursor(wxCURSOR_HAND); });
+    m_saveTimeText->Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent&) { m_saveTimeText->SetCursor(wxCURSOR_DEFAULT); });
+    Bind(wxEVT_REFRESH_DATA, &SelectMachineDialog::update_best_pos_dialog, this);
+
     sizer_basic_right_info->Add(sizer_rename, 0, wxTOP, 0);
     sizer_basic_right_info->Add(0, 0, 0, wxTOP, FromDIP(5));
     sizer_basic_right_info->Add(m_sizer_basic_weight_time, 0, wxTOP, 0);
@@ -335,6 +349,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     sizer_basic_right_info->Add(m_text_printer_msg, 0, wxLEFT, 0);
     sizer_basic_right_info->AddSpacer(FromDIP(10));
     sizer_basic_right_info->Add(m_text_printer_msg_tips, 0, wxLEFT, 0);
+    sizer_basic_right_info->Add(m_saveTimeText, 0, wxTOP, 0); // Orca: best-position tip (resync)
 
 
     m_basicl_sizer->Add(m_sizer_thumbnail_area, 0, wxLEFT, 0);
@@ -1911,6 +1926,290 @@ bool SelectMachineDialog::CheckWarningFilamentCrossExtruder(MachineObject* obj_)
     return true;
 }
 
+// ===== Orca: resynced pre-send checks + AMS best-position popup (cluster 7) =====
+
+bool SelectMachineDialog::CheckWarningSmartNozzleBlobAuto(MachineObject* obj_)
+{
+    if (!obj_ || m_print_type != PrintFromType::FROM_NORMAL) return true;
+
+    // Only relevant when the printer firmware supports the smart wrap detection feature.
+    auto* opts = obj_->GetPrintOptions();
+    if (!opts) return true;
+    const auto* opt = opts->GetDetectionOption(PrintOptionEnum::Smart_Nozzle_Blob_Detection);
+    if (!opt || !opt->is_support_detect) return true;
+
+    // Already in Auto (cfg == 2): nothing to recommend.
+    if (opt->current_detect_value == 2) return true;
+
+    // Need at least one stringing-prone filament in the sliced project for any nozzle on the current
+    // printer config; iterating the diameters covers single- and dual-extruder printers.
+    if (!wxGetApp().preset_bundle) return true;
+    const auto& full_config = wxGetApp().preset_bundle->full_config();
+    const auto* opt_nozzle_diameters = full_config.option<ConfigOptionFloats>("nozzle_diameter");
+    if (!opt_nozzle_diameters || opt_nozzle_diameters->values.empty()) return true;
+
+    for (const auto& fila : m_filaments) {
+        if (fila.filament_id.empty()) continue;
+        for (double d : opt_nozzle_diameters->values) {
+            if (Slic3r::is_stringing_prone_filament(fila.filament_id, static_cast<float>(d)))
+                return false;
+        }
+    }
+    return true;
+}
+
+std::optional<FilamentInfo> SelectMachineDialog::get_slicing_filament_info(int fila_logic_id) const
+{
+    for (const auto& fila : m_filaments)
+        if (fila.id == fila_logic_id) return fila;
+    return std::nullopt;
+}
+
+std::optional<FilamentInfo> SelectMachineDialog::get_mapped_filament_info(int fila_logic_id) const
+{
+    for (const auto& fila : m_ams_mapping_result)
+        if (fila.id == fila_logic_id) return fila;
+    return std::nullopt;
+}
+
+bool SelectMachineDialog::is_used_filament(int fila_logic_id) const
+{
+    for (const auto& fila : m_ams_mapping_result)
+        if (fila.id == fila_logic_id) return true;
+    return false;
+}
+
+wxString SelectMachineDialog::FormatTime(float totalSeconds)
+{
+    totalSeconds = std::abs(totalSeconds);
+    int secs      = static_cast<int>(std::round(totalSeconds));
+    int hours     = secs / 3600;
+    int remaining = secs % 3600;
+    int minutes   = remaining / 60;
+    int seconds   = remaining % 60;
+    if (hours > 0)   return wxString::Format("%dm%ds", hours * 60 + minutes, seconds);
+    if (minutes > 0) return wxString::Format("%dm%ds", minutes, seconds);
+    return wxString::Format("%ds", seconds);
+}
+
+// Orca: estimated filament-change time gap (actual vs. sliced) for the current AMS arrangement. Inlines
+// REF's calc_filament_change_gap_for_assignment (a thin wrapper over simulate_filament_change_time, which
+// Orca keeps) so no libslic3r change is needed. std::nullopt unless a filament switcher is installed.
+std::optional<float> SelectMachineDialog::get_filament_change_gap_time(MachineObject* obj_) const
+{
+    if (m_print_type != PrintFromType::FROM_NORMAL) return std::nullopt;
+    if (!m_plater || !obj_ || !obj_->GetFilaSwitch() || !obj_->GetFilaSwitch()->IsInstalled()) return std::nullopt;
+
+    GCodeProcessorResult* gcode_result = m_plater->background_process().get_current_gcode_result();
+    auto nozzle_group_res = DevUtilBackend::GetNozzleGroupResult(m_plater);
+    if (!nozzle_group_res || !gcode_result) return std::nullopt;
+
+    const std::vector<unsigned int>& used_u = nozzle_group_res->get_used_filaments();
+    const std::vector<int> logic_filaments(used_u.begin(), used_u.end());
+
+    std::vector<int> group_of_filaments;
+    for (const auto& fila_idx : logic_filaments) {
+        bool found = false;
+        for (const auto& item : m_ams_mapping_result) {
+            if (fila_idx != item.id) continue;
+            const auto& ams_item = obj_->GetFilaSystem()->GetAmsById(item.ams_id);
+            if (ams_item && ams_item->GetSwitcherPos().has_value()) {
+                if (ams_item->GetSwitcherPos().value() == DevFilaSwitch::POS_IN_A)      { group_of_filaments.push_back(0); found = true; break; }
+                else if (ams_item->GetSwitcherPos().value() == DevFilaSwitch::POS_IN_B) { group_of_filaments.push_back(1); found = true; break; }
+            } else {
+                return std::nullopt;
+            }
+        }
+        if (!found) return std::nullopt;
+    }
+
+    const std::vector<MultiNozzleUtils::NozzleInfo> nozzle_list = nozzle_group_res->get_used_nozzles_in_extruder();
+    const std::vector<int> fila_change_seq(gcode_result->filament_change_sequence.begin(), gcode_result->filament_change_sequence.end());
+    const std::vector<int> nozzle_change_seq(gcode_result->nozzle_change_sequence.begin(), gcode_result->nozzle_change_sequence.end());
+
+    MultiNozzleUtils::FilamentChangeTimeParams params;
+    const auto& full_config = wxGetApp().preset_bundle->full_config();
+    if (const auto* load_time_opt = full_config.option<ConfigOptionFloat>("machine_load_filament_time"))
+        params.standard_load_time = load_time_opt->value;
+    if (const auto* unload_time_opt = full_config.option<ConfigOptionFloat>("machine_unload_filament_time"))
+        params.standard_unload_time = unload_time_opt->value;
+    params.selector_load_time   = params.standard_load_time * 0.5;
+    params.selector_unload_time = params.standard_unload_time * 0.5;
+
+    int group_count = group_of_filaments.empty() ? 0 : *std::max_element(group_of_filaments.begin(), group_of_filaments.end()) + 1;
+    // Orca: kept device model has no ams_preload_version; assume no AMS pre-load (conservative).
+    std::vector<bool> ams_preload_enabled(group_count, false);
+
+    try {
+        auto r = MultiNozzleUtils::simulate_filament_change_time(logic_filaments, nozzle_list, fila_change_seq,
+                                                                 nozzle_change_seq, group_of_filaments, params,
+                                                                 ams_preload_enabled, /*calc_sliced_time=*/true);
+        return static_cast<float>(r.actual_time - r.sliced_time);
+    } catch (const std::exception& e) {
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": exception: " << e.what();
+        return std::nullopt;
+    }
+}
+
+// Suggested switch position per logic filament from the slicing result + AMS mapping.
+std::map<int, DevFilaSwitch::SwitchPos> SelectMachineDialog::get_filament_suggest_pos(MachineObject* obj_) const
+{
+    std::map<int, DevFilaSwitch::SwitchPos> suggest_pos_map;
+    if (m_print_type != PrintFromType::FROM_NORMAL) return suggest_pos_map;
+    if (!m_plater || !obj_ || !obj_->GetFilaSwitch() || !obj_->GetFilaSwitch()->IsInstalled()) return suggest_pos_map;
+
+    GCodeProcessorResult* gcode_result = m_plater->background_process().get_current_gcode_result();
+    if (!gcode_result) return suggest_pos_map;
+
+    std::map<int, std::set<int>> pos2group;
+    const auto& optimal_assignment = gcode_result->optimal_assignment;
+    for (int fila_idx = 0; fila_idx < (int) optimal_assignment.size(); fila_idx++) {
+        if (is_used_filament(fila_idx))
+            pos2group[optimal_assignment.at(fila_idx)].insert(fila_idx);
+    }
+
+    std::set<int> in_a_fila_set;
+    std::set<int> in_b_fila_set;
+    for (const auto& item : m_ams_mapping_result) {
+        const auto& ams_item = obj_->GetFilaSystem()->GetAmsById(item.ams_id);
+        if (ams_item && ams_item->GetSwitcherPos().has_value()) {
+            if (ams_item->GetSwitcherPos().value() == DevFilaSwitch::POS_IN_A)      in_a_fila_set.insert(item.id);
+            else if (ams_item->GetSwitcherPos().value() == DevFilaSwitch::POS_IN_B) in_b_fila_set.insert(item.id);
+        } else {
+            return suggest_pos_map;
+        }
+    }
+
+    if (pos2group.size() == 1) {
+        DevFilaSwitch::SwitchPos target = (in_a_fila_set.size() >= in_b_fila_set.size()) ? DevFilaSwitch::POS_IN_A : DevFilaSwitch::POS_IN_B;
+        for (const auto& item : m_ams_mapping_result)
+            suggest_pos_map[item.id] = target;
+    } else if (pos2group.size() == 2) {
+        auto iter = pos2group.begin();
+        const auto& group_1 = iter->second;
+        ++iter;
+        const auto& group_2 = iter->second;
+
+        int offset_1 = 0; // place group1->INA, group2->INB
+        for (const auto& g1 : group_1) if (in_a_fila_set.count(g1) == 0) offset_1++;
+        for (const auto& g2 : group_2) if (in_b_fila_set.count(g2) == 0) offset_1++;
+
+        int offset_2 = 0; // place group2->INA, group1->INB
+        for (const auto& g1 : group_1) if (in_b_fila_set.count(g1) == 0) offset_2++;
+        for (const auto& g2 : group_2) if (in_a_fila_set.count(g2) == 0) offset_2++;
+
+        if (offset_1 <= offset_2) {
+            for (const auto& fila_idx : group_1) suggest_pos_map[fila_idx] = DevFilaSwitch::POS_IN_A;
+            for (const auto& fila_idx : group_2) suggest_pos_map[fila_idx] = DevFilaSwitch::POS_IN_B;
+        } else {
+            for (const auto& fila_idx : group_1) suggest_pos_map[fila_idx] = DevFilaSwitch::POS_IN_B;
+            for (const auto& fila_idx : group_2) suggest_pos_map[fila_idx] = DevFilaSwitch::POS_IN_A;
+        }
+    }
+    return suggest_pos_map;
+}
+
+std::optional<DevFilaSwitch::SwitchPos> SelectMachineDialog::get_filament_suggest_pos(MachineObject* obj_, int filament_logic_id) const
+{
+    const auto& suggest_pos_opt = get_filament_suggest_pos(obj_);
+    if (suggest_pos_opt.empty()) return std::nullopt;
+    for (const auto& item : m_ams_mapping_result) {
+        if (item.id == filament_logic_id) {
+            if (suggest_pos_opt.count(item.id) != 0) return suggest_pos_opt.at(item.id);
+            return std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
+
+bool SelectMachineDialog::is_at_suggested_pos(MachineObject* obj_, int filament_logic_id) const
+{
+    auto opt = get_filament_suggest_pos(obj_, filament_logic_id);
+    if (!opt.has_value()) return true;
+    const auto& mapped_filament_info = get_mapped_filament_info(filament_logic_id);
+    if (mapped_filament_info.has_value()) {
+        const auto& ams_item = obj_->GetFilaSystem()->GetAmsById(mapped_filament_info->ams_id);
+        if (ams_item)
+            return ams_item->GetSwitcherPos() == opt;
+    }
+    return true;
+}
+
+// Orca adaptation: drives only the "saves X" tip (m_saveTimeText); unlike REF it does NOT re-set the
+// print-time label m_stext_time, so Orca's existing time display is untouched. No-op unless a filament
+// switcher is installed and a better arrangement exists.
+void SelectMachineDialog::refresh_save_time(MachineObject* obj)
+{
+    if (m_print_type != PrintFromType::FROM_NORMAL || !m_saveTimeText) return;
+
+    auto save_time = get_filament_change_gap_time(obj);
+    bool is_all_at_suggest_pos = true;
+    for (const auto& mapping_item : m_ams_mapping_result) {
+        is_all_at_suggest_pos = is_at_suggested_pos(obj, mapping_item.id);
+        if (!is_all_at_suggest_pos) break;
+    }
+
+    if (save_time.has_value() && save_time.value() >= 1 && !is_all_at_suggest_pos) {
+        m_saveTimeText->SetLabel(wxString::Format(_L("Recommended filament arrangement saves %s->"), FormatTime(*save_time)));
+        m_saveTimeText->Wrap(-1);
+        m_saveTimeText->Show();
+        m_basic_panel->Layout();
+        m_basic_panel->Fit();
+    } else {
+        m_saveTimeText->Hide();
+    }
+}
+
+void SelectMachineDialog::on_reselect_dialog_btn_clicked(wxMouseEvent&)
+{
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__;
+    DeviceManager* dev = wxGetApp().getDeviceManager();
+    MachineObject* obj = dev ? dev->get_selected_machine() : nullptr;
+    if (!obj) return;
+    if (m_best_pos_dialog == nullptr)
+        m_best_pos_dialog = new ReselectMachineDialog(static_cast<wxWindow*>(this));
+
+    auto save_time = get_filament_change_gap_time(obj);
+    wxString text{};
+    if (save_time.has_value() && save_time.value() >= 1)
+        text = FormatTime(*save_time);
+
+    std::map<int, int> best_pos_map; // key: logic id, value: pos id
+    for (const auto& slot : m_ams_mapping_result) {
+        if (!is_at_suggested_pos(obj, slot.id)) {
+            auto pos = get_filament_suggest_pos(obj, slot.id);
+            if (pos.has_value())
+                best_pos_map[slot.id] = pos.value();
+        }
+    }
+    m_best_pos_dialog->Update(obj, best_pos_map, m_ams_mapping_result, text);
+    m_best_pos_dialog->ShowModal();
+}
+
+void SelectMachineDialog::update_best_pos_dialog(wxCommandEvent& evt)
+{
+    if (!m_best_pos_dialog) return; // Orca: only relevant while the popup is open
+    DeviceManager* dev = wxGetApp().getDeviceManager();
+    MachineObject* obj_ = dev ? dev->get_selected_machine() : nullptr;
+    if (!obj_) return;
+    update_show_status(obj_);
+
+    auto save_time = get_filament_change_gap_time(obj_);
+    wxString text{};
+    if (save_time.has_value() && save_time.value() >= 1)
+        text = FormatTime(*save_time);
+
+    std::map<int, int> best_pos_map;
+    for (const auto& slot : m_ams_mapping_result) {
+        if (!is_at_suggested_pos(obj_, slot.id)) {
+            auto pos = get_filament_suggest_pos(obj_, slot.id);
+            if (pos.has_value())
+                best_pos_map[slot.id] = pos.value();
+        }
+    }
+    m_best_pos_dialog->Update(obj_, best_pos_map, m_ams_mapping_result, text);
+}
+
 void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxString> params, wxString wiki_url)
 {
     wxString msg;
@@ -1985,6 +2284,9 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
     } else if (status == PrintStatusColorQuantityExceed) {
         Enable_Refresh_Button(true);
         Enable_Send_Button(false);
+        // Orca: fill the real per-printer max color count into the %s template (resync).
+        if (!params.empty())
+            msg = wxString::Format(m_pre_print_checker.get_pre_state_msg(status), params[0], params[0]);
     }
 
     else if (status == PrintDialogStatus::PrintStatusAmsMappingU0Invalid) {
@@ -2096,6 +2398,9 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
         Enable_Refresh_Button(true);
         Enable_Send_Button(true);
     } else if (status == PrintStatusTPUUnsupportAutoCali) {
+        Enable_Refresh_Button(true);
+        Enable_Send_Button(false);
+    } else if (status == PrintStatusTPUUnsupportCaliOn) { // Orca: TPU manual-cali-on gate (resync)
         Enable_Refresh_Button(true);
         Enable_Send_Button(false);
     } else if (status == PrintStatusHasFilamentInBlackListError) {
@@ -4429,13 +4734,13 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
     // Orca: gate against the printer's real max filament-color count instead of a hardcoded 16, so
     // high-color firmware (is_support_filament_32_colors -> 32) isn't wrongly blocked. Floor at 16 so
     // printers that report 0 (e.g. series X/O) keep their prior limit; every other class is unchanged.
-    // The max shown in the message is owned by PrePrintChecker (out of this cluster's scope).
+    // The real max is passed as a param so the %s message shows the actual count.
     int max_color = obj_->get_max_filament_color_count();
     if (max_color < 16) max_color = 16;
     if (wxGetApp().preset_bundle->filament_presets.size() > (size_t)max_color && m_print_type != PrintFromType::FROM_SDCARD_VIEW) {
         if (!obj_->is_enable_ams_np && !obj_->is_enable_np)
         {
-            show_status(PrintDialogStatus::PrintStatusColorQuantityExceed);
+            show_status(PrintDialogStatus::PrintStatusColorQuantityExceed, {wxString::Format("%d", max_color)});
             return;
         }
     }
@@ -4455,14 +4760,18 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
         }
     }
 
-    // Orca: also gate the "auto" flow-cali case (REF parity — closes a pre-existing gap where TPU/Aero
-    // with Flow Dynamics Calibration set to Auto was not blocked on printers that don't support PA
-    // auto-cali). Both auto and on map to the one available status enum; REF's distinct "CaliOn"
-    // message lives in PrePrintChecker (out of this cluster's scope).
-    if (!can_support_pa_auto_cali() && m_checkbox_list["flow_cali"]->IsShown()
-        && (m_checkbox_list["flow_cali"]->getValue() == "on" || m_checkbox_list["flow_cali"]->getValue() == "auto")) {
-        show_status(PrintDialogStatus::PrintStatusTPUUnsupportAutoCali);
-        return;
+    // Orca: gate both flow-cali cases for TPU/Aero on printers that don't support PA auto-cali (REF
+    // parity). "auto" -> AutoCali, "on" -> CaliOn, matching REF's distinct messages now that the
+    // CaliOn status exists in PrePrintChecker (this cluster). Both block Send.
+    if (!can_support_pa_auto_cali() && m_checkbox_list["flow_cali"]->IsShown()) {
+        if (m_checkbox_list["flow_cali"]->getValue() == "auto") {
+            show_status(PrintDialogStatus::PrintStatusTPUUnsupportAutoCali);
+            return;
+        }
+        if (m_checkbox_list["flow_cali"]->getValue() == "on") {
+            show_status(PrintDialogStatus::PrintStatusTPUUnsupportCaliOn);
+            return;
+        }
     }
 
     /*disable print when there is no mapping*/
@@ -4674,6 +4983,27 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
                                   "may affect print quality. Enabling Flow Dynamics Calibration is recommended.");
         show_status(PrintDialogStatus::PrintStatusFilamentCrossExtruderWarning, { warning_msg });
     }
+
+    // Orca: smart-nozzle-blob pre-send suggestion (resync). When the file has stringing-prone filament
+    // and the printer's clumping detection isn't already Auto, offer a clickable "Switch" that sets the
+    // detection to Auto (mode 2). Rendered via the Orca callback-link path (add_with_link).
+    if (!CheckWarningSmartNozzleBlobAuto(obj_)) {
+        show_status(PrintDialogStatus::PrintStatusSmartNozzleBlobNeedAuto);
+        m_pre_print_checker.add_with_link(
+            PrintDialogStatus::PrintStatusSmartNozzleBlobNeedAuto,
+            m_pre_print_checker.get_pre_state_msg(PrintDialogStatus::PrintStatusSmartNozzleBlobNeedAuto),
+            _L("Switch"),
+            [] {
+                DeviceManager* dev = wxGetApp().getDeviceManager();
+                MachineObject* o   = dev ? dev->get_selected_machine() : nullptr;
+                if (o && o->GetPrintOptions())
+                    o->GetPrintOptions()->command_smart_nozzle_blob_detect_mode(2);
+            });
+    }
+
+    // Orca: refresh the best-position "saves X" tip (resync); no-op for printers without a switcher.
+    refresh_save_time(obj_);
+
     if (m_ams_mapping_res) {
         if (has_timelapse_warning()) {
             show_status(PrintDialogStatus::PrintStatusTimelapseWarning);

@@ -65,6 +65,10 @@ std::string PrePrintChecker::get_print_status_info(PrintDialogStatus status)
     case PrintStatusHasUnreliableNozzleWarning: return "PrintStatusHasUnreliableNozzleWarning";
     case PrintStatusWarningExtFilamentNotMatch: return "PrintStatusWarningExtFilamentNotMatch";
     case PrintStatusFilamentWarningNozzleHRC: return "PrintStatusFilamentWarningNozzleHRC";
+    case PrintStatusTPUUnsupportCaliOn: return "PrintStatusTPUUnsupportCaliOn";
+    case PrintStatusSmartNozzleBlobNeedAuto: return "PrintStatusSmartNozzleBlobNeedAuto";
+    case PrintStatusFilamentWarningRemainNotEnough: return "PrintStatusFilamentWarningRemainNotEnough";
+    case PrintStatusPrintTimeEstimateWarning: return "PrintStatusPrintTimeEstimateWarning";
     case PrintStatusReadingFinished: return "PrintStatusReadingFinished";
     case PrintStatusSendingCanceled: return "PrintStatusSendingCanceled";
     case PrintStatusAmsMappingSuccess: return "PrintStatusAmsMappingSuccess";
@@ -103,8 +107,14 @@ wxString PrePrintChecker::get_pre_state_msg(PrintDialogStatus status)
     case PrintStatusTPUUnsupportAutoCali: return _L("TPU 90A/TPU 85A is too soft and does not support automatic Flow Dynamics calibration.");
     case PrintStatusWarningKvalueNotUsed: return _L("Set dynamic flow calibration to 'OFF' to enable custom dynamic flow value.");
     case PrintStatusNotSupportedPrintAll: return _L("This printer does not support printing all plates.");
-    case PrintStatusColorQuantityExceed: return _L("The current firmware supports a maximum of 16 materials. You can either reduce the number of materials to 16 or fewer on the Preparation Page, or try updating the firmware. If you are still restricted after the update, please wait for subsequent firmware support.");
+    // Orca: %s-parameterized so the real per-printer max color count can be filled in by the caller
+    // (SelectMachine formats it via get_pre_state_msg before add()); default templates keep the wording.
+    case PrintStatusColorQuantityExceed: return _L("The current firmware supports a maximum of %s materials. You can either reduce the number of materials to %s or fewer on the Preparation Page, or try updating the firmware. If you are still restricted after the update, please wait for subsequent firmware support.");
     case PrintStatusWarningExtFilamentNotMatch: return _L("The type of external filament is unknown or does not match with the filament type in the slicing file. Please make sure you have installed the correct filament in the external spool.");
+    case PrintStatusTPUUnsupportCaliOn: return _L("TPU 90A/TPU 85A is too soft. It is recommended to perform manual flow calibration on the 'Calibration' page. If 'Dynamic Flow Calibration' is set to on, the system will use the previous calibration value and skip the flow calibration process.");
+    case PrintStatusSmartNozzleBlobNeedAuto: return _L("There is stringing-prone filament in this file. For best print quality, we recommend switching nozzle clumping detection to Auto mode.");
+    case PrintStatusFilamentWarningRemainNotEnough: return _L("The filament in the AMS may be insufficient for this print. Please refill or replace it.");
+    case PrintStatusPrintTimeEstimateWarning: return _L("The print time estimate may be inaccurate for the current AMS configuration.");
     }
     return wxEmptyString;
 }
