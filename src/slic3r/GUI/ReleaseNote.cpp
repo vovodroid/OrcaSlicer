@@ -137,7 +137,7 @@ UpdatePluginDialog::UpdatePluginDialog(wxWindow* parent /*= nullptr*/)
     m_text_up_info->SetForegroundColour(wxColour(0x26, 0x2E, 0x30));
 
 
-    operation_tips = new ::Label(this, Label::Body_12, _L("Click OK to update the Network plug-in the next time Orca Slicer launches."), LB_AUTO_WRAP);
+    operation_tips = new ::Label(this, Label::Body_12, _L("Click OK to update the Network plug-in now. If a file is in use, the update will be applied the next time Orca Slicer launches."), LB_AUTO_WRAP);
     operation_tips->SetMinSize(wxSize(FromDIP(260), -1));
     operation_tips->SetMaxSize(wxSize(FromDIP(260), -1));
 

@@ -3291,6 +3291,22 @@ void GUI_App::copy_network_if_available()
     if (app_config->get("update_network_plugin") != "true")
         return;
 
+    bool had_cache = false;
+    bool installed = install_network_plugin_from_ota(had_cache);
+    // Success consumes the cache and a missing cache leaves nothing to do; only a
+    // failed copy keeps the flag so the install is retried on the next launch.
+    if (installed || !had_cache)
+        app_config->set("update_network_plugin", "false");
+}
+
+// Installs the OTA-downloaded plug-in files from ota/plugins into the plugins folder
+// (network library under its versioned name, and the configured version updated to
+// match). Returns true when everything was installed; had_cache reports whether a
+// usable download was present at all.
+bool GUI_App::install_network_plugin_from_ota(bool& had_cache)
+{
+    had_cache = false;
+
     std::string data_dir_str = data_dir();
     boost::filesystem::path data_dir_path(data_dir_str);
     auto plugin_folder = data_dir_path / "plugins";
@@ -3312,10 +3328,10 @@ void GUI_App::copy_network_if_available()
     }
 
     if (cached_version.empty()) {
-        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": no version found in changelog, aborting copy";
-        app_config->set("update_network_plugin", "false");
-        return;
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": no version found in changelog, nothing to install";
+        return false;
     }
+    had_cache = true;
 
     std::string network_library, player_library, live555_library, network_library_dst, player_library_dst, live555_library_dst;
 #if defined(_MSC_VER) || defined(_WIN32)
@@ -3346,17 +3362,41 @@ void GUI_App::copy_network_if_available()
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": create directory " << plugin_folder.string();
         boost::filesystem::create_directory(plugin_folder);
     }
-    std::string error_message;
-    if (boost::filesystem::exists(network_library)) {
-        CopyFileResult cfr = copy_file(network_library, network_library_dst, error_message, false);
-        if (cfr != CopyFileResult::SUCCESS) {
-            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Copying failed(" << cfr << "): " << error_message;
-            return;
-        }
 
+    // Replace a destination even while the running process still maps it: an in-use
+    // file cannot be deleted or overwritten on Windows, but it can be renamed aside;
+    // the stale ".old" copy is swept on the next launch (see on_init_network).
+    auto install_file = [](const std::string& src, const std::string& dst) -> bool {
+        boost::system::error_code ec;
+        if (boost::filesystem::exists(dst, ec)) {
+            boost::filesystem::remove(dst, ec);
+            if (ec) {
+                boost::filesystem::path aside(dst);
+                aside += ".old";
+                boost::system::error_code ec2;
+                boost::filesystem::remove(aside, ec2);
+                boost::filesystem::rename(dst, aside, ec2);
+                if (ec2) {
+                    BOOST_LOG_TRIVIAL(error) << "install_network_plugin_from_ota: cannot replace in-use file " << dst << ": " << ec2.message();
+                    return false;
+                }
+            }
+        }
+        std::string error_message;
+        CopyFileResult cfr = copy_file(src, dst, error_message, false);
+        if (cfr != CopyFileResult::SUCCESS) {
+            BOOST_LOG_TRIVIAL(error) << "install_network_plugin_from_ota: copying " << src << " failed(" << cfr << "): " << error_message;
+            return false;
+        }
         static constexpr const auto perms = fs::owner_read | fs::owner_write | fs::group_read | fs::others_read;
-        fs::permissions(network_library_dst, perms);
-        fs::remove(network_library);
+        fs::permissions(dst, perms);
+        boost::filesystem::remove(src, ec);
+        return true;
+    };
+
+    if (boost::filesystem::exists(network_library)) {
+        if (!install_file(network_library, network_library_dst))
+            return false;
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Copying network library from " << network_library << " to " << network_library_dst << " successfully.";
 
         app_config->set_network_plugin_version(cached_version);
@@ -3364,28 +3404,14 @@ void GUI_App::copy_network_if_available()
     }
 
     if (boost::filesystem::exists(player_library)) {
-        CopyFileResult cfr = copy_file(player_library, player_library_dst, error_message, false);
-        if (cfr != CopyFileResult::SUCCESS) {
-            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Copying failed(" << cfr << "): " << error_message;
-            return;
-        }
-
-        static constexpr const auto perms = fs::owner_read | fs::owner_write | fs::group_read | fs::others_read;
-        fs::permissions(player_library_dst, perms);
-        fs::remove(player_library);
+        if (!install_file(player_library, player_library_dst))
+            return false;
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Copying player library from " << player_library << " to " << player_library_dst << " successfully.";
     }
 
     if (boost::filesystem::exists(live555_library)) {
-        CopyFileResult cfr = copy_file(live555_library, live555_library_dst, error_message, false);
-        if (cfr != CopyFileResult::SUCCESS) {
-            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Copying failed(" << cfr << "): " << error_message;
-            return;
-        }
-
-        static constexpr const auto perms = fs::owner_read | fs::owner_write | fs::group_read | fs::others_read;
-        fs::permissions(live555_library_dst, perms);
-        fs::remove(live555_library);
+        if (!install_file(live555_library, live555_library_dst))
+            return false;
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Copying live555 library from " << live555_library << " to " << live555_library_dst << " successfully.";
     }
     // All cached files consumed - drop the whole ota/plugins cache folder.
@@ -3395,7 +3421,7 @@ void GUI_App::copy_network_if_available()
     } catch (...) {
         BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": failed to remove the plugin cache folder " << cache_folder.string();
     }
-    app_config->set("update_network_plugin", "false");
+    return true;
 }
 
 bool GUI_App::on_init_network(bool try_backup)

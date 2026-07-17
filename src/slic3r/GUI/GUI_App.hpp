@@ -751,6 +751,7 @@ public:
 
     void            show_network_plugin_download_dialog(bool is_update = false);
     bool            hot_reload_network_plugin();
+    bool            install_network_plugin_from_ota(bool& had_cache);
     std::string     get_latest_network_version() const;
     bool            has_network_update_available() const;
     // Orca: return the client version to report to Bambu servers. Pinned to
