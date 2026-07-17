@@ -566,7 +566,6 @@ public:
     std::optional<DevFilaSwitch::SwitchPos> get_filament_suggest_pos(MachineObject* obj_, int fila_logic_id) const;
     bool is_at_suggested_pos(MachineObject* obj_, int fila_logic_id) const;
     wxString FormatTime(float totalSeconds);
-    std::optional<FilamentInfo> get_slicing_filament_info(int fila_logic_id) const;
     std::optional<FilamentInfo> get_mapped_filament_info(int fila_logic_id) const;
     bool is_used_filament(int fila_logic_id) const;
 

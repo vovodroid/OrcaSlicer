@@ -1958,13 +1958,6 @@ bool SelectMachineDialog::CheckWarningSmartNozzleBlobAuto(MachineObject* obj_)
     return true;
 }
 
-std::optional<FilamentInfo> SelectMachineDialog::get_slicing_filament_info(int fila_logic_id) const
-{
-    for (const auto& fila : m_filaments)
-        if (fila.id == fila_logic_id) return fila;
-    return std::nullopt;
-}
-
 std::optional<FilamentInfo> SelectMachineDialog::get_mapped_filament_info(int fila_logic_id) const
 {
     for (const auto& fila : m_ams_mapping_result)
@@ -2400,9 +2393,15 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
     } else if (status == PrintStatusTPUUnsupportAutoCali) {
         Enable_Refresh_Button(true);
         Enable_Send_Button(false);
-    } else if (status == PrintStatusTPUUnsupportCaliOn) { // Orca: TPU manual-cali-on gate (resync)
+    } else if (status == PrintStatusTPUUnsupportCaliOn) { // Orca: TPU manual-cali-on ADVISORY (resync) — Send stays enabled
         Enable_Refresh_Button(true);
-        Enable_Send_Button(false);
+        Enable_Send_Button(true);
+    } else if (status == PrintStatusTPUUnsuggestCali) { // Orca: TPU flow-cali advisory (resync) — non-blocking
+        Enable_Refresh_Button(true);
+        Enable_Send_Button(true);
+    } else if (status == PrintStatusSmartNozzleBlobNeedAuto) { // Orca: blob switch-to-Auto advisory (resync) — non-blocking
+        Enable_Refresh_Button(true);
+        Enable_Send_Button(true);
     } else if (status == PrintStatusHasFilamentInBlackListError) {
         Enable_Refresh_Button(true);
         Enable_Send_Button(false);
@@ -2948,6 +2947,10 @@ void SelectMachineDialog::EnableEditing(bool enable)
     {
         iter.second->enable(enable);
     }
+
+    // Orca: grey the best-position "saves X" tip when editing is disabled so an error transition
+    // doesn't leave a stale clickable tip (resync).
+    if (m_saveTimeText) enable ? m_saveTimeText->Enable() : m_saveTimeText->Disable();
 }
 
 /*content height > FromDIP(650), make the area scrollable*/
@@ -4087,6 +4090,11 @@ void SelectMachineDialog::on_timer(wxTimerEvent &event)
     update_show_status(obj_);
     update_print_status_msg();
     //update_scroll_area_size();/*STUDIO-12867 the page maybe blank in some platform. FIXME*/
+
+    // Orca: refresh the best-position "saves X" tip after the status update (resync). Placed here (not
+    // inside update_show_status) so it still runs when update_show_status returns early on an error.
+    // No-op for printers without a filament switcher.
+    refresh_save_time(obj_);
 }
 
 void SelectMachineDialog::on_selection_changed(wxCommandEvent &event)
@@ -4760,17 +4768,17 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
         }
     }
 
-    // Orca: gate both flow-cali cases for TPU/Aero on printers that don't support PA auto-cali (REF
-    // parity). "auto" -> AutoCali, "on" -> CaliOn, matching REF's distinct messages now that the
-    // CaliOn status exists in PrePrintChecker (this cluster). Both block Send.
+    // Orca: TPU/Aero flow-cali gate on printers that don't support PA auto-cali (REF parity). Only the
+    // "auto" case BLOCKS (AutoCali). The "on" case is a non-blocking ADVISORY (CaliOn): the printer uses
+    // the previous cali value and skips, so Send stays enabled and we do NOT return (matches REF, which
+    // puts CaliOn in the warning band and only returns on is_error).
     if (!can_support_pa_auto_cali() && m_checkbox_list["flow_cali"]->IsShown()) {
         if (m_checkbox_list["flow_cali"]->getValue() == "auto") {
             show_status(PrintDialogStatus::PrintStatusTPUUnsupportAutoCali);
             return;
         }
         if (m_checkbox_list["flow_cali"]->getValue() == "on") {
-            show_status(PrintDialogStatus::PrintStatusTPUUnsupportCaliOn);
-            return;
+            show_status(PrintDialogStatus::PrintStatusTPUUnsupportCaliOn); // advisory: no return
         }
     }
 
@@ -4986,12 +4994,14 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
 
     // Orca: smart-nozzle-blob pre-send suggestion (resync). When the file has stringing-prone filament
     // and the printer's clumping detection isn't already Auto, offer a clickable "Switch" that sets the
-    // detection to Auto (mode 2). Rendered via the Orca callback-link path (add_with_link).
+    // detection to Auto (mode 2). Rendered via the Orca callback-link path (add_with_link) with the
+    // message passed as a literal (no get_pre_state_msg entry) so the tail add() doesn't also push a
+    // second, linkless copy — mirrors the TimelapseStorageLow convention.
     if (!CheckWarningSmartNozzleBlobAuto(obj_)) {
         show_status(PrintDialogStatus::PrintStatusSmartNozzleBlobNeedAuto);
         m_pre_print_checker.add_with_link(
             PrintDialogStatus::PrintStatusSmartNozzleBlobNeedAuto,
-            m_pre_print_checker.get_pre_state_msg(PrintDialogStatus::PrintStatusSmartNozzleBlobNeedAuto),
+            _L("There is stringing-prone filament in this file. For best print quality, we recommend switching nozzle clumping detection to Auto mode."),
             _L("Switch"),
             [] {
                 DeviceManager* dev = wxGetApp().getDeviceManager();
@@ -5001,8 +5011,23 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
             });
     }
 
-    // Orca: refresh the best-position "saves X" tip (resync); no-op for printers without a switcher.
-    refresh_save_time(obj_);
+    // Orca: TPU flow-cali advisory (resync, non-blocking). When Flow Dynamics Calibration is Auto/On and
+    // a mapped filament is in the printer's auto_on_cali_warning_tpu_filaments list, warn that the system
+    // will use the manual/default value and skip flow calibration. Send stays enabled.
+    if (obj_ && m_checkbox_list.count("flow_cali") && m_checkbox_list["flow_cali"]->IsShown()
+        && m_checkbox_list["flow_cali"]->getValue() != "off") {
+        const auto& warning_tpu_filaments =
+            DevPrinterConfigUtil::get_value_from_config<std::vector<std::string>>(obj_->printer_type, "auto_on_cali_warning_tpu_filaments");
+        if (!warning_tpu_filaments.empty()) {
+            for (const auto& fila : m_ams_mapping_result) {
+                if (std::find(warning_tpu_filaments.begin(), warning_tpu_filaments.end(), fila.filament_id) != warning_tpu_filaments.end()) {
+                    show_status(PrintDialogStatus::PrintStatusTPUUnsuggestCali,
+                                { _L("If 'Dynamic Flow Calibration' is set to Auto/On, the system will use the manual calibration value or the default value and skip the flow calibration process. You can perform a manual flow calibration for TPU filament on the 'Calibration' page.") });
+                    break;
+                }
+            }
+        }
+    }
 
     if (m_ams_mapping_res) {
         if (has_timelapse_warning()) {
@@ -6131,6 +6156,7 @@ void SelectMachineDialog::set_default_from_sdcard()
         ::sprintf(weight, "%.2f g", float_weight); // ORCA remove spacing before text
         m_stext_time->SetLabel(time);
         m_stext_weight->SetLabel(weight);
+        refresh_save_time(obj_); // Orca: mirrors REF; no-op for FROM_SDCARD_VIEW (refresh_save_time early-returns)
     }
     catch (...) {}
 }

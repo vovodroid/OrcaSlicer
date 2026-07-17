@@ -66,6 +66,7 @@ std::string PrePrintChecker::get_print_status_info(PrintDialogStatus status)
     case PrintStatusWarningExtFilamentNotMatch: return "PrintStatusWarningExtFilamentNotMatch";
     case PrintStatusFilamentWarningNozzleHRC: return "PrintStatusFilamentWarningNozzleHRC";
     case PrintStatusTPUUnsupportCaliOn: return "PrintStatusTPUUnsupportCaliOn";
+    case PrintStatusTPUUnsuggestCali: return "PrintStatusTPUUnsuggestCali";
     case PrintStatusSmartNozzleBlobNeedAuto: return "PrintStatusSmartNozzleBlobNeedAuto";
     case PrintStatusFilamentWarningRemainNotEnough: return "PrintStatusFilamentWarningRemainNotEnough";
     case PrintStatusPrintTimeEstimateWarning: return "PrintStatusPrintTimeEstimateWarning";
@@ -111,10 +112,12 @@ wxString PrePrintChecker::get_pre_state_msg(PrintDialogStatus status)
     // (SelectMachine formats it via get_pre_state_msg before add()); default templates keep the wording.
     case PrintStatusColorQuantityExceed: return _L("The current firmware supports a maximum of %s materials. You can either reduce the number of materials to %s or fewer on the Preparation Page, or try updating the firmware. If you are still restricted after the update, please wait for subsequent firmware support.");
     case PrintStatusWarningExtFilamentNotMatch: return _L("The type of external filament is unknown or does not match with the filament type in the slicing file. Please make sure you have installed the correct filament in the external spool.");
-    case PrintStatusTPUUnsupportCaliOn: return _L("TPU 90A/TPU 85A is too soft. It is recommended to perform manual flow calibration on the 'Calibration' page. If 'Dynamic Flow Calibration' is set to on, the system will use the previous calibration value and skip the flow calibration process.");
-    case PrintStatusSmartNozzleBlobNeedAuto: return _L("There is stringing-prone filament in this file. For best print quality, we recommend switching nozzle clumping detection to Auto mode.");
+    // Orca: reuses REF's exact AutoCali/CaliOn text (same string for both). CaliOn is a non-blocking
+    // advisory (Send stays enabled); the "auto" case is the blocking one (PrintStatusTPUUnsupportAutoCali).
+    case PrintStatusTPUUnsupportCaliOn: return _L("TPU 90A/TPU 85A are too soft. It is recommended to perform manual flow calibration on the 'Calibration' page. If 'Dynamic Flow Calibration' is set to auto/on, the system will use the previous calibration value and skip the flow calibration process.");
     case PrintStatusFilamentWarningRemainNotEnough: return _L("The filament in the AMS may be insufficient for this print. Please refill or replace it.");
-    case PrintStatusPrintTimeEstimateWarning: return _L("The print time estimate may be inaccurate for the current AMS configuration.");
+    // SmartNozzleBlobNeedAuto text is passed via add_with_link (clickable "Switch"), not here.
+    // PrintTimeEstimateWarning is dead in REF (no call site); enum kept for parity, no message string.
     }
     return wxEmptyString;
 }

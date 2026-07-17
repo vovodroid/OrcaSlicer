@@ -491,7 +491,7 @@ void PrintJob::process(Ctl &ctl)
     DeviceManager* dev = wxGetApp().getDeviceManager();
     MachineObject* obj = dev->get_selected_machine();
 
-    auto wait_fn = [this, curr_percent, &obj](int state, std::string job_info) {
+    auto wait_fn = [this, &ctl, curr_percent, &obj](int state, std::string job_info) {
             BOOST_LOG_TRIVIAL(info) << "print_job: get_job_info = " << job_info;
 
             if (!obj->is_support_wait_sending_finish) {
@@ -521,6 +521,11 @@ void PrintJob::process(Ctl &ctl)
                     }
                     if (obj->is_in_printing_status(obj->print_status)) {
                         BOOST_LOG_TRIVIAL(info) << "print_job: printer has enter printing status, s = " << obj->print_status;
+                        return true;
+                    }
+                    // Orca: break the wait-for-print-start loop on user cancel (resync).
+                    if (ctl.was_canceled()) {
+                        BOOST_LOG_TRIVIAL(info) << "print_job: user cancel the job " << obj->job_id_;
                         return true;
                     }
                     time_out++;
@@ -639,7 +644,11 @@ void PrintJob::process(Ctl &ctl)
     if (result < 0) {
         curr_percent = -1;
 
-        if (result == BAMBU_NETWORK_ERR_PRINT_WR_FILE_NOT_EXIST || result == BAMBU_NETWORK_ERR_PRINT_SP_FILE_NOT_EXIST) {
+        // Orca: restore the ENC-flag-not-ready message (resync). The printer is still fetching its
+        // encryption flag (a transient state), so ask the user to retry rather than showing a generic error.
+        if (result == BAMBU_NETOWRK_ERR_PRINT_SP_ENC_FLAG_NOT_READY) {
+            msg_text = _u8L("Retrieving printer information, please try again later.");
+        } else if (result == BAMBU_NETWORK_ERR_PRINT_WR_FILE_NOT_EXIST || result == BAMBU_NETWORK_ERR_PRINT_SP_FILE_NOT_EXIST) {
             msg_text = file_is_not_exists_str;
         } else if (result == BAMBU_NETWORK_ERR_PRINT_SP_FILE_OVER_SIZE || result == BAMBU_NETWORK_ERR_PRINT_WR_FILE_OVER_SIZE) {
             msg_text = file_over_size_str;
