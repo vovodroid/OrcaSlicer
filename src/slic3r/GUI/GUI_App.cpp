@@ -1241,13 +1241,14 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
     // get_url
     std::string  url = get_plugin_url(name, app_config->get_country_code());
     std::string download_url;
+    std::string online_version;
     Slic3r::Http http_url = Slic3r::Http::get(url);
     BOOST_LOG_TRIVIAL(info) << "[download_plugin]: check the plugin from " << url;
     http_url.timeout_connect(TIMEOUT_CONNECT)
         .timeout_max(TIMEOUT_RESPONSE)
         .header("X-BBL-OS-Type", os_type)
         .on_complete(
-        [&download_url](std::string body, unsigned status) {
+        [&download_url, &online_version](std::string body, unsigned status) {
             try {
                 json j = json::parse(body);
                 std::string message = j["message"].get<std::string>();
@@ -1257,6 +1258,7 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
                     if (resource.is_array()) {
                         for (auto iter = resource.begin(); iter != resource.end(); iter++) {
                             Semver version;
+                            std::string version_str;
                             std::string url;
                             std::string type;
                             std::string vendor;
@@ -1267,7 +1269,8 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
                                     BOOST_LOG_TRIVIAL(info) << "[download_plugin]: get version of settings's type, " << sub_iter.value();
                                 }
                                 else if (boost::iequals(sub_iter.key(), "version")) {
-                                    version = *(Semver::parse(sub_iter.value()));
+                                    version_str = sub_iter.value();
+                                    version = *(Semver::parse(version_str));
                                 }
                                 else if (boost::iequals(sub_iter.key(), "description")) {
                                     description = sub_iter.value();
@@ -1278,6 +1281,7 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
                             }
                             BOOST_LOG_TRIVIAL(info) << "[download_plugin 1]: get type " << type << ", version " << version.to_string() << ", url " << url;
                             download_url = url;
+                            online_version = version_str;
                         }
                     }
                 }
@@ -1367,6 +1371,26 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
             result = -1;
         });
     http.perform_sync();
+
+    // The cloud endpoint serves the newest build of the requested series, which may be
+    // newer than the configured version. Adopt the actual downloaded version so that
+    // install_plugin() names the library after what it really contains - otherwise the
+    // post-load config sync (on_init_network) points at a file name that does not exist
+    // and the plugin is "lost" on the following launch. Legacy mode is left untouched:
+    // is_legacy_version() matches exactly and drives the legacy struct layout.
+    if (result >= 0 && name == "plugins" && !online_version.empty() && !use_legacy_network_plugin()) {
+        std::string configured = app_config->get_network_plugin_version();
+        if (configured.empty())
+            configured = get_latest_network_version();
+        if (configured != online_version
+            && configured.size() >= 8 && online_version.size() >= 8
+            && configured.compare(0, 8, online_version, 0, 8) == 0) {
+            BOOST_LOG_TRIVIAL(info) << "[download_plugin] server returned " << online_version
+                                    << " for configured " << configured << ", adopting it";
+            app_config->set_network_plugin_version(online_version);
+        }
+    }
+
     j["result"] = result < 0 ? "failed" : "success";
     j["error_msg"] = err_msg;
     return result;
@@ -3270,7 +3294,7 @@ void GUI_App::copy_network_if_available()
     std::string data_dir_str = data_dir();
     boost::filesystem::path data_dir_path(data_dir_str);
     auto plugin_folder = data_dir_path / "plugins";
-    auto cache_folder = data_dir_path / "ota";
+    auto cache_folder = data_dir_path / "ota" / "plugins";
     std::string changelog_file = cache_folder.string() + "/network_plugins.json";
 
     std::string cached_version;
@@ -3364,8 +3388,13 @@ void GUI_App::copy_network_if_available()
         fs::remove(live555_library);
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Copying live555 library from " << live555_library << " to " << live555_library_dst << " successfully.";
     }
-    if (boost::filesystem::exists(changelog_file))
-        fs::remove(changelog_file);
+    // All cached files consumed - drop the whole ota/plugins cache folder.
+    try {
+        if (boost::filesystem::exists(cache_folder))
+            fs::remove_all(cache_folder);
+    } catch (...) {
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": failed to remove the plugin cache folder " << cache_folder.string();
+    }
     app_config->set("update_network_plugin", "false");
 }
 
