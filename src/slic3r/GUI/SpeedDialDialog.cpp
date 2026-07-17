@@ -55,6 +55,8 @@ SpeedDialWebDialog::SpeedDialWebDialog(wxWindow* parent)
     }
 }
 
+SpeedDialWebDialog::~SpeedDialWebDialog() { m_alive->store(false, std::memory_order_release); }
+
 void SpeedDialWebDialog::request_show()
 {
     if (IsShown()) {
@@ -77,6 +79,18 @@ void SpeedDialWebDialog::on_script_message(const nlohmann::json& payload)
     if (handle_common_script_command(payload))
         return;
 
+    // Defer command handling out of the webview script-message callback: GTK and macOS deliver
+    // it synchronously inside the native webview callback, and window work on that stack is the
+    // crash class fixed in b779a7bfed/f2ccbfc8b5 (see PluginsDialog::on_script_message).
+    // run_action puts a modal confirm on that stack, which is the same bug.
+    wxGetApp().CallAfter([this, alive = m_alive, payload]() {
+        if (alive->load(std::memory_order_acquire))
+            handle_web_command(payload);
+    });
+}
+
+void SpeedDialWebDialog::handle_web_command(const nlohmann::json& payload)
+{
     const std::string command = payload.value("command", "");
     if (command == "request_actions") {
         m_page_ready = true;
