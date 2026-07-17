@@ -14,11 +14,11 @@ namespace Slic3r {
 // Path safety
 // ---------------------------------------------------------------------------
 
-bool is_inside_allowed_root(const std::filesystem::path& candidate, const std::filesystem::path& allowed_root)
+bool is_inside_allowed_root(const boost::filesystem::path& candidate, const boost::filesystem::path& allowed_root)
 {
-    namespace fs = std::filesystem;
+    namespace fs = boost::filesystem;
 
-    std::error_code ec;
+    boost::system::error_code ec;
 
     // Canonicalize both paths.  weakly_canonical resolves symlinks but does
     // NOT require the path to exist — it canonicalizes the prefix that exists
@@ -79,7 +79,7 @@ bool is_inside_allowed_root(const std::filesystem::path& candidate, const std::f
 thread_local std::string PluginAuditManager::m_current_plugin_key           = "";
 thread_local std::string PluginAuditManager::m_current_capability_name     = "";
 thread_local PluginAuditManager::AuditMode PluginAuditManager::m_audit_mode = PluginAuditManager::AuditMode::Loading;
-thread_local std::vector<std::filesystem::path> PluginAuditManager::m_scoped_allowed_roots;
+thread_local std::vector<boost::filesystem::path> PluginAuditManager::m_scoped_allowed_roots;
 thread_local bool PluginAuditManager::m_has_last_violation = false;
 thread_local AuditViolation PluginAuditManager::m_last_violation;
 
@@ -127,7 +127,7 @@ std::string PluginAuditManager::current_capability() const { return m_current_ca
 
 void PluginAuditManager::clear_current_capability() { m_current_capability_name.clear(); }
 
-void PluginAuditManager::add_global_allowed_root(const std::filesystem::path& root)
+void PluginAuditManager::add_global_allowed_root(const boost::filesystem::path& root)
 {
     if (root.empty())
         return;
@@ -137,7 +137,7 @@ void PluginAuditManager::add_global_allowed_root(const std::filesystem::path& ro
     BOOST_LOG_TRIVIAL(info) << "[AUDIT] Global allowed root: " << root.string();
 }
 
-void PluginAuditManager::add_scoped_allowed_root(const std::filesystem::path& root)
+void PluginAuditManager::add_scoped_allowed_root(const boost::filesystem::path& root)
 {
     if (root.empty())
         return;
@@ -175,12 +175,12 @@ AuditDecision PluginAuditManager::check_open(const std::string& path_str, const 
             return {true, ""};
     }
 
-    namespace fs = std::filesystem;
+    namespace fs = boost::filesystem;
     fs::path candidate(path_str);
 
     // Resolve relative paths against the current working directory
     if (candidate.is_relative()) {
-        std::error_code ec;
+        boost::system::error_code ec;
         candidate = fs::absolute(candidate, ec);
         if (ec)
             candidate = fs::path(path_str);

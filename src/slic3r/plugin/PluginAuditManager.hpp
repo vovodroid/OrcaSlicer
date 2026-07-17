@@ -2,10 +2,11 @@
 #define slic3r_PluginAuditManager_hpp_
 
 #include <Python.h>
-#include <filesystem>
 #include <mutex>
 #include <string>
 #include <vector>
+
+#include <boost/filesystem.hpp>
 
 namespace Slic3r {
 
@@ -17,14 +18,14 @@ struct AuditDecision {
 struct AuditViolation {
     std::string            plugin_key;
     std::string            event_name;
-    std::filesystem::path  path;
+    boost::filesystem::path  path;
     std::string            reason;
 };
 
 // Returns true if candidate resolves to a path inside allowed_root.
 // Uses weakly_canonical and component-wise comparison to reject traversal attacks.
-bool is_inside_allowed_root(const std::filesystem::path& candidate,
-                            const std::filesystem::path& allowed_root);
+bool is_inside_allowed_root(const boost::filesystem::path& candidate,
+                            const boost::filesystem::path& allowed_root);
 
 class PluginAuditManager
 {
@@ -48,8 +49,8 @@ public:
     void        clear_current_capability();
 
     // --- allowed-roots registry ---
-    void add_global_allowed_root(const std::filesystem::path& root);
-    void add_scoped_allowed_root(const std::filesystem::path& root);
+    void add_global_allowed_root(const boost::filesystem::path& root);
+    void add_scoped_allowed_root(const boost::filesystem::path& root);
 
     // --- enforcement mode ---
     enum class AuditMode {
@@ -85,12 +86,12 @@ private:
     static thread_local std::string  m_current_plugin_key;
     static thread_local std::string  m_current_capability_name;
     static thread_local AuditMode    m_audit_mode;
-    static thread_local std::vector<std::filesystem::path> m_scoped_allowed_roots;
+    static thread_local std::vector<boost::filesystem::path> m_scoped_allowed_roots;
     static thread_local bool         m_has_last_violation;
     static thread_local AuditViolation m_last_violation;
 
     std::mutex m_mutex;
-    std::vector<std::filesystem::path> m_global_allowed_roots;
+    std::vector<boost::filesystem::path> m_global_allowed_roots;
 };
 
 // RAII guard that sets the current plugin key and capability name, restoring the previous
@@ -113,7 +114,7 @@ private:
     std::string                   m_previous_id;
     std::string                   m_previous_capability;
     PluginAuditManager::AuditMode m_previous_mode;
-    std::vector<std::filesystem::path> m_previous_scoped_roots;
+    std::vector<boost::filesystem::path> m_previous_scoped_roots;
 };
 
 } // namespace Slic3r

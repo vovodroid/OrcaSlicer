@@ -1518,7 +1518,7 @@ function RunScriptPlugin(pluginId, capabilityName = "") {
   if (!plugin || !capability)
     return;
 
-  SendMessage("run_script_plugin", {
+  SendMessage("run_script_plugin_capability", {
     plugin_key: pluginId,
     capability_name: String(capability.name || "")
   });

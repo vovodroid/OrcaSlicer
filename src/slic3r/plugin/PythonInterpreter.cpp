@@ -4,7 +4,7 @@
 #include "PluginAuditManager.hpp"
 #include <boost/filesystem/path.hpp>
 #include <pytypedefs.h>
-#include "PythonFileUtils.hpp"
+#include "PluginFsUtils.hpp"
 
 #include <pybind11/embed.h>
 

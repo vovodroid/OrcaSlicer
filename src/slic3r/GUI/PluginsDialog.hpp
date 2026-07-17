@@ -53,6 +53,13 @@ private:
     void open_plugin_on_cloud(const std::string& sharing_token);
     void open_plugin_hub();
     void on_script_message(const nlohmann::json& payload) override;
+    // Runs one web command on a clean main-loop stack; see on_script_message.
+    void handle_web_command(const nlohmann::json& payload);
+    // Re-raises this dialog after a transient modal it opened (file dialog, message box,
+    // progress dialog). Native macOS panels end by re-activating the app's main window
+    // (the mainframe) instead of this webview-hosting dialog, burying it; wx only
+    // compensates for generic wxDialog modals (wxDialog::EndModal raises the parent).
+    void restore_z_order();
 
     void send_plugins();
     void set_plugin_sort(const std::string& sort_key, const std::string& sort_order);
@@ -60,7 +67,7 @@ private:
 
     bool get_descriptor(const std::string& plugin_key, Slic3r::PluginDescriptor& descriptor) const;
 
-    void refresh_plugin_catalog_async(const wxString& title, const wxString& message, bool fetch_cloud);
+    void refresh_plugin_metadata_async(const wxString& title, const wxString& message, bool fetch_cloud);
     void refresh_plugins();
     void toggle_plugin(const std::string& plugin_key, bool enabled);
     void toggle_plugin_capability(const std::string& plugin_key, PluginCapabilityType type, const std::string& capability_name, bool enabled);
@@ -69,7 +76,7 @@ private:
     void install_plugin_from_file();
     bool install_plugin_package(const std::string& package_path);
     bool install_cloud_plugin(const std::string& uuid, const std::string& version, const wxString& name);
-    void run_script_plugin(const std::string& plugin_key, const std::string& capability_name);
+    void run_script_plugin_capability(const std::string& plugin_key, const std::string& capability_name);
     // Config tab. Both are scoped to the full capability ID: a request naming a
     // capability that is gone or not configurable is refused rather than served from, or written
     // to, some other entry.
@@ -114,7 +121,8 @@ private:
 
         timer->Start(100);
 
-        std::thread([alive,
+        std::thread([this,
+                     alive,
                      progress,
                      timer,
                      run       = std::forward<Run>(run),
@@ -131,7 +139,8 @@ private:
             if (wxTheApp == nullptr)
                 return;
 
-            wxTheApp->CallAfter([alive,
+            wxTheApp->CallAfter([this,
+                                 alive,
                                  progress,
                                  timer,
                                  on_finish = std::move(on_finish),
@@ -141,6 +150,7 @@ private:
 
                 if (alive->load(std::memory_order_acquire)) {
                     progress->Destroy();
+                    restore_z_order();
                     on_finish();
                 } else if (finish_after_dialog_destroyed) {
                     on_finish();
@@ -240,9 +250,9 @@ private:
     PluginSortKey m_plugin_sort_key       = PluginSortKey::None;
     PluginSortOrder m_plugin_sort_order   = PluginSortOrder::Asc;
 
-    // Serializes run_script_plugin. With main-thread execution a plugin's orca.host.ui modal
+    // Serializes run_script_plugin_capability. With main-thread execution a plugin's orca.host.ui modal
     // (message/show_dialog) or the result message box pumps a nested event loop, which could
-    // re-dispatch the web "run_script_plugin" command and start a second, overlapping run.
+    // re-dispatch the web "run_script_plugin_capability" command and start a second, overlapping run.
     bool m_script_running = false;
 
     // Plugin whose asynchronous activation is in flight, awaited by resolve_pending_activation().

@@ -8,7 +8,10 @@ add_executable(${_TEST_NAME}_tests
     test_plugin_install.cpp
     test_plugin_lifecycle.cpp
     test_slicing_pipeline_bindings.cpp
+    test_slicing_pipeline_params.cpp
     test_plugin_sort.cpp
+    test_plugin_cloud_metadata.cpp
+    ../fff_print/test_helpers.cpp
     )
 
 if (MSVC)
@@ -30,6 +33,19 @@ if (WIN32)
             "${CMAKE_PREFIX_PATH}/libpython/vcruntime140_1.dll"
             "$<TARGET_FILE_DIR:${_TEST_NAME}_tests>"
         COMMENT "Copying Python runtime for slic3rutils plugin host API tests"
+        VERBATIM
+    )
+elseif (APPLE)
+    target_link_options(${_TEST_NAME}_tests PRIVATE
+        "LINKER:-rpath,@executable_path/python/lib")
+
+    add_custom_command(TARGET ${_TEST_NAME}_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
+            "$<TARGET_FILE_DIR:${_TEST_NAME}_tests>/python"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_PREFIX_PATH}/libpython"
+            "$<TARGET_FILE_DIR:${_TEST_NAME}_tests>/python"
+        COMMENT "Copying Python runtime for macOS plugin host API tests"
         VERBATIM
     )
 endif()
