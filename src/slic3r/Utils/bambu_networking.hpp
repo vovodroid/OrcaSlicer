@@ -386,6 +386,8 @@ struct NetworkLibraryVersionInfo {
     bool is_latest;
     std::string warning;
     bool is_discovered;
+    // Whether the versioned library file for this entry is present on disk.
+    bool is_installed = false;
 
     static NetworkLibraryVersionInfo from_static(const NetworkLibraryVersion& v) {
         return {

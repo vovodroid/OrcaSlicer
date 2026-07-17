@@ -219,9 +219,14 @@ void NetworkPluginDownloadDialog::setup_version_selector()
             label = wxString::FromUTF8("\xE2\x94\x94 ") + wxString::FromUTF8(ver.display_name);
         } else {
             label = wxString::FromUTF8(ver.display_name);
-            if (ver.is_latest) {
-                label += wxString(" ") + _L("(Latest)");
-            }
+        }
+        // Same labeling as the Preferences selector: "(Latest)" = highest listed
+        // version, "(installed)" = library already on disk; both can apply.
+        if (ver.is_latest) {
+            label += wxString(" ") + _L("(Latest)");
+        }
+        if (ver.is_installed) {
+            label += wxString(" ") + _L("(installed)");
         }
         m_version_combo->Append(label);
     }

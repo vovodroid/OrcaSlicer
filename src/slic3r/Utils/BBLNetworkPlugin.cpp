@@ -885,6 +885,24 @@ std::vector<NetworkLibraryVersionInfo> get_all_available_versions()
                       NetworkLibraryVersionInfo::from_discovered(full, full, ""));
     }
 
+    // Final pass: record what is actually present on disk, and put the "(Latest)"
+    // label on the truly highest full version in the list - an OTA-installed build
+    // can be newer than the newest whitelisted entry. get_latest_network_version()
+    // intentionally keeps returning the static whitelist default, which drives the
+    // download and update-check decisions.
+    size_t highest = result.size();
+    for (size_t i = 0; i < result.size(); ++i) {
+        auto& info = result[i];
+        info.is_installed = info.is_discovered ||
+            BBLNetworkPlugin::versioned_library_exists(info.version);
+        info.is_latest = false;
+        if (info.suffix.empty() &&
+            (highest == result.size() || info.version > result[highest].version))
+            highest = i;
+    }
+    if (highest < result.size())
+        result[highest].is_latest = true;
+
     return result;
 }
 

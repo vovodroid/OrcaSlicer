@@ -90,10 +90,21 @@ TEST_CASE_METHOD(PluginFolderFixture, "Same-series OTA plugin versions are surfa
     const auto& ota = versions[ota_pos];
     REQUIRE(ota.is_discovered);
     REQUIRE(ota.suffix.empty());
-    REQUIRE_FALSE(ota.is_latest);
 
-    // The static whitelist entry keeps its "latest" role.
-    REQUIRE(versions[latest_pos].is_latest);
+    // "(Latest)" is dynamic: the OTA build is the highest listed version, so it takes
+    // the label from the static whitelist entry - and it is also marked installed.
+    REQUIRE(ota.is_latest);
+    REQUIRE(ota.is_installed);
+    REQUIRE_FALSE(versions[latest_pos].is_latest);
+    REQUIRE_FALSE(versions[latest_pos].is_installed);
+
+    // A whitelisted version whose library exists on disk is marked installed.
+    for (const auto& info : versions) {
+        if (info.version == "02.03.00.62")
+            REQUIRE(info.is_installed);
+    }
+
+    // The static default used for download and update-check decisions is unchanged.
     REQUIRE(std::string(get_latest_network_version()) == "02.08.01.52");
 }
 
@@ -109,4 +120,13 @@ TEST_CASE_METHOD(PluginFolderFixture, "Legacy series never adopts discovered bui
 
     REQUIRE(count_version(versions, legacy_sibling) == 0);
     REQUIRE(count_version(versions, legacy) == 1);
+
+    // With nothing else on disk, the highest whitelisted version holds "(Latest)"
+    // even though its library is not installed.
+    for (const auto& info : versions) {
+        if (info.version == "02.08.01.52") {
+            REQUIRE(info.is_latest);
+            REQUIRE_FALSE(info.is_installed);
+        }
+    }
 }

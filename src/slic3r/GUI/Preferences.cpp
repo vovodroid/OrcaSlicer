@@ -1270,10 +1270,12 @@ wxBoxSizer *PreferencesDialog::create_item_network_plugin_version(wxString title
             label = wxString::FromUTF8(ver.display_name);
         }
 
+        // "(Latest)" marks the highest listed version; "(installed)" marks versions
+        // whose library is already on disk. One entry can carry both.
         if (ver.is_latest) {
             label += " " + _L("(Latest)");
-        } else if (ver.is_discovered && ver.suffix.empty()) {
-            // A same-series build found on disk (usually installed by the OTA update).
+        }
+        if (ver.is_installed) {
             label += " " + _L("(installed)");
         }
         m_network_version_combo->Append(label);
