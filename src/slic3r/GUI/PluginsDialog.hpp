@@ -250,11 +250,6 @@ private:
     PluginSortKey m_plugin_sort_key       = PluginSortKey::None;
     PluginSortOrder m_plugin_sort_order   = PluginSortOrder::Asc;
 
-    // Serializes run_script_plugin_capability. With main-thread execution a plugin's orca.host.ui modal
-    // (message/show_dialog) or the result message box pumps a nested event loop, which could
-    // re-dispatch the web "run_script_plugin_capability" command and start a second, overlapping run.
-    bool m_script_running = false;
-
     // Plugin whose asynchronous activation is in flight, awaited by resolve_pending_activation().
     // Empty when no activation is pending.
     std::string m_activating_plugin_key;

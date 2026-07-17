@@ -7,8 +7,6 @@
 #include "slic3r/plugin/PluginConfig.hpp"
 #include "slic3r/plugin/PluginFsUtils.hpp"
 #include "slic3r/plugin/PluginManager.hpp"
-#include "slic3r/plugin/PythonInterpreter.hpp"
-#include "slic3r/plugin/pluginTypes/script/ScriptPluginCapability.hpp"
 
 #include <libslic3r/Utils.hpp>
 
@@ -17,7 +15,7 @@
 #include <slic3r/GUI/format.hpp>
 
 #include <slic3r/plugin/PluginDescriptor.hpp>
-#include <slic3r/plugin/PluginLoader.hpp>
+#include <slic3r/plugin/PythonPluginInterface.hpp>
 
 #include <boost/filesystem.hpp>
 #include <boost/log/trivial.hpp>
@@ -977,7 +975,7 @@ void PluginsDialog::run_script_plugin_capability(const std::string& plugin_key, 
     manager.clear_plugin_error(plugin_key);
     send_plugins();
 
-    const bool skipped      = result.status == PluginResult::Skipped;
+    const bool     skipped  = result.status == PluginResult::Skipped;
     const wxString fallback = skipped ? _L("Script plugin skipped.") : _L("Script plugin finished.");
     const wxString message  = result.message.empty() ? fallback : from_u8(result.message);
     show_status(message, skipped ? "info" : "success");

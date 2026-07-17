@@ -51,6 +51,12 @@
   --ctx-bg: #ffffff;
   --ctx-border: #cccccc;
   --ctx-hover: #efefef;
+
+  /* Speed dial icon tile treatment */
+  --speed-tile-bg: #efefef;
+  --speed-tile-border: #d8d8d8;
+  --speed-tile-text-s: 74%;
+  --speed-tile-text-l: 34%;
 }
 
 :root[data-orca-theme="dark"] {
@@ -85,6 +91,12 @@
   --ctx-bg: #2a313a;
   --ctx-border: #4b5664;
   --ctx-hover: #3a4451;
+
+  /* Speed dial icon tile treatment */
+  --speed-tile-bg: #34343b;
+  --speed-tile-border: #50505a;
+  --speed-tile-text-s: 82%;
+  --speed-tile-text-l: 84%;
 }
 
 /* Re-theme the shared common.css chrome through variables (replaces dark.css's

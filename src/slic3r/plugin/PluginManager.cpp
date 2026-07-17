@@ -1112,61 +1112,88 @@ std::vector<PluginManager::CapabilityLifecycleFn> PluginManager::copy_capability
     return it == m_capability_callbacks.end() ? std::vector<CapabilityLifecycleFn>{} : it->second;
 }
 
-// The run_on_*_callbacks below are called from detached load/unload workers. They copy the
-// subscriber list under m_mutex and invoke it OUTSIDE the lock: subscribers re-enter the manager,
-// and no callback may run while the registry lock is held.
+// The run_on_*_callbacks below are called from detached load/unload workers. They snapshot the
+// subscriber list under m_mutex (the copy protects the in-flight loop from a callback that
+// subscribes mid-dispatch, and serialises against a concurrent subscribe), then hand the snapshot
+// to the UI thread: subscribers touch wx and must not run on a worker, and none may run while the
+// registry lock is held. The dispatch runs inline when already on the UI thread, else via
+// CallAfter, since calling wx off the main thread is UB.
 void PluginManager::run_on_load_callbacks(const std::string& plugin_key)
 {
-    for (auto& fn : copy_callbacks(CallbackType::Load)) {
-        try {
-            fn(plugin_key);
-        } catch (const std::exception& ex) {
-            BOOST_LOG_TRIVIAL(error) << "Plugin load completion callback failed for " << plugin_key << ": " << ex.what();
-        } catch (...) {
-            BOOST_LOG_TRIVIAL(error) << "Plugin load completion callback failed for " << plugin_key;
+    auto work = [callbacks = copy_callbacks(CallbackType::Load), plugin_key] {
+        for (auto& fn : callbacks) {
+            try {
+                fn(plugin_key);
+            } catch (const std::exception& ex) {
+                BOOST_LOG_TRIVIAL(error) << "Plugin load completion callback failed for " << plugin_key << ": " << ex.what();
+            } catch (...) {
+                BOOST_LOG_TRIVIAL(error) << "Plugin load completion callback failed for " << plugin_key;
+            }
         }
-    }
+    };
+    if (wxTheApp == nullptr || wxIsMainThread())
+        work();
+    else
+        GUI::wxGetApp().CallAfter(std::move(work));
 }
 
 void PluginManager::run_on_unload_callbacks(const std::string& plugin_key)
 {
-    for (auto& fn : copy_callbacks(CallbackType::Unload)) {
-        try {
-            fn(plugin_key);
-        } catch (const std::exception& ex) {
-            BOOST_LOG_TRIVIAL(error) << "Plugin unload completion callback failed for " << plugin_key << ": " << ex.what();
-        } catch (...) {
-            BOOST_LOG_TRIVIAL(error) << "Plugin unload completion callback failed for " << plugin_key << ": unknown error";
+    auto work = [callbacks = copy_callbacks(CallbackType::Unload), plugin_key] {
+        for (auto& fn : callbacks) {
+            try {
+                fn(plugin_key);
+            } catch (const std::exception& ex) {
+                BOOST_LOG_TRIVIAL(error) << "Plugin unload completion callback failed for " << plugin_key << ": " << ex.what();
+            } catch (...) {
+                BOOST_LOG_TRIVIAL(error) << "Plugin unload completion callback failed for " << plugin_key << ": unknown error";
+            }
         }
-    }
+    };
+    if (wxTheApp == nullptr || wxIsMainThread())
+        work();
+    else
+        GUI::wxGetApp().CallAfter(std::move(work));
 }
 
 void PluginManager::run_on_capability_load_callbacks(const PluginCapabilityId& id)
 {
-    for (auto& fn : copy_capability_callbacks(CallbackType::Load)) {
-        try {
-            fn(id);
-        } catch (const std::exception& ex) {
-            BOOST_LOG_TRIVIAL(error) << "Plugin capability load callback failed for " << id.plugin_key << "/" << id.name << ": "
-                                     << ex.what();
-        } catch (...) {
-            BOOST_LOG_TRIVIAL(error) << "Plugin capability load callback failed for " << id.plugin_key << "/" << id.name;
+    auto work = [callbacks = copy_capability_callbacks(CallbackType::Load), id] {
+        for (auto& fn : callbacks) {
+            try {
+                fn(id);
+            } catch (const std::exception& ex) {
+                BOOST_LOG_TRIVIAL(error) << "Plugin capability load callback failed for " << id.plugin_key << "/" << id.name << ": "
+                                         << ex.what();
+            } catch (...) {
+                BOOST_LOG_TRIVIAL(error) << "Plugin capability load callback failed for " << id.plugin_key << "/" << id.name;
+            }
         }
-    }
+    };
+    if (wxTheApp == nullptr || wxIsMainThread())
+        work();
+    else
+        GUI::wxGetApp().CallAfter(std::move(work));
 }
 
 void PluginManager::run_on_capability_unload_callbacks(const PluginCapabilityId& id)
 {
-    for (auto& fn : copy_capability_callbacks(CallbackType::Unload)) {
-        try {
-            fn(id);
-        } catch (const std::exception& ex) {
-            BOOST_LOG_TRIVIAL(error) << "Plugin capability unload callback failed for " << id.plugin_key << "/" << id.name << ": "
-                                     << ex.what();
-        } catch (...) {
-            BOOST_LOG_TRIVIAL(error) << "Plugin capability unload callback failed for " << id.plugin_key << "/" << id.name;
+    auto work = [callbacks = copy_capability_callbacks(CallbackType::Unload), id] {
+        for (auto& fn : callbacks) {
+            try {
+                fn(id);
+            } catch (const std::exception& ex) {
+                BOOST_LOG_TRIVIAL(error) << "Plugin capability unload callback failed for " << id.plugin_key << "/" << id.name << ": "
+                                         << ex.what();
+            } catch (...) {
+                BOOST_LOG_TRIVIAL(error) << "Plugin capability unload callback failed for " << id.plugin_key << "/" << id.name;
+            }
         }
-    }
+    };
+    if (wxTheApp == nullptr || wxIsMainThread())
+        work();
+    else
+        GUI::wxGetApp().CallAfter(std::move(work));
 }
 
 // ── Cloud user ──────────────────────────────────────────────────────────────────────────────

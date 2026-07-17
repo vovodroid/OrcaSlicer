@@ -141,6 +141,7 @@
 #include "slic3r/Utils/bambu_networking.hpp"
 
 #include "PluginsDialog.hpp"
+#include "SpeedDialDialog.hpp"
 #include "TerminalDialog.hpp"
 
 //#ifdef WIN32
@@ -3169,6 +3170,9 @@ bool GUI_App::on_init_inner()
     plugin_mgr.discover_plugins(false, true);
 
     init_plugin_gui_wiring();
+
+    // Subscribe to the plugin loader and enumerate current actions (UI thread, once).
+    m_action_registry.init();
 
     for (const std::string& plugin_key : plugin_mgr.get_enabled_plugin_keys()) {
         if (!plugin_mgr.is_plugin_loaded(plugin_key)) {
@@ -8281,6 +8285,21 @@ void GUI_App::open_terminal_dialog()
         // Show() alone activates and fronts a freshly created window on every platform.
         m_terminal_dlg->Show();
     });
+}
+
+void GUI_App::open_speed_dial()
+{
+    if (!mainframe)
+        return;
+    if (!m_speed_dial_dialog) {
+        m_speed_dial_dialog = new SpeedDialWebDialog(mainframe);
+        m_speed_dial_dialog->Bind(wxEVT_DESTROY, [this](wxWindowDestroyEvent& event) {
+            if (event.GetEventObject() == m_speed_dial_dialog)
+                m_speed_dial_dialog = nullptr;
+            event.Skip();
+        });
+    }
+    m_speed_dial_dialog->request_show();
 }
 
 void GUI_App::open_exportpresetbundledialog(size_t open_on_tab, const std::string& highlight_option)

@@ -4,60 +4,14 @@ function PluginSearchActive() {
   return pluginSearch.query.length > 0;
 }
 
-// --- matcher: fold per-character on the fly so matched offsets stay in ORIGINAL coordinates ---
-// why: highlighting marks slices of the original string; a separate folded string would desync offsets.
-function FoldChar(ch) {
-  return ch.normalize("NFD").replace(/\p{Diacritic}/gu, ""); // accents always folded (both Cc states)
-}
-function Norm(ch, caseSensitive) {
-  const folded = FoldChar(ch);
-  return caseSensitive ? folded : folded.toLowerCase(); // Cc controls case only
-}
-function EscapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
+// why: matcher (FoldChar/Norm/FuzzyRanges/WholeWordRanges) lives in shared ../js/fuzzy-search.js,
+//      loaded before this script - it is shared with the Speed Dial popup. Cc = pluginSearch.caseSensitive.
 function MatchText(text, query) {
   if (!query)
     return [];
-  return pluginSearch.wholeWord ? WholeWordRanges(text, query) : FuzzyRanges(text, query);
-}
-
-// Fuzzy: ordered subsequence. Builds ranges in original coordinates, merging adjacent runs on the fly.
-function FuzzyRanges(text, query) {
-  const caseSensitive = pluginSearch.caseSensitive;
-  const needle = Array.from(query).map((ch) => Norm(ch, caseSensitive)).join("");
-  const ranges = [];
-  let qi = 0;
-  for (let i = 0; i < text.length && qi < needle.length; i++) {
-    if (Norm(text[i], caseSensitive) === needle[qi]) {
-      const last = ranges[ranges.length - 1];
-      if (last && last[1] === i)
-        last[1] = i + 1;
-      else
-        ranges.push([i, i + 1]);
-      qi++;
-    }
-  }
-  return qi === needle.length ? ranges : null;
-}
-
-// Whole word: literal \b-bounded match that bypasses fuzzy; Cc still applies. The per-char fold keeps the
-// haystack length-aligned to the original text, so regex indices map straight back to original offsets.
-// note: one-to-many folds (ligatures, eszett) shift offsets by a char; rare in plugin names, cosmetic only.
-function WholeWordRanges(text, query) {
-  const caseSensitive = pluginSearch.caseSensitive;
-  const haystack = Array.from(text).map((ch) => Norm(ch, caseSensitive)).join("");
-  const needle = Array.from(query).map((ch) => Norm(ch, caseSensitive)).join("");
-  if (!needle)
-    return null;
-  const re = new RegExp(`\\b${EscapeRegExp(needle)}\\b`, "g");
-  const ranges = [];
-  let match;
-  // why: needle is non-empty, so \b-bounded matches are never zero-length - no empty-match guard needed.
-  while ((match = re.exec(haystack)) !== null)
-    ranges.push([match.index, match.index + match[0].length]);
-  return ranges.length > 0 ? ranges : null;
+  return pluginSearch.wholeWord
+    ? WholeWordRanges(text, query, pluginSearch.caseSensitive)
+    : FuzzyRanges(text, query, pluginSearch.caseSensitive);
 }
 
 // Per-plugin evaluator consumed by RenderPlugins. The name text mirrors LabelCell's pluginLabelText so
