@@ -114,7 +114,7 @@ std::unique_ptr<AppAction> make_action(const std::string& plugin_key, const std:
     if (!manager.is_plugin_loaded(plugin_key))
         return nullptr;
     // only_enabled defaults true, so a disabled capability resolves to nullptr here.
-    if (!manager.get_plugin_capability(plugin_key, capability, PluginCapabilityType::Script))
+    if (!manager.get_plugin_capability({PluginCapabilityType::Script, capability, plugin_key}))
         return nullptr;
     return std::make_unique<PluginScriptAction>(plugin_key, capability, source_name);
 }

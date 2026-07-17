@@ -5,6 +5,8 @@
 #include <slic3r/plugin/PluginDescriptor.hpp>
 #include <slic3r/plugin/PluginFsUtils.hpp>
 
+#include "plugin_test_utils.hpp"
+
 #include <boost/filesystem.hpp>
 
 #include <fstream>
@@ -14,30 +16,6 @@ using namespace Slic3r;
 namespace fs = boost::filesystem;
 
 namespace {
-
-// Point data_dir() at a throwaway directory for the lifetime of a test and
-// restore the previous value afterwards, so install_plugin() writes into a
-// disposable tree and tests don't leak state into each other.
-struct ScopedDataDir
-{
-    std::string previous;
-    fs::path    dir;
-
-    explicit ScopedDataDir(const std::string& tag)
-    {
-        previous = data_dir();
-        dir      = fs::temp_directory_path() / fs::unique_path("orca-" + tag + "-%%%%-%%%%");
-        fs::create_directories(dir);
-        set_data_dir(dir.string());
-    }
-
-    ~ScopedDataDir()
-    {
-        set_data_dir(previous);
-        boost::system::error_code ec;
-        fs::remove_all(dir, ec);
-    }
-};
 
 fs::path write_py_file(const fs::path& dir, const std::string& filename, const std::string& contents)
 {
@@ -142,38 +120,4 @@ TEST_CASE("install-state sidecar is the source of truth for a cloud plugin's ins
     scanned.version = "1.0.0"; // as parsed from the unchanged PEP723 header
     read_install_state(plugin_dir, scanned);
     CHECK(scanned.installed_version == "1.2.0");
-}
-
-TEST_CASE("install_plugin parses [tool.orcaslicer.plugin.settings] into descriptor.settings", "[PluginInstall]")
-{
-    ScopedDataDir data_dir_guard("plugin-settings");
-
-    // A PEP-723 header with a per-plugin settings sub-table. Values stay strings; the plugin
-    // parses what it needs (ctx.params). This is the source Twistify reads its knobs from.
-    const std::string contents =
-        "# /// script\n"
-        "# requires-python = \">=3.12\"\n"
-        "#\n"
-        "# [tool.orcaslicer.plugin]\n"
-        "# name = \"Settings Plugin\"\n"
-        "# type = \"slicing-pipeline\"\n"
-        "#\n"
-        "# [tool.orcaslicer.plugin.settings]\n"
-        "# twist_deg_per_mm = \"1.5\"\n"
-        "# taper_per_mm = \"-0.004\"\n"
-        "# ///\n"
-        "print('ok')\n";
-    const fs::path py = write_py_file(data_dir_guard.dir / "src", "settings.py", contents);
-
-    PluginDescriptor descriptor;
-    std::string error;
-    const bool installed = plugin_loader::install_plugin(py, /*cloud_user_id=*/"", descriptor, error);
-
-    REQUIRE(installed);
-    CHECK(error.empty());
-    REQUIRE(descriptor.settings.count("twist_deg_per_mm") == 1);
-    CHECK(descriptor.settings.at("twist_deg_per_mm") == "1.5");
-    CHECK(descriptor.settings.at("taper_per_mm") == "-0.004");
-    // Identity keys are NOT captured as settings (they belong to [tool.orcaslicer.plugin]).
-    CHECK(descriptor.settings.count("name") == 0);
 }

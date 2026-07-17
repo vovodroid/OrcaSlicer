@@ -81,12 +81,19 @@
         <div id="pluginList" class="body thin-scroll"></div>
       </section>
 
+      <!-- Drag to redistribute the dialog's height between the list and the details pane; the hit
+           area is the whole strip, the visible divider is the line drawn inside it. -->
+      <div id="paneSplitter" class="pane-splitter" role="separator" aria-orientation="horizontal"
+        aria-label="Resize the plugin list" title="Drag to resize; double-click to reset"></div>
+
       <section class="pane details-pane">
         <div class="detail-tabs" role="tablist" aria-label="Plugin details">
           <button id="pluginInfoTab" class="detail-tab active" type="button" role="tab"
             aria-selected="true" aria-controls="pluginInfoPanel" data-tab="plugin-info">Plugin Info</button>
           <button id="descriptionTab" class="detail-tab" type="button" role="tab" tabindex="-1"
             aria-selected="false" aria-controls="descriptionPanel" data-tab="description">Description</button>
+          <button id="configTab" class="detail-tab" type="button" role="tab" tabindex="-1"
+            aria-selected="false" aria-controls="configPanel" data-tab="config">Config</button>
           <button id="changelogTab" class="detail-tab" type="button" role="tab" tabindex="-1"
             aria-selected="false" aria-controls="changelogPanel" data-tab="changelog">Changelog</button>
           <button id="diagnosticsTab" class="detail-tab" type="button" role="tab" tabindex="-1"
@@ -137,6 +144,39 @@
             aria-labelledby="descriptionTab" data-panel="description" hidden>
             <h2 class="detail-section-title">Description</h2>
             <div id="detailDescription" class="detail-description">No description available</div>
+          </section>
+
+          <section id="configPanel" class="detail-tab-panel" role="tabpanel" tabindex="0"
+            aria-labelledby="configTab" data-panel="config" hidden>
+            <div id="configEmpty" class="detail-empty">Select a plugin to configure its capabilities</div>
+            <div id="configLayout" class="config-layout" hidden>
+              <div id="configSidebar" class="config-sidebar thin-scroll" role="listbox"
+                aria-label="Configurable capabilities"></div>
+              <div class="config-view">
+                <div id="configError" class="config-error" role="status" aria-live="polite" hidden></div>
+                <div id="configEditor" class="config-editor" hidden>
+                  <textarea id="configText" class="config-textarea thin-scroll" spellcheck="false"
+                    autocomplete="off" autocapitalize="off" aria-label="Capability configuration (JSON)"></textarea>
+                </div>
+                <!-- Custom capability UI. Sandboxed without allow-same-origin, so the plugin's HTML
+                     runs in an opaque origin and reaches the host only through the injected
+                     window.orca bridge. -->
+                <iframe id="configCustom" class="config-custom" title="Plugin configuration"
+                  sandbox="allow-scripts" referrerpolicy="no-referrer" hidden></iframe>
+                <!-- JSON-editor chrome only: a custom UI renders its own save/restore controls and
+                     drives them through the window.orca bridge. -->
+                <div id="configFooter" class="config-view-footer" hidden>
+                  <span id="configValidation" class="config-validation" role="status" aria-live="polite"></span>
+                  <div class="config-actions">
+                    <button id="configRestoreBtn" class="ButtonStyleRegular ButtonTypeChoice" type="button"
+                      title="Discard the settings saved for this capability and restore the plugin's defaults">
+                      Restore defaults
+                    </button>
+                    <button id="configSaveBtn" class="ButtonStyleConfirm ButtonTypeChoice" type="button">Save</button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section id="changelogPanel" class="detail-tab-panel thin-scroll" role="tabpanel" tabindex="0"

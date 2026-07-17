@@ -23,6 +23,8 @@
 #include "OG_CustomCtrl.hpp"
 #include "MsgDialog.hpp"
 #include "BitmapComboBox.hpp"
+#include "PluginsConfigDialog.hpp"
+#include "Widgets/Button.hpp"
 
 // BBS
 #include "Notebook.hpp"
@@ -1995,8 +1997,6 @@ void Choice::msw_rescale()
 
 void PluginField::BUILD()
 {
-    // Wrap the dynamic rows in a single container panel so the field is a proper window-field
-    // (getWindow() != null). The panel owns m_main_sizer; all row controls are children of it.
     auto* panel = new wxPanel(m_parent, wxID_ANY);
     wxGetApp().UpdateDarkUI(panel);
     window = panel;
@@ -2004,7 +2004,6 @@ void PluginField::BUILD()
     m_main_sizer = new wxBoxSizer(wxVERTICAL);
     panel->SetSizer(m_main_sizer);
 
-    // Initialize with default values or empty
     if (m_opt.type == coStrings) {
         const ConfigOptionStrings* vec = m_opt.get_default_value<ConfigOptionStrings>();
         if (vec != nullptr && !vec->values.empty()) {
@@ -2095,13 +2094,11 @@ void PluginField::add_plugin_row(const wxString& value, bool is_last)
     const auto button_size = wxSize(def_width_thinner() * m_em_unit, -1);
     auto row_sizer = new wxBoxSizer(wxHORIZONTAL);
 
-    // Select button with search icon
     ScalableButton* select_btn = new ScalableButton(window, wxID_ANY, "search", wxEmptyString,
         button_size, wxDefaultPosition, wxBU_EXACTFIT | wxNO_BORDER, true, 16);
     wxGetApp().UpdateDarkUI(select_btn);
     select_btn->SetToolTip(_L("Select plugin"));
 
-    // Display text control
     wxTextCtrl* display = new wxTextCtrl(window, wxID_ANY, value,
         wxDefaultPosition, wxSize(def_width_wider() * m_em_unit, wxDefaultCoord),
         wxTE_READONLY);
@@ -2117,7 +2114,6 @@ void PluginField::add_plugin_row(const wxString& value, bool is_last)
         remove_btn->SetToolTip(_L("Remove plugin"));
     }
 
-    // Add button (only on last row)
     ScalableButton* add_btn = nullptr;
     if (is_last && !m_opt.readonly) {
         add_btn = new ScalableButton(window, wxID_ANY, "param_add", wxEmptyString,
@@ -2238,7 +2234,6 @@ void PluginField::set_value(const boost::any& value, bool change_event)
 {
     m_disable_change_event = !change_event;
 
-    // Handle different input types
     if (value.empty()) {
         m_values.clear();
     } else if (value.type() == typeid(std::vector<std::string>)) {
@@ -2307,6 +2302,126 @@ void PluginField::msw_rescale()
 {
     Field::msw_rescale();
     rebuild_ui();
+}
+
+namespace {
+
+// The stored text as a document, or an empty array when it is absent or unparseable.
+nlohmann::json plugin_overrides_as_json(const std::string& text)
+{
+    if (text.empty())
+        return nlohmann::json::array();
+    return nlohmann::json::parse(text, nullptr, /* allow_exceptions */ false);
+}
+
+} // namespace
+
+void PluginConfigField::BUILD()
+{
+    m_button = new ::Button(m_parent, _L("Configure"));
+    // ButtonType::Parameter gives the button the same height as the parameter fields above it.
+    m_button->SetStyle(ButtonStyle::Regular, ButtonType::Parameter);
+
+    wxSize size(def_width_wider() * m_em_unit, m_button->GetMinSize().GetHeight());
+    if (m_opt.height >= 0) size.SetHeight(m_opt.height * m_em_unit);
+    if (m_opt.width >= 0)  size.SetWidth(m_opt.width * m_em_unit);
+    m_button->SetMinSize(size);
+    m_button->SetSize(size);
+
+    m_button->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { open_dialog(); });
+    m_button->SetToolTip(get_tooltip_text(_L("Configure")));
+
+    window = m_button;
+
+    if (const ConfigOptionString* def = m_opt.get_default_value<ConfigOptionString>())
+        m_json = def->value;
+
+    update_button_label();
+    m_value = m_json;
+}
+
+void PluginConfigField::update_button_label()
+{
+    if (m_button == nullptr)
+        return;
+
+    const nlohmann::json entries = plugin_overrides_as_json(m_json);
+    const size_t         count   = entries.is_array() ? entries.size() : 0;
+
+    m_button->SetLabel(count == 0 ? _L("Configure")
+                                  : wxString::Format(_L("Configure (%d)"), int(count)));
+}
+
+void PluginConfigField::open_dialog()
+{
+    const Preset::Type type = static_cast<Preset::Type>(m_preset_type);
+    if (type != Preset::TYPE_PRINT && type != Preset::TYPE_FILAMENT && type != Preset::TYPE_PRINTER)
+        return;
+
+    std::string edited;
+    {
+        PluginsConfigDialog dlg(m_button, type, m_json);
+        dlg.ShowModal();
+        edited = dlg.overrides_json();
+    }
+
+    // Compare semantically: a round-trip through the serializer can reorder keys or drop whitespace,
+    // and that alone must not dirty the preset.
+    if (plugin_overrides_as_json(m_json) == plugin_overrides_as_json(edited))
+        return;
+
+    m_json  = edited;
+    m_value = m_json;
+    update_button_label();
+    on_change_field();
+}
+
+void PluginConfigField::set_value(const boost::any& value, bool change_event)
+{
+    m_disable_change_event = !change_event;
+
+    if (value.type() == typeid(wxString))
+        m_json = into_u8(boost::any_cast<wxString>(value));
+    else if (value.type() == typeid(std::string))
+        m_json = boost::any_cast<std::string>(value);
+
+    m_value = m_json;
+    update_button_label();
+
+    m_disable_change_event = false;
+}
+
+boost::any& PluginConfigField::get_value()
+{
+    // std::string, not wxString: change_opt_value any_casts a coString to std::string.
+    m_value = m_json;
+    return m_value;
+}
+
+void PluginConfigField::enable()
+{
+    if (m_button)
+        m_button->Enable();
+}
+
+void PluginConfigField::disable()
+{
+    if (m_button)
+        m_button->Disable();
+}
+
+void PluginConfigField::msw_rescale()
+{
+    Field::msw_rescale();
+    if (m_button == nullptr)
+        return;
+
+    m_button->SetStyle(ButtonStyle::Regular, ButtonType::Parameter);
+
+    wxSize size(def_width_wider() * m_em_unit, m_button->GetMinSize().GetHeight());
+    if (m_opt.height >= 0) size.SetHeight(m_opt.height * m_em_unit);
+    if (m_opt.width >= 0)  size.SetWidth(m_opt.width * m_em_unit);
+    m_button->SetMinSize(size);
 }
 
 void ColourPicker::BUILD()

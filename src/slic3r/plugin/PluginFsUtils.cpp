@@ -31,10 +31,16 @@ namespace Slic3r {
 
 const char* const INSTALL_STATE_FILE = ".install_state.json";
 
+std::string get_orca_plugins_dir()
+{
+    namespace fs = boost::filesystem;
+    return (fs::path(data_dir()) / "orca_plugins").string();
+}
+
 std::string get_cloud_plugin_dir(const std::string& user_id)
 {
     namespace fs = boost::filesystem;
-    return (fs::path(data_dir()) / "orca_plugins" / PLUGIN_SUBSCRIBED_DIR / user_id).string();
+    return (fs::path(get_orca_plugins_dir()) / PLUGIN_SUBSCRIBED_DIR / user_id).string();
 }
 
 boost::filesystem::path resolve_plugin_root_from_descriptor(const PluginDescriptor& descriptor)
@@ -48,8 +54,7 @@ boost::filesystem::path resolve_plugin_root_from_descriptor(const PluginDescript
     return {};
 }
 
-bool is_plugin_root_allowed(const boost::filesystem::path& candidate_root,
-                            const std::vector<std::string>& allowed_dirs)
+bool is_plugin_root_allowed(const boost::filesystem::path& candidate_root, const std::vector<std::string>& allowed_dirs)
 {
     boost::system::error_code ec;
     boost::filesystem::path resolved_root = boost::filesystem::weakly_canonical(candidate_root, ec);
@@ -103,9 +108,7 @@ bool resolve_allowed_plugin_root(const PluginDescriptor& descriptor,
     return true;
 }
 
-bool delete_plugin_root(const boost::filesystem::path& resolved_root,
-                        const std::string& plugin_id,
-                        std::string& error)
+bool delete_plugin_root(const boost::filesystem::path& resolved_root, const std::string& plugin_id, std::string& error)
 {
     namespace fs = boost::filesystem;
 
@@ -432,7 +435,6 @@ bool parse_pep723_toml(const std::string& toml_content,
                        std::string& out_description,
                        std::string& out_author,
                        std::string& out_version,
-                       std::map<std::string, std::string>& out_settings,
                        std::string& error)
 {
     out_deps.clear();
@@ -441,7 +443,6 @@ bool parse_pep723_toml(const std::string& toml_content,
     out_description.clear();
     out_author.clear();
     out_version.clear();
-    out_settings.clear();
 
     TomlSection section = TomlSection::Root;
 
@@ -466,7 +467,10 @@ bool parse_pep723_toml(const std::string& toml_content,
             if (trimmed == "[tool.orcaslicer.plugin]") {
                 section = TomlSection::OrcaPlugin;
             } else if (trimmed == "[tool.orcaslicer.plugin.settings]") {
-                section = TomlSection::OrcaPluginSettings; // per-plugin params table
+                // Legacy table, superseded by PluginConfig. Recognized so its keys are ignored
+                // rather than falling through to Root, where a stray dependencies/requires-python
+                // key inside it would be parsed as package metadata.
+                section = TomlSection::OrcaPluginSettings;
             } else {
                 section = TomlSection::Root; // Unknown section — skip.
             }
@@ -519,10 +523,6 @@ bool parse_pep723_toml(const std::string& toml_content,
             else if (key == "description")  out_description = unquote_toml_string(val);
             else if (key == "author")       out_author = unquote_toml_string(val);
             else if (key == "version")      out_version = unquote_toml_string(val);
-        } else if (section == TomlSection::OrcaPluginSettings) {
-            // collect every key as a string; the plugin parses (int/float/...) what it needs.
-            if (!key.empty())
-                out_settings[key] = unquote_toml_string(val);
         }
     }
 
@@ -920,7 +920,6 @@ bool read_python_plugin_metadata(const boost::filesystem::path& py_path, PluginD
                                pep_desc,
                                pep_author,
                                pep_version,
-                               descriptor.settings,
                                pep723_error)) {
             error = "Failed to parse PEP 723 metadata: " + pep723_error;
             return false;

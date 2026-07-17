@@ -151,11 +151,13 @@ body {
   margin-right: auto;
 }
 
+/* Split pane: the list keeps --plugin-list-height of the dialog's content height (set by the
+   splitter drag, see InitPaneSplitter), the details pane takes what is left. Both panes shrink
+   before the layout overflows, so a short dialog degrades instead of clipping. */
 .content {
   min-height: 0;
-  display: grid;
-  grid-template-rows: minmax(220px, 1fr) 280px;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
 }
 
 .pane {
@@ -166,15 +168,58 @@ body {
   display: grid;
 }
 
+/* The pane minimums live in JS (SPLIT_MIN_LIST_PX / SPLIT_MIN_DETAILS_PX), which clamps the ratio
+   against the current height: as CSS min-heights they could not both be honored in a very short
+   dialog and the panes would overflow instead of shrinking. */
 .plugin-list-pane {
+  flex: 0 1 auto;
+  height: var(--plugin-list-height, 62%);
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+/* basis 0, so the details pane takes the space the list leaves instead of letting its own content
+   height push back and shrink the list below --plugin-list-height. */
 .details-pane {
+  flex: 1 1 0;
   grid-template-rows: auto minmax(0, 1fr);
   padding: 12px;
   box-sizing: border-box;
   gap: 10px;
+}
+
+/* 9px of grab area for a 2px divider: the strip also supplies the gap between the panes. */
+.pane-splitter {
+  flex: 0 0 auto;
+  position: relative;
+  height: 9px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.pane-splitter::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 1px;
+  background: transparent;
+  transition: background-color 0.12s ease;
+}
+
+.pane-splitter:hover::after {
+  background: var(--border-strong);
+}
+
+.pane-splitter.dragging::after {
+  background: var(--row-selected-outline);
+}
+
+/* Keep the resize cursor for the whole drag, wherever the pointer travels. */
+body.pane-resizing {
+  cursor: ns-resize;
 }
 
 .hdr {
@@ -1081,6 +1126,174 @@ body {
 
 .detail-empty[hidden],
 .detail-table[hidden] {
+  display: none;
+}
+
+/* Config tab: fixed-width capability sidebar + the capability's configuration view. */
+.config-layout {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 6px;
+  box-sizing: border-box;
+}
+
+.config-layout[hidden] {
+  display: none;
+}
+
+.config-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  border-right: 1px solid var(--border-soft);
+}
+
+.config-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.config-cap:hover {
+  background: var(--row-hover);
+}
+
+.config-cap.selected {
+  background: var(--row-selected);
+  border-color: var(--row-selected-outline);
+}
+
+.config-cap-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-cap-type {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.config-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.config-error {
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--plugin-status-warn-bg);
+  color: var(--plugin-status-warn);
+  font-size: 12px;
+}
+
+.config-error[hidden] {
+  display: none;
+}
+
+.config-editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.config-editor[hidden] {
+  display: none;
+}
+
+.config-textarea {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  box-sizing: border-box;
+  /* common.css applies `user-select: none` to *, so without this the user could type into the
+     editor but not select, drag or copy what they had typed. (What blocks typing is the global
+     onkeydown guard in common.js — see the keydown handler in index.js.) */
+  -webkit-user-select: text;
+  user-select: text;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: none;
+  white-space: pre;
+  overflow: auto;
+}
+
+.config-textarea:focus {
+  outline: none;
+  border-color: var(--main-color);
+}
+
+.config-view-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.config-view-footer[hidden] {
+  display: none;
+}
+
+/* Restore sits immediately left of Save, both pinned right; the validation message takes the
+   remaining space on the left. */
+.config-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.config-actions > button[hidden] {
+  display: none;
+}
+
+.config-validation {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-validation.invalid {
+  color: var(--plugin-status-danger);
+}
+
+.config-custom {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.config-custom[hidden] {
   display: none;
 }
 

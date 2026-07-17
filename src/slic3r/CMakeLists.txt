@@ -122,6 +122,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/SpeedDialDialog.hpp
     GUI/ActionRegistry.cpp
     GUI/ActionRegistry.hpp
+    GUI/PluginsConfigDialog.cpp
+    GUI/PluginsConfigDialog.hpp
     GUI/ProcessRunner.cpp
     GUI/ProcessRunner.hpp
     GUI/TerminalDialog.cpp
@@ -621,6 +623,8 @@ set(SLIC3R_GUI_SOURCES
     plugin/CloudPluginService.hpp
     plugin/PluginFsUtils.cpp
     plugin/PluginFsUtils.hpp
+    plugin/PluginConfig.cpp
+    plugin/PluginConfig.hpp
     plugin/PluginLoader.cpp
     plugin/PluginLoader.hpp
     plugin/PluginDescriptor.hpp

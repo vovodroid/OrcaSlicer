@@ -106,7 +106,7 @@ TEST_CASE("orca.slicing is workflow-only: context exposes raw print/object; view
     py::object slicing = orca.attr("slicing");
 
     // Context surface: raw graph entry points + workflow accessors.
-    for (const char* name : { "print", "object", "params", "config_value", "cancelled",
+    for (const char* name : { "print", "object", "config_value", "cancelled",
                               "orca_version", "step" })
         CHECK(py::hasattr(slicing.attr("SlicingPipelineContext"), name));
 

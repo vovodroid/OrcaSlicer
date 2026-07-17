@@ -29,6 +29,7 @@ class wxTimer;
 namespace Slic3r {
 
 class PluginCapabilityInterface;
+struct PluginCapabilityId;
 enum class PluginCapabilityType;
 
 namespace GUI {
@@ -41,7 +42,7 @@ public:
                   const wxString& title = wxT(""),
                   const wxPoint& pos    = wxDefaultPosition,
                   const wxSize& size    = wxDefaultSize,
-                  long style            = wxSYSTEM_MENU | wxCAPTION | wxCLOSE_BOX | wxMAXIMIZE_BOX);
+                  long style            = wxSYSTEM_MENU | wxCAPTION | wxCLOSE_BOX | wxMAXIMIZE_BOX | wxRESIZE_BORDER);
 
     ~PluginsDialog();
 
@@ -65,7 +66,6 @@ private:
     nlohmann::json build_plugins_payload() const;
 
     bool get_descriptor(const std::string& plugin_key, Slic3r::PluginDescriptor& descriptor) const;
-    std::shared_ptr<PluginCapabilityInterface> get_capability(const std::string& plugin_key, PluginCapabilityType type, const std::string& capability_name) const;
 
     void refresh_plugin_metadata_async(const wxString& title, const wxString& message, bool fetch_cloud);
     void refresh_plugins();
@@ -77,6 +77,12 @@ private:
     bool install_plugin_package(const std::string& package_path);
     bool install_cloud_plugin(const std::string& uuid, const std::string& version, const wxString& name);
     void run_script_plugin_capability(const std::string& plugin_key, const std::string& capability_name);
+    // Config tab. Both are scoped to the full capability ID: a request naming a
+    // capability that is gone or not configurable is refused rather than served from, or written
+    // to, some other entry.
+    void send_capability_config(const PluginCapabilityId& id);
+    void save_capability_config(const PluginCapabilityId& id, const nlohmann::json& config);
+    void restore_capability_config(const PluginCapabilityId& id);
     // Pushes a one-line result into the web footer status bar (level: "success" | "warn" | "error" | "info"),
     // used for every plugin/capability operation instead of a modal box so the dialog stays non-disruptive.
     void show_status(const wxString& message, const char* level);

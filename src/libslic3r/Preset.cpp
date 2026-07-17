@@ -1203,6 +1203,7 @@ static std::vector<std::string> s_Preset_print_options{
     "post_process",
     "slicing_pipeline_plugin",
     "plugins",
+    "plugin_config_overrides",
     "process_change_extrusion_role_gcode",
     "min_length_factor",
     "wall_maximum_resolution",
@@ -1377,6 +1378,7 @@ static std::vector<std::string> s_Preset_filament_options {/*"filament_colour", 
     "filament_preheat_temperature_delta", "filament_retract_length_nc",
     "filament_change_length_nc", "filament_prime_volume_nc",
     "long_retractions_when_ec", "retraction_distances_when_ec",
+    "plugin_config_overrides",
     //ams chamber
     "filament_dev_ams_drying_ams_limitations", "filament_dev_ams_drying_temperature", "filament_dev_ams_drying_time", "filament_dev_ams_drying_heat_distortion_temperature",
     "filament_dev_chamber_drying_bed_temperature", "filament_dev_chamber_drying_time",
@@ -1427,7 +1429,8 @@ static std::vector<std::string> s_Preset_printer_options {
     "machine_hotend_change_time", "machine_prepare_compensation_time",
     // Fast-purge printer flag + device/firmware-facing per-variant extruder-change
     // deretraction speed (unconsumed by the slicer; carried by H2D/A2L/X2D/P2S machine profiles).
-    "support_fast_purge_mode", "deretract_speed_extruder_change"
+    "support_fast_purge_mode", "deretract_speed_extruder_change",
+    "plugin_config_overrides"
     };
 
 static std::vector<std::string> s_Preset_sla_print_options {

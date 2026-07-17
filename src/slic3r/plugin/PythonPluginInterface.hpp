@@ -7,11 +7,33 @@
 #include <string_view>
 #include <utility>
 
+#include <nlohmann/json.hpp>
 #include <pybind11/embed.h>
 
 namespace Slic3r {
 
 enum class PluginCapabilityType { PrinterConnection = 0, Automation, Analysis, Importer, Exporter, Visualization, Script, SlicingPipeline, Unknown };
+
+struct PluginCapabilityId
+{
+    PluginCapabilityType type = PluginCapabilityType::Unknown;
+    std::string          name;
+    std::string          plugin_key;
+
+    bool empty() const { return type == PluginCapabilityType::Unknown || name.empty() || plugin_key.empty(); }
+    friend bool operator==(const PluginCapabilityId& lhs, const PluginCapabilityId& rhs)
+    {
+        return lhs.type == rhs.type && lhs.name == rhs.name && lhs.plugin_key == rhs.plugin_key;
+    }
+    friend bool operator<(const PluginCapabilityId& lhs, const PluginCapabilityId& rhs)
+    {
+        if (lhs.plugin_key != rhs.plugin_key)
+            return lhs.plugin_key < rhs.plugin_key;
+        if (lhs.name != rhs.name)
+            return lhs.name < rhs.name;
+        return lhs.type < rhs.type;
+    }
+};
 
 inline std::string plugin_capability_type_to_string(PluginCapabilityType type)
 {
@@ -127,6 +149,20 @@ public:
     virtual std::string get_name() const = 0;                                               // required — overridden in Python
     virtual PluginCapabilityType get_type() const { return PluginCapabilityType::Unknown; } // optional — typed bases override
 
+    // Every capability is configurable and always gets the host's default JSON editor over its
+    // stored config; this only says whether it supplies its own UI *instead of* that editor.
+    // get_config_ui() is called only when it returns true.
+    virtual bool has_config_ui() const { return false; }
+    // An HTML snippet for the custom configuration UI. An empty or throwing result is treated as
+    // "no custom UI" and falls back to the default JSON editor.
+    virtual std::string get_config_ui() const { return ""; }
+
+    // The config the "Restore defaults" action writes back. Not overridden -> an empty object, which
+    // is right for a capability that keeps its stored config sparse and applies its own defaults on
+    // read. Override it to write an explicit starting config instead (e.g. to seed a form UI with
+    // every field present). The host neither invents nor validates this value.
+    virtual nlohmann::json get_default_config() const { return nlohmann::json::object(); }
+
     virtual void on_load() {}
     virtual void on_unload() {}
     virtual void on_cancelled() {}
@@ -137,9 +173,12 @@ public:
     // exactly as long as the capability does, and are discarded with it on unload. Nothing about a
     // capability outlives the capability — the durable record is the .install_state.json sidecar.
 
-    // Cached identity. Plain C++ reads, safe under any lock and after the interpreter is gone.
+    // Cached identity. Plain C++ reads, safe under any lock and after the interpreter is gone. Also
+    // doubles as the audited capability name (paired with audit_plugin_key()) so host APIs invoked
+    // from Python can tell which capability they are serving.
     const std::string&   name() const { return m_name; }
     PluginCapabilityType type() const { return m_type; }
+    PluginCapabilityId   identity() const { return {m_type, m_name, m_audit_plugin_key}; }
     void                 set_resolved_identity(std::string name, PluginCapabilityType type)
     {
         m_name = std::move(name);
@@ -151,6 +190,12 @@ public:
     // registry lock held. Seeded from the sidecar at load; PluginManager writes it through on change.
     bool is_enabled() const { return m_enabled.load(std::memory_order_acquire); }
     void set_enabled(bool enabled) { m_enabled.store(enabled, std::memory_order_release); }
+
+    // Whether this capability supplies its own config UI (has_config_ui()), resolved once at
+    // materialization under the GIL and cached here. Plain C++ read so the GUI can decide between
+    // the capability's custom UI and the host's default JSON editor without touching Python.
+    bool config_ui_available() const { return m_config_ui_available; }
+    void set_config_ui_available(bool available) { m_config_ui_available = available; }
 
     // The owning package (PluginDescriptor::plugin_key), the canonical runtime id. Also scopes
     // filesystem enforcement for trampoline calls.
@@ -165,6 +210,7 @@ private:
     std::string m_name;
     PluginCapabilityType m_type = PluginCapabilityType::Unknown;
     std::atomic<bool> m_enabled{true};
+    bool m_config_ui_available = false;
     std::string m_audit_plugin_key;
 
     mutable std::atomic<int> m_refs{0};

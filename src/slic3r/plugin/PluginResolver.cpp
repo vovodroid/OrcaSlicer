@@ -12,6 +12,7 @@
 #include <boost/log/trivial.hpp>
 #include <libslic3r/Config.hpp>
 #include <libslic3r/PresetBundle.hpp>
+#include <slic3r/plugin/PluginLoader.hpp>
 #include <vector>
 #include <wx/utils.h>
 
@@ -20,35 +21,39 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 
 namespace Slic3r {
 
 namespace {
 
-// Return the name of the tracked option in `preset` whose value references `ref`'s capability, or
-// an empty string when no active option uses it. The result doubles as the "Jump to" target and as
-// the signal that the plugin is still required: a missing plugin with no referencing option is
-// considered resolved and dropped from the missing set.
-std::string find_option_for_capability(Preset::Type type, const Preset& preset, const PluginCapabilityRef& ref)
+// The tracked option in `preset` whose value references `ref`'s capability, or "" when none does.
+// Doubles as the "Jump to" target and as the signal that the plugin is still required: a missing
+// plugin with no referencing option is dropped from the set.
+std::string find_option_for_capability(Preset::Type type,
+                                       const Preset& preset,
+                                       const PluginCapabilityRef& ref,
+                                       PluginCapabilityType capability_type = PluginCapabilityType::Unknown)
 {
     if (type != Preset::TYPE_PRINT && type != Preset::TYPE_PRINTER && type != Preset::TYPE_FILAMENT)
         return {};
 
-    // Plugin-bearing options opt in via ConfigOptionDef::is_plugin_backed (a non-empty plugin_type),
-    // so scan the preset's definition rather than maintaining a hardcoded per-type field list. A typed
-    // preset's config only contains keys for its own type, so this naturally stays scoped to `type`.
+    // Options opt in via ConfigOptionDef::is_plugin_backed, so scan the definition rather than keep a
+    // hardcoded per-type field list. A typed preset's config only holds keys for its own type.
     const ConfigDef* def = preset.config.def();
     if (def == nullptr)
         return {};
 
+    const std::string expected_type = plugin_capability_type_to_string(capability_type);
     const auto matches_ref = [&ref](const std::string& value) {
         return value == ref.capability_name;
     };
 
     for (const std::string& field : preset.config.keys()) {
         const ConfigOptionDef* opt_def = def->get(field);
-        if (opt_def == nullptr || !opt_def->is_plugin_backed())
+        if (opt_def == nullptr || !opt_def->is_plugin_backed() ||
+            (capability_type != PluginCapabilityType::Unknown && opt_def->plugin_type != expected_type))
             continue;
 
         const ConfigOption* option = preset.config.option(field);
@@ -70,16 +75,19 @@ std::string find_option_for_capability(Preset::Type type, const Preset& preset, 
 
     // printer_agent stores AgentInfo::id, so a missing plugin cannot be reverse-mapped through
     // the runtime registry. If no regular printer plugin field matched, assume printer_agent.
-    if (type == Preset::Type::TYPE_PRINTER && preset.config.has("printer_agent"))
+    if (type == Preset::Type::TYPE_PRINTER && preset.config.has("printer_agent")) {
+        const ConfigOptionDef* agent_def = def->get("printer_agent");
+        if (agent_def != nullptr && agent_def->is_plugin_backed() &&
+            (capability_type == PluginCapabilityType::Unknown || agent_def->plugin_type == expected_type))
         return "printer_agent";
+    }
 
     return {};
 }
 
 } // namespace
 
-// One missing-plugin set per tracked preset type, keyed by the full "name;uuid;capability" ref.
-// Only TYPE_PRINT (process), TYPE_PRINTER (machine) and TYPE_FILAMENT are tracked.
+// One set per tracked preset type, keyed by the full "name;uuid;capability" ref.
 static std::map<Preset::Type, std::unordered_map<std::string, MissingPlugin>> s_missing;
 static std::mutex s_missing_mutex;
 // Installed-but-inactive capabilities (not loaded, or loaded-but-disabled); resolvable locally.
@@ -90,6 +98,95 @@ static std::map<Preset::Type, std::unordered_map<std::string, MissingPlugin>> s_
 static bool is_tracked_type(Preset::Type type)
 {
     return type == Preset::TYPE_PRINT || type == Preset::TYPE_PRINTER || type == Preset::TYPE_FILAMENT;
+}
+
+std::vector<PluginCapabilityRef> referenced_capabilities(Preset::Type type, const Preset& preset)
+{
+    if (!is_tracked_type(type))
+        return {};
+
+    const auto* manifest = dynamic_cast<const ConfigOptionStrings*>(preset.config.option("plugins"));
+    if (manifest == nullptr)
+        return {};
+
+    std::vector<PluginCapabilityRef> refs;
+    for (const std::string& entry : manifest->values) {
+        const auto ref = parse_capability_ref(entry);
+        if (!ref)
+            continue;
+        if (find_option_for_capability(type, preset, *ref).empty())
+            continue;
+        refs.push_back(*ref);
+    }
+    return refs;
+}
+
+namespace {
+
+// Resolve one preset's referenced capabilities to loaded capability identifiers, appending to `out`.
+// A ref not in the catalog, or whose capability is not loaded, is dropped: no instance means nothing
+// to configure.
+void collect_capabilities_in_use(Preset::Type type, const Preset& preset, std::vector<PluginCapabilityId>& out)
+{
+    for (const PluginCapabilityRef& ref : referenced_capabilities(type, preset)) {
+        // Cloud plugins resolve by UUID, local plugins by plugin_key.
+        const std::string key = ref.uuid.empty() ? ref.name : ref.uuid;
+        if (key.empty())
+            continue;
+
+        PluginDescriptor descriptor;
+        if (!PluginManager::instance().try_get_plugin_descriptor(key, descriptor))
+            continue;
+
+        // The manifest ref does not carry a type, so require the live capability type to match the
+        // type declared by the option that references it.
+        for (const auto& capability : PluginManager::instance().get_plugin_capabilities(descriptor.plugin_key, PluginCapabilityType::Unknown, false))
+            if (capability && capability->type() != PluginCapabilityType::Unknown &&
+                capability->name() == ref.capability_name &&
+                !find_option_for_capability(type, preset, ref, capability->type()).empty())
+                out.push_back(capability->identity());
+    }
+}
+
+} // namespace
+
+std::vector<PluginCapabilityId> capabilities_in_use(const PresetBundle& preset_bundle, Preset::Type type)
+{
+    if (!is_tracked_type(type))
+        return {};
+
+    std::vector<PluginCapabilityId> result;
+    if (type == Preset::TYPE_PRINT) {
+        collect_capabilities_in_use(type, preset_bundle.prints.get_edited_preset(), result);
+    } else if (type == Preset::TYPE_PRINTER) {
+        collect_capabilities_in_use(type, preset_bundle.printers.get_edited_preset(), result);
+    } else {
+        // Each filament preset is tested against its own config; refresh_missing_plugins cannot do
+        // that, as it unions the manifests and loses the preset.
+        for (const std::string& filament_name : preset_bundle.filament_presets)
+            if (const Preset* filament = preset_bundle.filaments.find_preset(filament_name))
+                collect_capabilities_in_use(type, *filament, result);
+    }
+
+    std::sort(result.begin(), result.end(), [](const PluginCapabilityId& a, const PluginCapabilityId& b) {
+        return std::tie(a.plugin_key, a.name, a.type) < std::tie(b.plugin_key, b.name, b.type);
+    });
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    return result;
+}
+
+std::vector<PluginCapabilityId> capabilities_in_use(Preset::Type type, const Preset& preset)
+{
+    std::vector<PluginCapabilityId> result;
+    if (!is_tracked_type(type))
+        return result;
+
+    collect_capabilities_in_use(type, preset, result);
+    std::sort(result.begin(), result.end(), [](const PluginCapabilityId& a, const PluginCapabilityId& b) {
+        return std::tie(a.plugin_key, a.name, a.type) < std::tie(b.plugin_key, b.name, b.type);
+    });
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    return result;
 }
 
 static std::string resolve_cloud_base_url()
@@ -111,9 +208,7 @@ std::string resolve_recovery_url(const PluginCapabilityRef& ref)
     return resolve_cloud_base_url() + "/app/plugins/plugin-hub?search=" + Http::url_encode(ref.name);
 }
 
-// Reports whether the loaded plugin currently exposes the referenced capability (in any enabled
-// state) and whether that capability is enabled. Returns {false, false} when the plugin is not
-// loaded or does not provide the capability.
+// {present, enabled}; {false, false} when the plugin is not loaded or does not provide the capability.
 static std::pair<bool, bool> loaded_capability_state(const std::string& plugin_key, const PluginCapabilityRef& ref)
 {
     PluginManager& mgr = PluginManager::instance();
@@ -123,7 +218,7 @@ static std::pair<bool, bool> loaded_capability_state(const std::string& plugin_k
     if (!mgr.is_plugin_loaded(plugin_key))
         return {false, false};
 
-    const auto capability = mgr.get_plugin_capability(plugin_key, ref.capability_name, PluginCapabilityType::Unknown,
+    const auto capability = mgr.get_plugin_capability({PluginCapabilityType::Unknown, ref.capability_name, plugin_key},
                                                       /*only_enabled=*/false);
     if (!capability)
         return {false, false};
@@ -193,7 +288,7 @@ void refresh_missing_plugins(Preset::Type type, const ConfigOptionStrings* manif
             continue;
 
         if (!installed) {
-            // Not on disk — needs download/install (existing behavior).
+            // Not on disk — needs download/install.
             std::string recovery_url = ref->uuid.empty() ? resolve_recovery_url(*ref) : std::string();
             missing_set.emplace(entry, MissingPlugin{*ref, std::move(recovery_url), std::move(opt), type, PluginCapabilityType::Unknown});
         } else if (!loaded || cap_present) {
@@ -287,7 +382,6 @@ static void report_install_failure(const std::string& message)
 
 void resolve_missing_plugins(const std::vector<std::string>& refs, PluginInstallProgress progress)
 {
-    // Collect the unique cloud UUIDs to install; local refs are handled via the browser flow.
     std::vector<std::string> uuids;
     for (const std::string& r : refs) {
         const auto ref = parse_capability_ref(r);
@@ -311,7 +405,6 @@ void resolve_missing_plugins(const std::vector<std::string>& refs, PluginInstall
 
             const std::string& uuid = uuids[i];
 
-            // Use a friendly name for the progress message when the catalog already knows it.
             std::string display_name = uuid;
             PluginDescriptor known;
             if (mgr.try_get_plugin_descriptor(uuid, known) && !known.name.empty())
@@ -345,8 +438,7 @@ void resolve_inactive_plugins(const std::vector<std::string>& refs)
 {
     PluginManager& mgr = PluginManager::instance();
 
-    // Group the requested capabilities by owning plugin so each plugin is loaded once with the full
-    // set to enable.
+    // Group by owning plugin so each plugin is loaded once with the full set to enable.
     std::map<std::string, std::vector<std::string>> by_plugin;
     for (const std::string& r : refs) {
         const auto ref = parse_capability_ref(r);
@@ -361,11 +453,9 @@ void resolve_inactive_plugins(const std::vector<std::string>& refs)
     if (by_plugin.empty())
         return;
 
-    // load_plugin loads+enables a not-loaded plugin (async) and enables the listed capabilities on an
-    // already-loaded one. The fresh-load path does NOT fire the capability-load callback the GUI uses
-    // to clear the notification, so wait for each load off the UI thread and then re-validate once —
-    // mirroring the cloud-install flow. This clears the inactive notification, or flips it to broken
-    // if the loaded plugin turns out not to provide the capability.
+    // The fresh-load path does NOT fire the capability-load callback the GUI uses to clear the
+    // notification, so wait for each load off the UI thread and re-validate once. That clears the
+    // inactive notification, or flips it to broken if the plugin does not provide the capability.
     std::vector<std::pair<std::string, std::vector<std::string>>> work(by_plugin.begin(), by_plugin.end());
     std::thread([work = std::move(work)]() {
         PluginManager& mgr = PluginManager::instance();
@@ -383,7 +473,6 @@ void resolve_inactive_plugins(const std::vector<std::string>& refs)
 
 void open_missing_plugins_on_cloud(const std::vector<std::string>& local_refs)
 {
-    // One missing plugin: deep-link a search for it. Multiple: just open the plugin hub.
     if (local_refs.size() == 1) {
         if (const auto ref = parse_capability_ref(local_refs.front())) {
             wxLaunchDefaultBrowser(GUI::from_u8(resolve_recovery_url(*ref)), wxBROWSER_NEW_WINDOW);

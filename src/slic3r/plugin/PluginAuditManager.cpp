@@ -77,17 +77,22 @@ bool is_inside_allowed_root(const boost::filesystem::path& candidate, const boos
 // ---------------------------------------------------------------------------
 
 thread_local std::string PluginAuditManager::m_current_plugin_key           = "";
+thread_local std::string PluginAuditManager::m_current_capability_name     = "";
 thread_local PluginAuditManager::AuditMode PluginAuditManager::m_audit_mode = PluginAuditManager::AuditMode::Loading;
 thread_local std::vector<boost::filesystem::path> PluginAuditManager::m_scoped_allowed_roots;
 thread_local bool PluginAuditManager::m_has_last_violation = false;
 thread_local AuditViolation PluginAuditManager::m_last_violation;
 
-ScopedPluginAuditContext::ScopedPluginAuditContext(const std::string& plugin_key, PluginAuditManager::AuditMode mode)
+ScopedPluginAuditContext::ScopedPluginAuditContext(const std::string& plugin_key,
+                                                   const std::string& capability_name,
+                                                   PluginAuditManager::AuditMode mode)
     : m_previous_id(PluginAuditManager::instance().current_plugin())
+    , m_previous_capability(PluginAuditManager::instance().current_capability())
     , m_previous_mode(PluginAuditManager::instance().audit_mode())
     , m_previous_scoped_roots(PluginAuditManager::m_scoped_allowed_roots)
 {
     PluginAuditManager::instance().set_current_plugin(plugin_key);
+    PluginAuditManager::instance().set_current_capability(capability_name);
     PluginAuditManager::instance().set_audit_mode(mode);
     PluginAuditManager::m_scoped_allowed_roots.clear();
 }
@@ -95,6 +100,7 @@ ScopedPluginAuditContext::ScopedPluginAuditContext(const std::string& plugin_key
 ScopedPluginAuditContext::~ScopedPluginAuditContext()
 {
     PluginAuditManager::instance().set_current_plugin(m_previous_id);
+    PluginAuditManager::instance().set_current_capability(m_previous_capability);
     PluginAuditManager::instance().set_audit_mode(m_previous_mode);
     PluginAuditManager::m_scoped_allowed_roots = std::move(m_previous_scoped_roots);
 }
@@ -114,6 +120,12 @@ void PluginAuditManager::set_current_plugin(const std::string& plugin_key) { m_c
 std::string PluginAuditManager::current_plugin() const { return m_current_plugin_key; }
 
 void PluginAuditManager::clear_current_plugin() { m_current_plugin_key.clear(); }
+
+void PluginAuditManager::set_current_capability(const std::string& capability_name) { m_current_capability_name = capability_name; }
+
+std::string PluginAuditManager::current_capability() const { return m_current_capability_name; }
+
+void PluginAuditManager::clear_current_capability() { m_current_capability_name.clear(); }
 
 void PluginAuditManager::add_global_allowed_root(const boost::filesystem::path& root)
 {
