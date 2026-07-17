@@ -96,9 +96,8 @@ class DevStorage;
 class DevUpgrade;   // Orca: adopt DeviceCore split
 struct DevPrintTaskRatingInfo;
 
-// Orca: REF-additive, now ported (post-review). Returns true when filament_id (e.g. "GFA11",
-// "GFU00") is on the stringing-prone list for the given nozzle diameter (mm), bucketed per
-// nozzle size to mirror the printer firmware.
+// Returns true when filament_id (e.g. "GFA11", "GFU00") is on the stringing-prone list for the
+// given nozzle diameter (mm), bucketed per nozzle size to mirror the printer firmware.
 bool is_stringing_prone_filament(const std::string& filament_id, float nozzle_diameter);
 
 
@@ -163,13 +162,11 @@ public:
     void set_agent(NetworkAgent* agent) { m_agent = agent; }
     NetworkAgent* get_agent() const { return m_agent; } // Orca: needed by DeviceCore modules (DevAxisCtrl)
 
-    // Orca: these five DeviceCore module accessors are UNWIRED on the read side. The modules are
-    // constructed in the ctor and axis/chamber/status are fed every MQTT push (ParseAxis/ParseChamber/
-    // ParseStatus), but NO GUI consumer reads them yet. For calib/upgrade the module parse is NOT
-    // routed — the legacy inline parse in DeviceManager.cpp remains authoritative. Migration is parked
-    // (follow-up issue); do NOT wire DevUpgrade naively: its ParseUpgradeDisplayState would duplicate
-    // the inline block's dis_state==3 -> command_get_version CallAfter side effect.
-    // Orca: adopt DeviceCore split — reference-shape accessors for the new modules
+    // Orca: these DeviceCore module accessors are unwired on the read side — axis/chamber/status
+    // are fed every MQTT push but no GUI consumer reads them yet, and for calib/upgrade the inline
+    // parse in DeviceManager.cpp remains authoritative. Do not wire DevUpgrade naively: its
+    // ParseUpgradeDisplayState would duplicate the inline block's dis_state==3 ->
+    // command_get_version CallAfter side effect.
     std::shared_ptr<DevAxis>    GetAxis() const { return m_axis; }
     std::shared_ptr<DevChamber> GetChamber() const { return m_chamber; }
     DevCalib*                   GetCalib() const { return m_calib; }
@@ -409,7 +406,6 @@ public:
     DevFirmwareVersionInfo laser_version_info;
     DevFirmwareVersionInfo cutting_module_version_info;
     DevFirmwareVersionInfo extinguish_version_info;
-    // Orca: REF-additive accessory firmware versions, now ported (post-review)
     DevFirmwareVersionInfo rotary_version_info;
     DevFirmwareVersionInfo exhaustfan_version_info;
     DevFirmwareVersionInfo amshub_version_info;
@@ -710,9 +706,8 @@ public:
     boost::thread* get_slice_info_thread { nullptr };
     boost::thread* get_model_task_thread { nullptr };
 
-    // Orca: REF-additive, now ported (post-review). Per-filament-index AMS slot mapping
-    // reported by the printer in print.mapping. Up to 32 entries, each value packs
-    // (ams_id << 8) | slot_id; 0xFFFF means unused.
+    // Per-filament-index AMS slot mapping reported by the printer in print.mapping. Up to
+    // 32 entries, each value packs (ams_id << 8) | slot_id; 0xFFFF means unused.
     std::vector<uint16_t> print_job_filament_mapping;
     bool any_loaded_filament_is_stringing_prone() const;
 
@@ -933,12 +928,11 @@ public:
     /*for more extruder*/
     bool                        is_enable_np{ false };
     bool                        is_enable_ams_np{ false };
-    bool                        is_support_filament_32_colors{ false }; // Orca: REF-additive, now ported (post-review)
-    bool                        is_support_fila_change_abort{ false }; // Orca: REF-additive, now ported (filament-change Stop button)
-    bool                        is_support_ext_change_assist_old{ false }; // Orca: REF-additive, now ported (A/P-series multi-color external change assist)
+    bool                        is_support_filament_32_colors{ false };
+    bool                        is_support_fila_change_abort{ false }; // filament-change Stop button
+    bool                        is_support_ext_change_assist_old{ false }; // A/P-series multi-color external change assist
 
-    // Orca: REF-additive, now ported (post-review). Max filament color count for the send
-    // gate; returns 0 when there is no explicit upper bound.
+    // Max filament color count for the send gate; returns 0 when there is no explicit upper bound.
     int get_max_filament_color_count() const;
 
     /**

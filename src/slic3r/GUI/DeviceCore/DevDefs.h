@@ -148,8 +148,8 @@ enum class DevFirmwareUpgradeState : int
     UpgradingFinished = 3
 };
 
-// Orca: permanent compatibility alias — the reverse-direction DeviceManager/UpgradePanel keep the
-// Orca spelling of this enum, so the alias to the reference name is a kept surface, not transitional.
+// Orca: DeviceManager/UpgradePanel keep the Orca spelling of this enum; the alias to the
+// reference name is a permanent compatibility surface.
 using DevFirmwareUpgradingState = DevFirmwareUpgradeState;
 
 class devPrinterUtil

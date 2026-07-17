@@ -76,7 +76,7 @@ public:
 
     DevAmsSystemIdx GetCurrentFirmwareIdxSel() const { return m_current_firmware_sel.m_firmare_idx; };
     DevAmsSystemIdx GetCurrentFirmwareIdxRun() const { return m_current_firmware_run.m_firmare_idx; };
-    std::unordered_map<int, DevAmsSystemFirmware> GetSuppotedFirmwares() const { return m_firmwares;}; // Orca: unordered (AMSSetting.cpp, cluster 8)
+    std::unordered_map<int, DevAmsSystemFirmware> GetSuppotedFirmwares() const { return m_firmwares;}; // Orca: unordered (mirrored by AMSSetting.cpp)
 
     bool IsSwitching() const { return m_status == "SWITCHING";};
     bool IsIdle() const { return m_status == "IDLE";};
@@ -95,7 +95,7 @@ private:
 
     DevAmsSystemFirmware m_current_firmware_run;
     DevAmsSystemFirmware m_current_firmware_sel;
-    std::unordered_map<int, DevAmsSystemFirmware> m_firmwares; // Orca: unordered (AMSSetting.cpp, cluster 8)
+    std::unordered_map<int, DevAmsSystemFirmware> m_firmwares; // Orca: unordered (mirrored by AMSSetting.cpp)
 
     DevCtrlInfo m_ctrl_switching;
 };

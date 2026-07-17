@@ -1236,7 +1236,6 @@ void MachineInfoPanel::update_filatrack(MachineObject* obj)
     }
 }
 
-// Orca: accessory firmware version display (backing parse landed in cluster 2)
 void MachineInfoPanel::update_rotary(MachineObject* obj)
 {
     if (obj && obj->rotary_version_info.isValid())
@@ -1250,7 +1249,6 @@ void MachineInfoPanel::update_rotary(MachineObject* obj)
     }
 }
 
-// Orca: accessory firmware version display (backing parse landed in cluster 2)
 void MachineInfoPanel::update_exhaustfan(MachineObject* obj)
 {
     if (obj && obj->exhaustfan_version_info.isValid())
@@ -1264,8 +1262,7 @@ void MachineInfoPanel::update_exhaustfan(MachineObject* obj)
     }
 }
 
-// Orca: AMS-hub / filament-buffer firmware version display (backing parse landed in cluster 2).
-// Shown only when the kept m_ahb_panel path (module_vers["ahb"]) does NOT fire, so no printer gets a
+// Shown only when the m_ahb_panel path (module_vers["ahb"]) does NOT fire, so no printer gets a
 // double AMS-hub row. X2D/P2S report the buffer via amshub_version_info.product_name instead of module_vers.
 void MachineInfoPanel::update_amshub(MachineObject* obj)
 {

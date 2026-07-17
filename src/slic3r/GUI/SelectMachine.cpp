@@ -31,9 +31,9 @@
 #include "DeviceCore/DevMapping.h"
 #include "DeviceCore/DevUtilBackend.h"
 #include "DeviceCore/DevMappingNozzle.h"
-#include "DeviceCore/DevPrintOptions.h" // Orca: smart-nozzle-blob detection option (resync)
-#include "libslic3r/MultiNozzleUtils.hpp" // Orca: filament-change-gap model for the best-position popup (resync)
-#include "BackgroundSlicingProcess.hpp"   // Orca: complete type for background_process().get_current_gcode_result() (resync)
+#include "DeviceCore/DevPrintOptions.h" // smart-nozzle-blob detection option
+#include "libslic3r/MultiNozzleUtils.hpp" // filament-change-gap model for the best-position popup
+#include "BackgroundSlicingProcess.hpp"   // complete type for background_process().get_current_gcode_result()
 #include "DeviceCore/DevStorage.h"
 
 #include <wx/progdlg.h>
@@ -329,7 +329,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     m_text_printer_msg_tips->Hide();
     m_text_printer_msg_tips->GetAlignment();
 
-    // Orca: best-position "recommended arrangement saves X" clickable tip (resync). Hidden unless the
+    // Orca: best-position "recommended arrangement saves X" clickable tip. Hidden unless the
     // printer has a filament switcher and a better arrangement exists; click opens the best-position popup.
     m_saveTimeText = new Label(m_basic_panel, wxEmptyString);
     m_saveTimeText->SetForegroundColour(wxColour("#FF6F00"));
@@ -349,7 +349,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     sizer_basic_right_info->Add(m_text_printer_msg, 0, wxLEFT, 0);
     sizer_basic_right_info->AddSpacer(FromDIP(10));
     sizer_basic_right_info->Add(m_text_printer_msg_tips, 0, wxLEFT, 0);
-    sizer_basic_right_info->Add(m_saveTimeText, 0, wxTOP, 0); // Orca: best-position tip (resync)
+    sizer_basic_right_info->Add(m_saveTimeText, 0, wxTOP, 0);
 
 
     m_basicl_sizer->Add(m_sizer_thumbnail_area, 0, wxLEFT, 0);
@@ -1926,7 +1926,7 @@ bool SelectMachineDialog::CheckWarningFilamentCrossExtruder(MachineObject* obj_)
     return true;
 }
 
-// ===== Orca: resynced pre-send checks + AMS best-position popup (cluster 7) =====
+// ===== Orca: pre-send checks + AMS best-position popup =====
 
 bool SelectMachineDialog::CheckWarningSmartNozzleBlobAuto(MachineObject* obj_)
 {
@@ -2277,7 +2277,7 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
     } else if (status == PrintStatusColorQuantityExceed) {
         Enable_Refresh_Button(true);
         Enable_Send_Button(false);
-        // Orca: fill the real per-printer max color count into the %s template (resync).
+        // Fill the real per-printer max color count into the %s template.
         if (!params.empty())
             msg = wxString::Format(m_pre_print_checker.get_pre_state_msg(status), params[0], params[0]);
     }
@@ -2393,13 +2393,13 @@ void SelectMachineDialog::show_status(PrintDialogStatus status, std::vector<wxSt
     } else if (status == PrintStatusTPUUnsupportAutoCali) {
         Enable_Refresh_Button(true);
         Enable_Send_Button(false);
-    } else if (status == PrintStatusTPUUnsupportCaliOn) { // Orca: TPU manual-cali-on ADVISORY (resync) — Send stays enabled
+    } else if (status == PrintStatusTPUUnsupportCaliOn) { // advisory — Send stays enabled
         Enable_Refresh_Button(true);
         Enable_Send_Button(true);
-    } else if (status == PrintStatusTPUUnsuggestCali) { // Orca: TPU flow-cali advisory (resync) — non-blocking
+    } else if (status == PrintStatusTPUUnsuggestCali) { // advisory — Send stays enabled
         Enable_Refresh_Button(true);
         Enable_Send_Button(true);
-    } else if (status == PrintStatusSmartNozzleBlobNeedAuto) { // Orca: blob switch-to-Auto advisory (resync) — non-blocking
+    } else if (status == PrintStatusSmartNozzleBlobNeedAuto) { // advisory — Send stays enabled
         Enable_Refresh_Button(true);
         Enable_Send_Button(true);
     } else if (status == PrintStatusHasFilamentInBlackListError) {
@@ -2948,8 +2948,8 @@ void SelectMachineDialog::EnableEditing(bool enable)
         iter.second->enable(enable);
     }
 
-    // Orca: grey the best-position "saves X" tip when editing is disabled so an error transition
-    // doesn't leave a stale clickable tip (resync).
+    // Grey the best-position "saves X" tip when editing is disabled so an error transition
+    // doesn't leave a stale clickable tip.
     if (m_saveTimeText) enable ? m_saveTimeText->Enable() : m_saveTimeText->Disable();
 }
 
@@ -3627,9 +3627,9 @@ void SelectMachineDialog::on_send_print()
         timelapse_option = m_checkbox_list["timelapse"]->getValue() == "on";
     }
 
-    // Orca: PA-profile-sharing mode (extrude_cali_manual_mode): 0 = share (toggle on), 1 = per-nozzle.
-    // Only sent for pa_mode-capable printers; -1 keeps the field omitted for everyone else, matching
-    // Orca's prior behavior (this field was never populated before).
+    // PA-profile-sharing mode (extrude_cali_manual_mode): 0 = share (toggle on), 1 = per-nozzle.
+    // Shared PA (0) is the deliberate default for pa_mode printers even while the toggle is hidden;
+    // -1 keeps the field omitted for every other printer, which was the prior behavior.
     int pa_manual_mode = -1;
     if (obj_->is_support_pa_mode) {
         pa_manual_mode = (m_checkbox_list["pa_value"]->getValue() == "on") ? 0 : 1;
@@ -4091,8 +4091,8 @@ void SelectMachineDialog::on_timer(wxTimerEvent &event)
     update_print_status_msg();
     //update_scroll_area_size();/*STUDIO-12867 the page maybe blank in some platform. FIXME*/
 
-    // Orca: refresh the best-position "saves X" tip after the status update (resync). Placed here (not
-    // inside update_show_status) so it still runs when update_show_status returns early on an error.
+    // Refresh the best-position "saves X" tip after the status update. Placed here (not inside
+    // update_show_status) so it still runs when update_show_status returns early on an error.
     // No-op for printers without a filament switcher.
     refresh_save_time(obj_);
 }
@@ -4680,7 +4680,7 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
     }
 
     /* multi color external change assist*/
-    // Orca: REF-additive, now ported — A/P-series expose this via flag3 bit-16 (is_support_ext_change_assist_old)
+    // A/P-series expose this via flag3 bit-16 (is_support_ext_change_assist_old)
     bool is_support_mutile_color = obj_->is_support_ext_change_assist_old || obj_->is_support_ext_change_assist;
     if (is_support_mutile_color && !m_check_ext_change_assist->IsShown()) {
         m_check_ext_change_assist->Show(true);
@@ -4741,10 +4741,9 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
         show_status(PrintDialogStatus::PrintStatusNoSdcard);
         return;
     }
-    // Orca: gate against the printer's real max filament-color count instead of a hardcoded 16, so
-    // high-color firmware (is_support_filament_32_colors -> 32) isn't wrongly blocked. Floor at 16 so
-    // printers that report 0 (e.g. series X/O) keep their prior limit; every other class is unchanged.
-    // The real max is passed as a param so the %s message shows the actual count.
+    // Gate against the printer's real max filament-color count, floored at 16 so printers that
+    // report 0 (e.g. series X/O) keep that limit. The max is passed as a param so the %s message
+    // shows the actual count.
     int max_color = obj_->get_max_filament_color_count();
     if (max_color < 16) max_color = 16;
     if (wxGetApp().preset_bundle->filament_presets.size() > (size_t)max_color && m_print_type != PrintFromType::FROM_SDCARD_VIEW) {
@@ -4770,10 +4769,9 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
         }
     }
 
-    // Orca: TPU/Aero flow-cali gate on printers that don't support PA auto-cali (REF parity). Only the
-    // "auto" case BLOCKS (AutoCali). The "on" case is a non-blocking ADVISORY (CaliOn): the printer uses
-    // the previous cali value and skips, so Send stays enabled and we do NOT return (matches REF, which
-    // puts CaliOn in the warning band and only returns on is_error).
+    // TPU/Aero flow-cali gate on printers that don't support PA auto-cali: "auto" blocks; "on" is a
+    // non-blocking advisory (the printer falls back to the previous cali value and skips flow
+    // calibration), so Send stays enabled and there is no return.
     if (!can_support_pa_auto_cali() && m_checkbox_list["flow_cali"]->IsShown()) {
         if (m_checkbox_list["flow_cali"]->getValue() == "auto") {
             show_status(PrintDialogStatus::PrintStatusTPUUnsupportAutoCali);
@@ -4856,9 +4854,12 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
 
     // H2-series firmware gate: block Send when TPU is mapped to the left (deputy) extruder on firmware
     // that can't print it. Inert unless the printer JSON opts in via support_print_check_firmware_for_tpu_left.
+    // Fail-closed on purpose: a mapping entry missing from the tray list blocks as
+    // AmsMappingInvalid, and value_or(false) blocks TPU-left until the first fun2 push arrives;
+    // both self-clear on the next status refresh.
     if (DevPrinterConfigUtil::support_print_check_firmware_for_tpu_left(obj_->printer_type)) {
-        // Orca: read the raw string members fila.ams_id/fila.slot_id (no int round-trip, which would throw on an
-        // unmapped filament); upstream's jump-to-upgrade button styling on the message is dropped for the plain message.
+        // Read the raw string members fila.ams_id/fila.slot_id — an int round-trip would throw on
+        // an unmapped filament. Orca: the jump-to-upgrade button styling is not ported.
         bool has_tpu_left = false;
         for (const auto& fila : m_ams_mapping_result) {
             const auto& ams_id  = fila.ams_id;
@@ -4994,11 +4995,9 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
         show_status(PrintDialogStatus::PrintStatusFilamentCrossExtruderWarning, { warning_msg });
     }
 
-    // Orca: smart-nozzle-blob pre-send suggestion (resync). When the file has stringing-prone filament
-    // and the printer's clumping detection isn't already Auto, offer a clickable "Switch" that sets the
-    // detection to Auto (mode 2). Rendered via the Orca callback-link path (add_with_link) with the
-    // message passed as a literal (no get_pre_state_msg entry) so the tail add() doesn't also push a
-    // second, linkless copy — mirrors the TimelapseStorageLow convention.
+    // Suggest switching nozzle clumping detection to Auto when the file has stringing-prone
+    // filament. The message is passed as a literal (no get_pre_state_msg entry) so the tail add()
+    // doesn't also push a second, linkless copy.
     if (!CheckWarningSmartNozzleBlobAuto(obj_)) {
         show_status(PrintDialogStatus::PrintStatusSmartNozzleBlobNeedAuto);
         m_pre_print_checker.add_with_link(
@@ -5013,9 +5012,9 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
             });
     }
 
-    // Orca: TPU flow-cali advisory (resync, non-blocking). When Flow Dynamics Calibration is Auto/On and
-    // a mapped filament is in the printer's auto_on_cali_warning_tpu_filaments list, warn that the system
-    // will use the manual/default value and skip flow calibration. Send stays enabled.
+    // Non-blocking: when Flow Dynamics Calibration is Auto/On and a mapped filament is in the
+    // printer's auto_on_cali_warning_tpu_filaments list, warn that the system will use the
+    // manual/default value and skip flow calibration. Send stays enabled.
     if (obj_ && m_checkbox_list.count("flow_cali") && m_checkbox_list["flow_cali"]->IsShown()
         && m_checkbox_list["flow_cali"]->getValue() != "off") {
         const auto& warning_tpu_filaments =
@@ -6158,7 +6157,7 @@ void SelectMachineDialog::set_default_from_sdcard()
         ::sprintf(weight, "%.2f g", float_weight); // ORCA remove spacing before text
         m_stext_time->SetLabel(time);
         m_stext_weight->SetLabel(weight);
-        refresh_save_time(obj_); // Orca: mirrors REF; no-op for FROM_SDCARD_VIEW (refresh_save_time early-returns)
+        refresh_save_time(obj_); // no-op for FROM_SDCARD_VIEW (refresh_save_time early-returns)
     }
     catch (...) {}
 }

@@ -523,7 +523,7 @@ void PrintJob::process(Ctl &ctl)
                         BOOST_LOG_TRIVIAL(info) << "print_job: printer has enter printing status, s = " << obj->print_status;
                         return true;
                     }
-                    // Orca: break the wait-for-print-start loop on user cancel (resync).
+                    // Break the wait-for-print-start loop on user cancel.
                     if (ctl.was_canceled()) {
                         BOOST_LOG_TRIVIAL(info) << "print_job: user cancel the job " << obj->job_id_;
                         return true;
@@ -644,8 +644,8 @@ void PrintJob::process(Ctl &ctl)
     if (result < 0) {
         curr_percent = -1;
 
-        // Orca: restore the ENC-flag-not-ready message (resync). The printer is still fetching its
-        // encryption flag (a transient state), so ask the user to retry rather than showing a generic error.
+        // The printer is still fetching its encryption flag (a transient state), so ask the
+        // user to retry rather than showing a generic error.
         if (result == BAMBU_NETOWRK_ERR_PRINT_SP_ENC_FLAG_NOT_READY) {
             msg_text = _u8L("Retrieving printer information, please try again later.");
         } else if (result == BAMBU_NETWORK_ERR_PRINT_WR_FILE_NOT_EXIST || result == BAMBU_NETWORK_ERR_PRINT_SP_FILE_NOT_EXIST) {

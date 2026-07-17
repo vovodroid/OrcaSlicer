@@ -96,8 +96,8 @@ protected:
     wxString m_mapping_text;
 
 public:
-    // Orca: filament_id defaults to empty so the pre-resync 3-arg callers (SelectMachine [cluster 7],
-    // SendMultiMachinePage, the calibration wizard) keep compiling; m_filament_id is otherwise unused here.
+    // Orca: filament_id defaults to empty so the existing 3-arg callers keep compiling;
+    // m_filament_id is otherwise unused here.
     MaterialItem(wxWindow *parent, wxColour mcolour, wxString mname, std::string filament_id = std::string());
     ~MaterialItem();
 
@@ -172,7 +172,7 @@ public:
 class MaterialSyncItem : public MaterialItem
 {
 public:
-    // Orca: filament_id defaults to empty for pre-resync 3-arg callers (see MaterialItem).
+    // Orca: filament_id defaults to empty for existing 3-arg callers (see MaterialItem).
     MaterialSyncItem(wxWindow *parent, wxColour mcolour, wxString mname, std::string filament_id = std::string());
     ~MaterialSyncItem();
     int  get_real_offset();
@@ -352,11 +352,10 @@ public:
     void         paintEvent(wxPaintEvent &evt);
     void         set_parent_item(MaterialItem* item) {m_parent_item = item;};
     void         set_show_type(ShowType type) { m_show_type = type; };
-    // Orca: kept surface for the reverse-direction SelectMachine — its only caller passes false, which
-    // equals the update path's default (all slots shown), so this no-op preserves behavior.
+    // Orca: kept as a no-op for SelectMachine — its only caller passes false, which
+    // equals the update path's default (all slots shown).
     void         set_only_show_ext_spool(bool /*flag*/) {}
-    // Orca: kept surface for the reverse-direction SelectMachine — this helper (dropped by the reference)
-    // is still consumed by SelectMachine, so it stays as a permanent compatibility surface.
+    // Orca: dropped by the reference but still consumed by SelectMachine.
     std::vector<TrayData> parse_ams_mapping(const std::map<std::string, DevAms*, NumericStrCompare>& amsList);
 
 #ifdef __APPLE__

@@ -45,7 +45,7 @@
 #include "Widgets/ScrolledWindow.hpp"
 #include "Widgets/PopupWindow.hpp"
 #include "Widgets/HyperLink.hpp" // ORCA
-#include "DeviceTab/uiAMSBestPositionPopup.hpp"  // Orca: AMS best-position popup (resync)
+#include "DeviceTab/uiAMSBestPositionPopup.hpp"  // AMS best-position popup
 #include "DeviceCore/DevFilaSwitch.h"            // Orca: DevFilaSwitch::SwitchPos for best-position helpers
 #include <optional>
 #include <wx/simplebook.h>
@@ -399,7 +399,7 @@ protected:
     wxStaticText*                       m_rename_text{nullptr};
     Label*                              m_stext_time{ nullptr };
     Label*                              m_stext_weight{ nullptr };
-    Label*                              m_saveTimeText{ nullptr }; // Orca: best-position "saves X" clickable tip (resync)
+    Label*                              m_saveTimeText{ nullptr }; // best-position "saves X" clickable tip
     PrinterMsgPanel *                   m_statictext_ams_msg{nullptr};
     Label*                              m_txt_change_filament_times{ nullptr };
     CheckBox*                           m_check_ext_change_assist{ nullptr };
@@ -446,7 +446,7 @@ protected:
     wxGridSizer*                        m_sizer_ams_mapping_right{ nullptr };
 
     PrePrintChecker                     m_pre_print_checker;
-    ReselectMachineDialog*              m_best_pos_dialog{ nullptr }; // Orca: AMS best-position popup (resync)
+    ReselectMachineDialog*              m_best_pos_dialog{ nullptr }; // AMS best-position popup
 
 public:
     static std::vector<wxString> MACHINE_BED_TYPE_STRING;
@@ -553,10 +553,10 @@ public:
     // Warn (without blocking) when a mapped filament would be printed from both extruders on a
     // dual-extruder printer, so per-nozzle manual K-value can't follow it across the whole print.
     bool CheckWarningFilamentCrossExtruder(MachineObject* obj_);
-    // Orca: smart-nozzle-blob pre-send suggestion (resync). Recommends switching nozzle clumping
-    // detection to Auto when the file has stringing-prone filament and the printer isn't in Auto.
+    // Recommends switching nozzle clumping detection to Auto when the file has stringing-prone
+    // filament and the printer isn't in Auto.
     bool CheckWarningSmartNozzleBlobAuto(MachineObject* obj_);
-    // Orca: AMS best-switch-position popup (resync). Suggests the filament arrangement that minimizes
+    // AMS best-switch-position popup: suggests the filament arrangement that minimizes
     // filament-change time on filament-switcher printers; no-op for printers without a switcher.
     void on_reselect_dialog_btn_clicked(wxMouseEvent&);
     void update_best_pos_dialog(wxCommandEvent& evt);

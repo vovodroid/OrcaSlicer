@@ -5432,7 +5432,7 @@ void StatusPanel::update_filament_loading_panel(MachineObject* obj)
     bool ams_loading_state = false;
     auto ams_status_sub = obj->ams_status_sub;
 
-    // Orca: skip busy-loading detection during a cold pull (backing enum/parse landed in cluster 2)
+    // Skip busy-loading detection during a cold pull.
     if (obj->is_enable_np && obj->ams_status_main != AMS_STATUS_MAIN_COLD_PULL) {
         ams_loading_state = obj->GetExtderSystem()->IsBusyLoading();
     } else if (obj->ams_status_main == AMS_STATUS_MAIN_FILAMENT_CHANGE) {

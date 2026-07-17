@@ -124,9 +124,8 @@ public:
     std::string    ams_setting_id;
 
     bool           m_is_third;
-    // Orca: view-only mode (dialog half of the laser/cut read-only feature). When set, the dialog is
-    // inspectable but every editing control is disabled and no command is sent. Set by the caller
-    // (StatusPanel, cluster 6); dormant (false) until then, so behavior is unchanged.
+    // Orca: view-only mode (laser/cut). When set, the dialog is inspectable but every
+    // editing control is disabled and no command is sent.
     bool           m_view_only = false;
     wxString       m_brand_filament;
     wxString       m_brand_sn;

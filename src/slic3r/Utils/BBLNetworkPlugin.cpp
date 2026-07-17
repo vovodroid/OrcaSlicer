@@ -187,10 +187,9 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
 int BBLNetworkPlugin::unload()
 {
     // Orca: destroy the plugin agent while its creating DLL is still loaded, so the void* handle
-    // never dangles into freed memory. Skipping this makes a network-plugin hot reload (unload +
-    // reload) crash: the stale m_agent survives the unload, create_agent() then short-circuits on
-    // has_agent() and keeps the dangling old-DLL handle, and the next call into the freshly loaded
-    // DLL (e.g. install_device_cert from the device-refresh timer) dereferences it -> access violation.
+    // never dangles into freed memory. A stale m_agent surviving the unload makes create_agent()
+    // short-circuit on has_agent() after a hot reload, and the next call into the freshly loaded
+    // DLL dereferences the old-DLL handle -> access violation.
     destroy_agent();
 
     UnloadFTModule();

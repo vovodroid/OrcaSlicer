@@ -223,9 +223,9 @@ PrintOptionsDialog::PrintOptionsDialog(wxWindow* parent)
         int mode_map[] = {2, 1, 0};
         if (sel < 0 || sel > 2) { evt.Skip(); return; }
 
-        // Orca: Auto->On in-print confirmation (backing helper landed in cluster 2). If currently in
-        // Auto (current_detect_value == 2), a print is running, and a loaded filament is stringing-prone,
-        // confirm before enabling — turning blob detection on mid-print with such filament can degrade quality.
+        // If currently in Auto (current_detect_value == 2), a print is running, and a loaded
+        // filament is stringing-prone, confirm before enabling — turning blob detection on
+        // mid-print with such filament can degrade quality.
         const auto* blob_opt = obj->GetPrintOptions()->GetDetectionOption(PrintOptionEnum::Smart_Nozzle_Blob_Detection);
         const bool was_auto = blob_opt && blob_opt->current_detect_value == 2;
         if (sel == 1 /*On*/ && was_auto && obj->is_in_printing()
@@ -527,8 +527,7 @@ void PrintOptionsDialog::update_options(MachineObject* obj_)
     }
 
     // Orca: firmware print-option toggles, each shown only when its fun2 capability bit is
-    //       reported (Task 6 detection map). A printer reporting none of these bits renders
-    //       the dialog exactly as before.
+    //       reported. A printer reporting none of these bits renders the dialog as before.
     auto* print_opts = obj_->GetPrintOptions();
     auto  show_row = [](bool support, std::initializer_list<wxWindow*> widgets, wxSizerItem* bottom_space) {
         for (auto* w : widgets) { if (w) w->Show(support); }

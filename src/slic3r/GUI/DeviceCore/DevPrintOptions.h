@@ -105,7 +105,7 @@ private:
     // print option
     DevPrintingSpeedLevel m_speed_level = SPEED_LEVEL_INVALID;
 
-    // detection options (7 existing + 6 newly parsed)
+    // detection options
     PrintOptionData m_ai_monitoring_detection;
     PrintOptionData m_first_layer_detection;
     PrintOptionData m_buildplate_mark_detection;

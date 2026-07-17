@@ -372,9 +372,8 @@ void SyncAmsInfoDialog::update_map_when_change_map_mode()
         m_cur_colors_in_thumbnail = m_back_cur_colors_in_thumbnail;
     } else if (m_map_mode == MapModeEnum::Override) {
         if (m_ams_combo_info.empty()) {
-            // Orca: the reference passes has_selector() here to skip ext-spool colors in Override mode;
-            // that overload lives in libslic3r/PresetBundle (out of this cluster's scope), so we keep the
-            // 1-arg form. Minor: with an FTS installed, ext-spool colors still appear in the Override combo.
+            // Orca: the reference's has_selector overload (skips ext-spool colors in Override mode) is
+            // not ported, so with an FTS installed, ext-spool colors still appear in the Override combo.
             wxGetApp().preset_bundle->get_ams_cobox_infos(m_ams_combo_info);
         }
         for (size_t i = 0; i < m_ams_combo_info.ams_filament_colors.size(); i++) {
@@ -1225,8 +1224,8 @@ void SyncAmsInfoDialog::sync_ams_mapping_result(std::vector<FilamentInfo> &resul
     }
 }
 
-// Orca: ported FTS "selector" check — a Filament Track Switch, once installed and ready, feeds both
-// nozzles from one AMS set, so the mapping collapses to a single dynamic panel and skips ext spools.
+// A Filament Track Switch, once installed and ready, feeds both nozzles from one AMS set,
+// so the mapping collapses to a single dynamic panel and skips ext spools.
 bool SyncAmsInfoDialog::has_selector(MachineObject *obj_) const
 {
     if (!obj_) {
@@ -2661,7 +2660,7 @@ void SyncAmsInfoDialog::reset_and_sync_ams_list()
             MachineObject *obj_        = dev_manager->get_selected_machine();
             bool is_selector = false;
             if (get_is_double_extruder()) {
-                if (has_selector(obj_)) { // Orca: ported FTS combined view — one dynamic panel when a switch is installed+ready
+                if (has_selector(obj_)) { // FTS combined view — one dynamic panel when a switch is installed+ready
                     m_mapping_popup.set_show_type(ShowType::LEFT_AND_RIGHT_DYNAMIC);
                     is_selector = true;
                 } else {
