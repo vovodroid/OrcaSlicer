@@ -44,7 +44,7 @@ private:
     std::vector<nlohmann::json>                  m_opaque_entries;
 };
 
-inline constexpr const char* PLUGIN_OVERRIDES_OPTION_KEY = "plugin_preference_overrides";
+inline constexpr const char* PLUGIN_OVERRIDES_OPTION_KEY = "plugin_config_overrides";
 
 std::string plugin_overrides_of(const Preset& preset);
 bool parse_plugin_overrides(const std::string& raw, CapabilityConfigDocument& document, std::string& error);
