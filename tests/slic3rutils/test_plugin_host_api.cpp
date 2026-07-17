@@ -134,8 +134,12 @@ TEST_CASE("Plugin host API exposes the UI module and guards it before Orca app i
 
     py::object ui = host.attr("ui");
     CHECK(has_attr(ui, "message"));
-    CHECK(has_attr(ui, "show_dialog"));
+    CHECK_FALSE(has_attr(ui, "show_dialog"));
     CHECK(has_attr(ui, "create_window"));
+    CHECK(has_attr(ui, "WINDOW_MODELESS"));
+    CHECK(has_attr(ui, "WINDOW_MODAL"));
+    CHECK(ui.attr("WINDOW_MODELESS").cast<long>() == 0);
+    CHECK(ui.attr("WINDOW_MODAL").cast<long>() == 1);
     CHECK(has_attr(ui, "UiWindow"));
 
     // With no wx application the UI calls marshal to a main thread that does not

@@ -18,7 +18,7 @@ usable) with a sidebar of sections, each exercising one part of the API:
   Config     the complete merged full_config as a searchable table
   Model      Model -> Object -> Volume/Instance tree with lazy mesh geometry
   Assembly   objects grouped by module_name, per-instance assemble transforms
-  UI Toolkit live demos of message/show_dialog/create_window/ProgressDialog
+  UI Toolkit live demos of message/create_window/ProgressDialog
 
 The page and the plugin talk JSON through the injected `window.orca` bridge:
 
@@ -1006,8 +1006,8 @@ function renderUikit() {
       '<option>error</option><option selected>question</option></select></div>' +
       '<div class="frow"><input id="ui-text" style="flex:1" value="Shall we inspect some hosts?">' +
       '<button class="small" data-act="ui" data-ui="message">Show</button></div></div>' +
-    '<div class="card"><h3>Modal HTML dialog · ui.show_dialog()</h3>' +
-      '<p class="muted">Blocks until closed; returns the <span class="mono">orca.submit()</span> payload.</p>' +
+    '<div class="card"><h3>Modal HTML dialog · ui.create_window()</h3>' +
+      '<p class="muted">Uses WINDOW_MODAL; messages and the final <span class="mono">orca.submit()</span> payload are callbacks.</p>' +
       '<button class="small" data-act="ui" data-ui="modal">Open modal dialog</button></div>' +
     '<div class="card"><h3>Progress dialog · ui.ProgressDialog</h3>' +
       '<p class="muted">Determinate update() loop (cancellable) and start_pulse()/stop_pulse().</p>' +
@@ -1107,13 +1107,13 @@ show('overview');
 """
 
 
-# The modal page demoed from the UI Toolkit tab: orca.submit(payload) resolves the
-# blocking show_dialog() call with that payload; orca.close() resolves it with None.
+# The modal page demoed from the UI Toolkit tab: create_window(style=WINDOW_MODAL)
+# keeps the handle alive for callbacks; orca.submit(payload) invokes on_submit.
 MODAL_PAGE = r"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
 <body style="padding:18px">
   <h3 style="margin-top:0">Modal dialog</h3>
-  <p>show_dialog() blocks the plugin until this closes, then returns the submitted payload.</p>
+  <p>create_window(style=WINDOW_MODAL) keeps this page interactive until it submits or closes.</p>
   <p><input id="note" style="width:100%" value="hello from the modal"></p>
   <p style="text-align:right">
     <button style="background:transparent;color:var(--orca-fg);border-color:var(--orca-border)"
@@ -1149,6 +1149,7 @@ CHILD_PAGE = r"""<!DOCTYPE html>
 class OrcaInspectorPanel(orca.script.ScriptPluginCapabilityBase):
     win = None
     child = None
+    modal = None
 
     def get_name(self):
         return "Orca Inspector"
@@ -1162,6 +1163,9 @@ class OrcaInspectorPanel(orca.script.ScriptPluginCapabilityBase):
         if self.child is not None:
             self.child.close()
             self.child = None
+        if self.modal is not None:
+            self.modal.close()
+            self.modal = None
         # Non-modal: returns immediately. The window is host-owned and lives on
         # after execute() returns; on_message keeps firing when the page posts.
         self.win = orca.host.ui.create_window(
@@ -1238,14 +1242,21 @@ class OrcaInspectorPanel(orca.script.ScriptPluginCapabilityBase):
                     icon=msg.get("icon", "info"))
                 report(f"user clicked {clicked!r}")
             elif action == "modal":
-                # We are on the UI thread, so this nests a modal event loop and
-                # blocks right here until the dialog closes. on_message still
-                # fires while the dialog is open (the log updates live).
-                result = orca.host.ui.show_dialog(
+                if self.modal is not None and self.modal.is_open():
+                    report("modal already open")
+                    return
+                # The modal window is created asynchronously on the UI thread,
+                # but the handle remains usable for post()/close() and callbacks.
+                self.modal = orca.host.ui.create_window(
                     html=MODAL_PAGE, title="Orca Inspector — modal", width=420, height=280,
+                    style=orca.host.ui.WINDOW_MODAL,
                     on_message=lambda m: self.win.post(
-                        {**reply, "ok": True, "result": f"modal posted {m!r} while open"}))
-                report(f"show_dialog returned {result!r}")
+                        {**reply, "ok": True, "result": f"modal posted {m!r} while open"}),
+                    on_submit=lambda result: self.win.post(
+                        {**reply, "ok": True, "result": f"modal submitted {result!r}"}),
+                    on_close=lambda: self.win.post(
+                        {**reply, "ok": True, "result": "modal closed"}))
+                report("modal opened")
             elif action == "progress":
                 threading.Thread(target=self.progress_demo, daemon=True).start()
                 report("started on a worker thread…")

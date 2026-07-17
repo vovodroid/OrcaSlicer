@@ -85,6 +85,24 @@ GUI::PluginWebDialog::MessageHandler make_message_adapter(py::object on_message)
     };
 }
 
+GUI::PluginWebDialog::SubmitHandler make_submit_adapter(py::object on_submit)
+{
+    CallablePtr holder = make_holder(std::move(on_submit));
+    if (!holder)
+        return nullptr;
+    return [holder](const json& data) {
+        PythonGILState gil;
+        if (!gil)
+            return;
+        try {
+            holder->fn(json_to_py(data));
+        } catch (py::error_already_set& e) {
+            BOOST_LOG_TRIVIAL(error) << "orca.host.ui on_submit handler raised: " << e.what();
+            PyErr_Clear();
+        }
+    };
+}
+
 // --------------------------------------------------------------------------
 // Registry of live plugin UI resources. Keyed by an opaque id; tracks the
 // owning plugin so all of a plugin's UI can be torn down on unload.
@@ -242,27 +260,11 @@ std::string ui_message(const std::string& text, const std::string& title,
 }
 
 // --------------------------------------------------------------------------
-// orca.host.ui.show_dialog (modal)
-// --------------------------------------------------------------------------
-py::object ui_show_dialog(const std::string& html, const std::string& title,
-                          int width, int height, py::object on_message)
-{
-    auto      handler = make_message_adapter(std::move(on_message));
-    const int w       = width > 0 ? width : 820;
-    const int h       = height > 0 ? height : 600;
+constexpr long WINDOW_MODELESS  = 0L;
+constexpr long WINDOW_MODAL     = 1L << 0;
+constexpr long PLUGIN_WX_STYLE = wxSYSTEM_MENU | wxCAPTION | wxCLOSE_BOX | wxMAXIMIZE_BOX | wxRESIZE_BORDER;
 
-    std::optional<json> result = run_on_ui_blocking([&]() -> std::optional<json> {
-        return GUI::PluginWebDialog::show_modal_dialog(ui_parent(), wxString::FromUTF8(title), html, wxSize(w, h),
-                                                       std::move(handler));
-    });
-
-    if (!result.has_value())
-        return py::none();
-    return json_to_py(*result); // GIL held in the binding body
-}
-
-// --------------------------------------------------------------------------
-// orca.host.ui.create_window (non-modal) + UiWindow handle
+// orca.host.ui.create_window + UiWindow handle
 // --------------------------------------------------------------------------
 struct UiWindowHandle
 {
@@ -275,13 +277,18 @@ struct UiProgressHandle
 };
 
 py::object ui_create_window(const std::string& html, const std::string& title, int width, int height,
-                            py::object on_message, py::object on_close)
+                            py::object on_message, py::object on_close, long style, py::object on_submit)
 {
-    auto              msg_adapter  = make_message_adapter(std::move(on_message));
-    CallablePtr       close_holder = make_holder(std::move(on_close));
-    const std::string plugin_key   = PluginAuditManager::instance().current_plugin();
-    const int         w            = width > 0 ? width : 820;
-    const int         h            = height > 0 ? height : 600;
+    auto              msg_adapter    = make_message_adapter(std::move(on_message));
+    auto              submit_adapter = make_submit_adapter(std::move(on_submit));
+    CallablePtr       close_holder   = make_holder(std::move(on_close));
+    const std::string plugin_key     = PluginAuditManager::instance().current_plugin();
+    const int         w              = width > 0 ? width : 820;
+    const int         h              = height > 0 ? height : 600;
+
+    if ((style & ~WINDOW_MODAL) != 0)
+        throw std::invalid_argument("unsupported orca.host.ui.create_window style flags");
+    const bool modal = (style & WINDOW_MODAL) != 0;
 
     if (wxTheApp == nullptr)
         throw std::runtime_error("OrcaSlicer application is not initialized");
@@ -308,7 +315,8 @@ py::object ui_create_window(const std::string& html, const std::string& title, i
 
     GUI::wxGetApp().CallAfter([new_id, plugin_key, html, title, w, h,
                                msg_adapter = std::move(msg_adapter),
-                               close_holder = std::move(close_holder)]() mutable {
+                               submit_adapter = std::move(submit_adapter),
+                               close_holder = std::move(close_holder), modal]() mutable {
         // Torn down (plugin unload / app shutdown) before the window materialized.
         if (!UiRegistry::instance().is_open(new_id))
             return;
@@ -332,11 +340,19 @@ py::object ui_create_window(const std::string& html, const std::string& title, i
         // Registry cleanup: GIL-free, runs from the dialog destructor on every path.
         auto on_destroyed = [new_id]() { UiRegistry::instance().remove(new_id); };
 
-        auto* dlg = GUI::PluginWebDialog::create_modeless_dialog(ui_parent(), wxString::FromUTF8(title), html,
-                                                                 wxSize(w, h), std::move(msg_adapter),
-                                                                 std::move(on_close), std::move(on_destroyed));
+        auto* dlg = new GUI::PluginWebDialog(ui_parent(), wxString::FromUTF8(title), html,
+                                             wxSize(w, h), std::move(msg_adapter), std::move(submit_adapter),
+                                             std::move(on_close), std::move(on_destroyed), PLUGIN_WX_STYLE);
         UiRegistry::instance().bind(new_id, dlg, plugin_key);
-        dlg->Show();
+        if (modal) {
+            dlg->ShowModal();
+            // Plugin teardown may already have removed and destroyed this dialog
+            // while its modal loop was running.
+            if (UiRegistry::instance().is_open(new_id))
+                dlg->Destroy();
+        } else {
+            dlg->Show();
+        }
     });
 
     return py::cast(UiWindowHandle{new_id});
@@ -450,12 +466,6 @@ void PluginHostUi::RegisterBindings(pybind11::module_& host)
            "(\"ok\"/\"cancel\"/\"yes\"/\"no\"). buttons: \"ok\"|\"ok_cancel\"|\"yes_no\"|\"yes_no_cancel\"; "
            "icon: \"info\"|\"warning\"|\"error\"|\"question\".");
 
-    ui.def("show_dialog", &ui_show_dialog, py::arg("html"), py::arg("title") = "OrcaSlicer", py::arg("width") = 820,
-           py::arg("height") = 600, py::arg("on_message") = py::none(),
-           "Show a modal dialog rendering the given raw HTML. The page talks to the plugin via "
-           "window.orca (postMessage/onMessage/submit/close). Blocks until closed; returns the "
-           "orca.submit() payload as a dict, or None.");
-
     ui.attr("PD_APP_MODAL")      = py::int_(wxPD_APP_MODAL);
     ui.attr("PD_AUTO_HIDE")      = py::int_(wxPD_AUTO_HIDE);
     ui.attr("PD_CAN_ABORT")      = py::int_(wxPD_CAN_ABORT);
@@ -463,8 +473,10 @@ void PluginHostUi::RegisterBindings(pybind11::module_& host)
     ui.attr("PD_ELAPSED_TIME")   = py::int_(wxPD_ELAPSED_TIME);
     ui.attr("PD_ESTIMATED_TIME") = py::int_(wxPD_ESTIMATED_TIME);
     ui.attr("PD_REMAINING_TIME") = py::int_(wxPD_REMAINING_TIME);
+    ui.attr("WINDOW_MODELESS")   = py::int_(WINDOW_MODELESS);
+    ui.attr("WINDOW_MODAL")      = py::int_(WINDOW_MODAL);
 
-    py::class_<UiWindowHandle>(ui, "UiWindow", "Handle to a non-modal plugin window created by create_window().")
+    py::class_<UiWindowHandle>(ui, "UiWindow", "Handle to a plugin HTML window or modal dialog created by create_window().")
         .def_property_readonly("id", [](const UiWindowHandle& h) { return h.id; })
         .def(
             "post", [](const UiWindowHandle& h, py::object data) { handle_post(h.id, std::move(data)); },
@@ -477,9 +489,10 @@ void PluginHostUi::RegisterBindings(pybind11::module_& host)
 
     ui.def("create_window", &ui_create_window, py::arg("html"), py::arg("title") = "OrcaSlicer", py::arg("width") = 820,
            py::arg("height") = 600, py::arg("on_message") = py::none(), py::arg("on_close") = py::none(),
-           "Open a non-modal, persistent HTML window and return a UiWindow. on_message(data) is called on "
-           "the UI thread when the page posts; offload heavy work to a thread and push results back with "
-           "window.post().");
+           py::arg("style") = WINDOW_MODELESS, py::arg("on_submit") = py::none(),
+           "Open a persistent HTML window or modal dialog and return a UiWindow. style is WINDOW_MODELESS "
+           "or WINDOW_MODAL. on_message(data) is called on the UI thread when the page posts; on_submit(data) "
+           "is called when the page submits; offload heavy work to a thread and push results back with window.post().");
 
     py::class_<UiProgressHandle>(ui, "ProgressDialog", "Handle to a native progress dialog.")
         .def(py::init(&new_progress_dialog), py::arg("title"), py::arg("message"), py::arg("maximum") = 100,
@@ -528,7 +541,9 @@ void PluginHostUi::close_windows_for_plugin(const std::string& plugin_key)
         // Destroy() bypasses wxEVT_CLOSE, so the plugin's on_close is not fired on
         // forced teardown (intended); the resource destructor still cleans the registry.
         for (auto* window : UiRegistry::instance().take_for_plugin(plugin_key)) {
-            if (window != nullptr)
+            if (auto* dialog = dynamic_cast<GUI::PluginWebDialog*>(window))
+                GUI::PluginWebDialog::destroy_for_plugin(dialog);
+            else if (window != nullptr)
                 window->Destroy();
         }
     };
