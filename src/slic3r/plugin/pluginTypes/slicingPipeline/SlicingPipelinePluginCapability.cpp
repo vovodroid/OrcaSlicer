@@ -2,7 +2,6 @@
 #include "SlicingPipelinePluginCapabilityTrampoline.hpp"
 #include "slic3r/plugin/PluginBindingUtils.hpp" // config_value_or_none
 #include "libslic3r/libslic3r.h"    // unscale<>, live SCALING_FACTOR
-#include <pybind11/stl.h>           // std::map<std::string,std::string> -> dict for ctx.params
 
 namespace py = pybind11;
 namespace Slic3r {
@@ -31,7 +30,7 @@ void SlicingPipelinePluginCapability::RegisterBindings(py::module_& module, py::
         // ctx.object are None; instead ctx.gcode_path / ctx.host / ctx.output_name are set and the plugin
         // edits the file at ctx.gcode_path IN PLACE. May fire more than once per slice (file export and/or
         // upload each fire once, on separate working copies) and its output is not reflected in the G-code
-        // preview (the viewer maps the pre-post-process file). ctx.config_value()/ctx.params still work.
+        // preview (the viewer maps the pre-post-process file). ctx.config_value() still works.
         .value("psGCodePostProcess", SlicingPipelineStepPlugin::psGCodePostProcess)
         .export_values();
 

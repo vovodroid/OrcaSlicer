@@ -24,9 +24,9 @@ preview corkscrews and the print keeps correct walls/infill/flow.
 
 Because we edit geometry in place, surface types are preserved automatically
 (no per-surface type carry needed), and no numpy is required --
-rotate/scale/translate are host methods. Parameters come from ctx.params (the
-settings table above). The first object layer is untouched (z_rel = 0), so bed
-adhesion is unaffected.
+rotate/scale/translate are host methods. Parameters come from self.get_config()
+(see _params below), which the host seeds from get_default_config(). The first
+object layer is untouched (z_rel = 0), so bed adhesion is unaffected.
 """
 import math
 import json

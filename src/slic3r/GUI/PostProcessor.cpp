@@ -270,9 +270,6 @@ static void run_post_process_plugins(const ConfigOptionStrings& capabilities,
         ctx.host         = host;
         ctx.output_name  = output_name;
         ctx.full_config  = &config;   // no live Print here; config_value() reads this
-        // Hand the plugin its own [tool.orcaslicer.plugin.settings] as ctx.params (same plugin_key the
-        // capability was resolved by), mirroring the in-pipeline dispatcher in GUI_App.cpp.
-        const std::string plugin_key = ref.uuid.empty() ? ref.name : ref.uuid;
 
         ExecutionResult exec_result;
         try {

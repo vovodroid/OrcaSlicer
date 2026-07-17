@@ -467,7 +467,10 @@ bool parse_pep723_toml(const std::string& toml_content,
             if (trimmed == "[tool.orcaslicer.plugin]") {
                 section = TomlSection::OrcaPlugin;
             } else if (trimmed == "[tool.orcaslicer.plugin.settings]") {
-                section = TomlSection::OrcaPluginSettings; // per-plugin params table
+                // Legacy table, superseded by PluginConfig. Recognized so its keys are ignored
+                // rather than falling through to Root, where a stray dependencies/requires-python
+                // key inside it would be parsed as package metadata.
+                section = TomlSection::OrcaPluginSettings;
             } else {
                 section = TomlSection::Root; // Unknown section — skip.
             }

@@ -42,7 +42,7 @@ PluginsConfigDialog::PluginsConfigDialog(wxWindow* parent, Preset::Type type, co
                    wxSize(640, 520));
 }
 
-PluginsConfigDialog::~PluginsConfigDialog() = default;
+PluginsConfigDialog::~PluginsConfigDialog() { m_alive->store(false, std::memory_order_release); }
 
 const Preset* PluginsConfigDialog::current_preset() const
 {
@@ -70,6 +70,18 @@ void PluginsConfigDialog::on_script_message(const nlohmann::json& payload)
     if (handle_common_script_command(payload))
         return;
 
+    // Defer command handling out of the webview script-message callback, exactly as PluginsDialog
+    // does: GTK and macOS deliver it synchronously inside the native webview callback, and window
+    // work on that stack is the crash class fixed in b779a7bfed/f2ccbfc8b5. remove_preset_override
+    // puts a modal message box on that stack, which is the same bug.
+    wxGetApp().CallAfter([this, alive = m_alive, payload]() {
+        if (alive->load(std::memory_order_acquire))
+            handle_web_command(payload);
+    });
+}
+
+void PluginsConfigDialog::handle_web_command(const nlohmann::json& payload)
+{
     const std::string command = payload.value("command", "");
     if (command == "request_capabilities") {
         send_capabilities();

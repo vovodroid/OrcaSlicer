@@ -483,8 +483,9 @@ void PluginsDialog::on_script_message(const nlohmann::json& payload)
     // Defer command handling out of the webview script-message callback: GTK and macOS
     // deliver it synchronously inside the native webview callback (see ui_create_window
     // in PluginHostUi.cpp), and window work on that stack is the crash class fixed in
-    // b779a7bfed/f2ccbfc8b5. Deferring at this single entry point keeps every command
-    // handler, current and future, off that stack by construction.
+    // b779a7bfed/f2ccbfc8b5. Deferring here keeps every command handler in THIS dialog off
+    // that stack; it is not a guarantee for other WebViewHostDialog subclasses, which each
+    // have to defer for themselves (PluginsConfigDialog does; others still do not).
     wxGetApp().CallAfter([this, alive = m_alive, payload]() {
         if (alive->load(std::memory_order_acquire))
             handle_web_command(payload);

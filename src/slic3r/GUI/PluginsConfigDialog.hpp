@@ -4,6 +4,8 @@
 #include <libslic3r/Preset.hpp>
 #include <slic3r/plugin/PluginConfig.hpp>
 
+#include <atomic>
+#include <memory>
 #include <string>
 
 namespace Slic3r { namespace GUI {
@@ -25,6 +27,8 @@ public:
 
 private:
     void on_script_message(const nlohmann::json& payload) override;
+    // Runs one web command on a clean main-loop stack; see on_script_message.
+    void handle_web_command(const nlohmann::json& payload);
 
     const Preset* current_preset() const;
     void          send_capabilities();
@@ -41,6 +45,8 @@ private:
     // Set when the preset's stored text could not be parsed: the rows are shown read-only rather
     // than silently replacing data we did not understand.
     std::string               m_parse_error;
+    // Guards the deferred command handlers against the dialog being destroyed while one is queued.
+    std::shared_ptr<std::atomic<bool>> m_alive = std::make_shared<std::atomic<bool>>(true);
 };
 
 }} // namespace Slic3r::GUI
