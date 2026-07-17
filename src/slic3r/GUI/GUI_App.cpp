@@ -1967,6 +1967,13 @@ bool GUI_App::check_networking_version()
 
     BOOST_LOG_TRIVIAL(info) << "check_networking_version: network_ver=" << network_ver << ", expected=" << studio_ver;
 
+    // A configured version outside the whitelisted series must never pass as compatible,
+    // even if it matches the loaded library - its ABI does not match this build.
+    if (!use_legacy_network_plugin() && !is_supported_network_version(studio_ver)) {
+        m_networking_compatible = false;
+        return false;
+    }
+
     if (network_ver.length() >= 8 && studio_ver.length() >= 8) {
         if (network_ver.substr(0,8) == studio_ver.substr(0,8)) {
             m_networking_compatible = true;
@@ -3451,6 +3458,21 @@ bool GUI_App::on_init_network(bool try_backup)
     std::string config_version = app_config->get_network_plugin_version();
 
     if (should_load_networking_plugin) {
+        // A version outside the whitelisted series (e.g. 02.03.00.62 configured by an older
+        // Orca release) must not be loaded - its ABI no longer matches this build. Fall back
+        // to the latest supported build if it is already on disk; otherwise clear the
+        // configured version so the normal empty-version download flow takes over (the
+        // download URL and install adoption both derive from the configured version, so it
+        // must not keep pointing at the unsupported build).
+        if (!config_version.empty() && !is_supported_network_version(config_version)) {
+            std::string latest = get_latest_network_version();
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": configured plugin version " << config_version
+                                       << " is no longer supported, falling back to " << latest;
+            config_version = BBLNetworkPlugin::versioned_library_exists(latest) ? latest : "";
+            app_config->set_network_plugin_version(config_version);
+            app_config->save();
+        }
+
         if (config_version.empty()) {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": no version configured, need to download";
             m_networking_need_update = true;
@@ -3505,6 +3527,20 @@ bool GUI_App::on_init_network(bool try_backup)
             }
         } else {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, load dll failed";
+            // A failed install can leave the config naming a build that never made it to
+            // disk (download_plugin() adopts the downloaded version up front so that
+            // install_plugin() can name the library after it). If the whitelisted latest
+            // is still installed, fall back to it instead of dropping the user into the
+            // re-download flow without networking.
+            std::string latest = get_latest_network_version();
+            if (config_version != latest && BBLNetworkPlugin::versioned_library_exists(latest)) {
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": falling back to installed " << latest;
+                config_version = latest;
+                app_config->set_network_plugin_version(latest);
+                app_config->save();
+                load_agent_dll = Slic3r::NetworkAgent::initialize_network_module(false, config_version);
+                goto __retry;
+            }
             if (should_load_networking_plugin) {
                 BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, need upload network module";
                 m_networking_need_update = true;

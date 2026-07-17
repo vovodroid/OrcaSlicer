@@ -359,11 +359,12 @@ struct NetworkLibraryVersion {
     const char* warning;
 };
 
+// Only the latest series and the legacy build are offered/loadable: the host binds the
+// modern ABI (by-value struct layouts, function signatures) of exactly one series, plus
+// a dedicated shim for the legacy build. Older 02.0x series expect different layouts
+// and must not be loaded - see is_supported_network_version().
 static const NetworkLibraryVersion AVAILABLE_NETWORK_VERSIONS[] = {
     {"02.08.01.52", "02.08.01.52", nullptr, true, nullptr},
-    {"02.03.00.62", "02.03.00.62", nullptr, false, nullptr},
-    {"02.01.01.52", "02.01.01.52", nullptr, false, nullptr},
-    {"02.00.02.50", "02.00.02.50", nullptr, false, "This version may crash on startup due to Bambu Lab's signature verification."},
     {BAMBU_NETWORK_AGENT_VERSION_LEGACY, BAMBU_NETWORK_AGENT_VERSION_LEGACY " (legacy)", nullptr, false, nullptr},
 };
 
@@ -375,6 +376,25 @@ inline const char* get_latest_network_version() {
             return AVAILABLE_NETWORK_VERSIONS[i].version;
     }
     return AVAILABLE_NETWORK_VERSIONS[0].version;
+}
+
+// True when the version can be loaded through the ABI this build was compiled against:
+// an exact whitelist entry, or a build from the same AA.BB.CC series as a non-legacy
+// whitelist entry (the plugin ABI is stable within a series, and the OTA sync only ever
+// installs same-series updates). Anything else - in particular older 02.0x series a
+// previous Orca release whitelisted - expects different by-value struct layouts and
+// function signatures and must not be loaded.
+inline bool is_supported_network_version(const std::string& version) {
+    for (size_t i = 0; i < AVAILABLE_NETWORK_VERSIONS_COUNT; ++i) {
+        const std::string base = AVAILABLE_NETWORK_VERSIONS[i].version;
+        if (version == base)
+            return true;
+        if (base == BAMBU_NETWORK_AGENT_VERSION_LEGACY)
+            continue;
+        if (version.size() >= 8 && base.size() >= 8 && version.compare(0, 8, base, 0, 8) == 0)
+            return true;
+    }
+    return false;
 }
 
 struct NetworkLibraryVersionInfo {

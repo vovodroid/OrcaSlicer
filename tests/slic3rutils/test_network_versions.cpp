@@ -66,14 +66,14 @@ TEST_CASE_METHOD(PluginFolderFixture, "Same-series OTA plugin versions are surfa
     add_plugin("02.08.01.55");          // same series as the whitelisted latest -> listed
     add_plugin("02.09.00.10");          // unknown series -> not listed
     add_plugin("02.08.01.52-custom");   // suffixed build of a whitelisted base -> listed (existing behavior)
-    add_plugin("02.03.00.62");          // exactly a whitelisted version -> no duplicate
+    add_plugin("02.03.00.62");          // series no longer whitelisted -> not listed
 
     auto versions = get_all_available_versions();
 
     REQUIRE(count_version(versions, "02.08.01.55") == 1);
     REQUIRE(count_version(versions, "02.09.00.10") == 0);
     REQUIRE(count_version(versions, "02.08.01.52-custom") == 1);
-    REQUIRE(count_version(versions, "02.03.00.62") == 1);
+    REQUIRE(count_version(versions, "02.03.00.62") == 0);
 
     size_t latest_pos = versions.size(), ota_pos = versions.size();
     for (size_t i = 0; i < versions.size(); ++i) {
@@ -98,14 +98,32 @@ TEST_CASE_METHOD(PluginFolderFixture, "Same-series OTA plugin versions are surfa
     REQUIRE_FALSE(versions[latest_pos].is_latest);
     REQUIRE_FALSE(versions[latest_pos].is_installed);
 
-    // A whitelisted version whose library exists on disk is marked installed.
-    for (const auto& info : versions) {
-        if (info.version == "02.03.00.62")
-            REQUIRE(info.is_installed);
-    }
-
     // The static default used for download and update-check decisions is unchanged.
     REQUIRE(std::string(get_latest_network_version()) == "02.08.01.52");
+}
+
+TEST_CASE("Only whitelisted series pass the load gate", "[NetworkVersions]")
+{
+    // Exact whitelist entries.
+    REQUIRE(is_supported_network_version("02.08.01.52"));
+    REQUIRE(is_supported_network_version(BAMBU_NETWORK_AGENT_VERSION_LEGACY));
+
+    // Same-series OTA builds and suffixed dev builds of the whitelisted latest.
+    REQUIRE(is_supported_network_version("02.08.01.55"));
+    REQUIRE(is_supported_network_version("02.08.01.52-custom"));
+
+    // Series whitelisted by previous Orca releases - their ABI no longer matches.
+    REQUIRE_FALSE(is_supported_network_version("02.03.00.62"));
+    REQUIRE_FALSE(is_supported_network_version("02.01.01.52"));
+    REQUIRE_FALSE(is_supported_network_version("02.00.02.50"));
+
+    // Unknown series, legacy siblings, and malformed values.
+    REQUIRE_FALSE(is_supported_network_version("02.09.00.10"));
+    std::string legacy = BAMBU_NETWORK_AGENT_VERSION_LEGACY;
+    std::string legacy_sibling = legacy.substr(0, 9) + (legacy.substr(9) == "99" ? "98" : "99");
+    REQUIRE_FALSE(is_supported_network_version(legacy_sibling));
+    REQUIRE_FALSE(is_supported_network_version(""));
+    REQUIRE_FALSE(is_supported_network_version("02.08"));
 }
 
 TEST_CASE_METHOD(PluginFolderFixture, "Legacy series never adopts discovered builds", "[NetworkVersions]")
