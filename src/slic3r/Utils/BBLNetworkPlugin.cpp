@@ -833,6 +833,58 @@ std::vector<NetworkLibraryVersionInfo> get_all_available_versions()
                       NetworkLibraryVersionInfo::from_discovered(full, base, sfx));
     }
 
+    // Also surface discovered versions WITHOUT a suffix (typically installed by the
+    // OTA plug-in update) when they belong to a whitelisted release series: the plugin
+    // ABI is stable within an AA.BB.CC series (the OTA sync only ever accepts same-series
+    // updates), so these load with the same struct layout as the static entry they follow.
+    // The legacy entry is excluded as an anchor - is_legacy_version() matches exactly, so
+    // a different 01.x build would be loaded with the modern layout and break.
+    std::vector<std::pair<std::string, std::string>> series_versions; // {anchor whitelist version, discovered version}
+    for (const auto& version : discovered) {
+        if (all_known_versions.count(version) > 0)
+            continue;
+        if (!extract_suffix(version).empty())
+            continue;
+        if (version.size() < 8)
+            continue;
+
+        for (const auto& base : known_base_versions) {
+            if (BBLNetworkPlugin::is_legacy_version(base))
+                continue;
+            if (base.size() >= 8 && base.compare(0, 8, version, 0, 8) == 0) {
+                series_versions.emplace_back(base, version);
+                all_known_versions.insert(version);
+                break;
+            }
+        }
+    }
+
+    // Ascending sort + insertion right behind the anchor leaves the newest build
+    // closest to its whitelist entry.
+    std::sort(series_versions.begin(), series_versions.end(),
+              [](const auto& a, const auto& b) {
+                  if (a.first != b.first) return a.first > b.first;
+                  return a.second < b.second;
+              });
+
+    for (const auto& [anchor, full] : series_versions) {
+        size_t insert_pos = result.size();
+        for (size_t i = 0; i < result.size(); ++i) {
+            if (result[i].version == anchor) {
+                // Skip past the whole base-version block (the entry itself plus any
+                // suffixed dev builds shown under it) so the tree glyphs stay adjacent.
+                insert_pos = i + 1;
+                while (insert_pos < result.size() &&
+                       result[insert_pos].base_version == anchor) {
+                    ++insert_pos;
+                }
+                break;
+            }
+        }
+        result.insert(result.begin() + insert_pos,
+                      NetworkLibraryVersionInfo::from_discovered(full, full, ""));
+    }
+
     return result;
 }
 

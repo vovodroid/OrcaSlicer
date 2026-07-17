@@ -1272,6 +1272,9 @@ wxBoxSizer *PreferencesDialog::create_item_network_plugin_version(wxString title
 
         if (ver.is_latest) {
             label += " " + _L("(Latest)");
+        } else if (ver.is_discovered && ver.suffix.empty()) {
+            // A same-series build found on disk (usually installed by the OTA update).
+            label += " " + _L("(installed)");
         }
         m_network_version_combo->Append(label);
         if (current_version == ver.version) {
