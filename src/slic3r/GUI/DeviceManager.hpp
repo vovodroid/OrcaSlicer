@@ -928,6 +928,7 @@ public:
     bool                        is_enable_np{ false };
     bool                        is_enable_ams_np{ false };
     bool                        is_support_filament_32_colors{ false }; // Orca: REF-additive, now ported (post-review)
+    bool                        is_support_fila_change_abort{ false }; // Orca: REF-additive, now ported (filament-change Stop button)
 
     // Orca: REF-additive, now ported (post-review). Max filament color count for the send
     // gate; returns 0 when there is no explicit upper bound.

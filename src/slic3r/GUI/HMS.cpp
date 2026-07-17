@@ -267,10 +267,15 @@ std::string HMSQuery::hms_language_code()
         // set language code to en by default
         return "en";
     std::string lang_code = wxGetApp().app_config->get_language_code();
-    // Orca: english fallback limited to locales without a translated HMS catalog
+    // The HMS host ships no catalog for these locales, so fall back to english to avoid empty texts + retries
     if (lang_code.compare("uk") == 0
         || lang_code.compare("cs") == 0
-        || lang_code.compare("ru") == 0) {
+        || lang_code.compare("ru") == 0
+        || lang_code.compare("tr") == 0
+        || lang_code.compare("pt") == 0
+        || lang_code.compare("ko") == 0
+        )
+    {
         BOOST_LOG_TRIVIAL(info) << "HMS: using english for lang_code = " << lang_code;
         return "en";
     }

@@ -2136,9 +2136,21 @@ wxBoxSizer* StatusBasePanel::create_filament_group(wxWindow* parent)
         if (obj) { obj->command_ams_control("resume"); }
     });
 
+    // Orca: filament-change Stop button (aborts an in-progress filament change)
+    m_fila_change_abort = new Button(m_filament_load_box, _L("Stop"));
+    m_fila_change_abort->SetStyle(ButtonStyle::Regular, ButtonType::Choice);
+    m_fila_change_abort->Hide();
+    m_fila_change_abort->Bind(wxEVT_BUTTON, [this](wxCommandEvent &e) {
+        BOOST_LOG_TRIVIAL(info) << "on_ams_abort";
+        if (obj) { obj->command_ams_control("abort"); }
+    });
+
+    wxBoxSizer *fila_change_sizer = new wxBoxSizer(wxHORIZONTAL);
+    fila_change_sizer->Add(m_button_retry, 0, wxRIGHT, FromDIP(7));
+    fila_change_sizer->Add(m_fila_change_abort, 0, wxLEFT, FromDIP(7));
 
     sizer_box->Add(steps_sizer, 0, wxEXPAND | wxTOP, FromDIP(5));
-    sizer_box->Add(m_button_retry, 0, wxLEFT, FromDIP(28));
+    sizer_box->Add(fila_change_sizer, 0, wxLEFT, FromDIP(28));
     sizer_box->Add(0, 0, 0, wxTOP, FromDIP(5));
     m_filament_load_box->SetBackgroundColour(*wxWHITE);
     m_filament_load_box->Layout();
@@ -5527,6 +5539,9 @@ void StatusPanel::update_filament_loading_panel(MachineObject* obj)
         ams_loading_state = false;
     }
 
+    // Orca: show the Stop button when the printer supports aborting a filament change (flag3 bit-13 or printer config)
+    m_fila_change_abort->Show(ams_loading_state &&
+        (obj->is_support_fila_change_abort || DevPrinterConfigUtil::support_ams_fila_change_abort(obj->printer_type)));
     show_filament_load_group(ams_loading_state);
 }
 
