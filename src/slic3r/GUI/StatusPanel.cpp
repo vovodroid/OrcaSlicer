@@ -4503,6 +4503,8 @@ void StatusPanel::on_filament_edit(wxCommandEvent &event)
 
     if (obj) {
         m_filament_setting_dlg->obj = obj;
+        // Orca: 2D mode (laser/cut) only allows viewing filament info, not editing
+        m_filament_setting_dlg->m_view_only = !obj->is_fdm_type();
 
         int ams_id = event.GetInt();
         int slot_id = event.GetString().IsEmpty() ? 0 : std::stoi(event.GetString().ToStdString());
@@ -4571,6 +4573,8 @@ void StatusPanel::on_ext_spool_edit(wxCommandEvent &event)
 
     if (obj) {
         m_filament_setting_dlg->obj = obj;
+        // Orca: 2D mode (laser/cut) only allows viewing filament info, not editing
+        m_filament_setting_dlg->m_view_only = !obj->is_fdm_type();
 
         int ams_id                     = event.GetInt();
         int slot_id                    = event.GetString().IsEmpty() ? 0 : std::stoi(event.GetString().ToStdString());
@@ -4716,16 +4720,8 @@ void StatusPanel::on_ams_selected(wxCommandEvent &event)
 
 void StatusPanel::on_ams_guide(wxCommandEvent& event)
 {
-    wxString ams_wiki_url;
-    if (m_ams_control && m_ams_control->m_is_none_ams_mode == AMSModel::GENERIC_AMS) {
-        ams_wiki_url = "https://wiki.bambulab.com/en/software/bambu-studio/use-ams-on-bambu-studio";
-    }
-    else if (m_ams_control && m_ams_control->m_is_none_ams_mode == AMSModel::AMS_LITE) {
-        ams_wiki_url = "https://wiki.bambulab.com/en/ams-lite";
-    }
-    else {
-        ams_wiki_url = "https://wiki.bambulab.com/en/software/bambu-studio/use-ams-on-bambu-studio";
-    }
+    // Orca: neutral wiki link (vendor URLs removed)
+    wxString ams_wiki_url = "https://www.orcaslicer.com/wiki/";
 
     wxLaunchDefaultBrowser(ams_wiki_url);
 }
@@ -5424,7 +5420,8 @@ void StatusPanel::update_filament_loading_panel(MachineObject* obj)
     bool ams_loading_state = false;
     auto ams_status_sub = obj->ams_status_sub;
 
-    if (obj->is_enable_np) {
+    // Orca: skip busy-loading detection during a cold pull (backing enum/parse landed in cluster 2)
+    if (obj->is_enable_np && obj->ams_status_main != AMS_STATUS_MAIN_COLD_PULL) {
         ams_loading_state = obj->GetExtderSystem()->IsBusyLoading();
     } else if (obj->ams_status_main == AMS_STATUS_MAIN_FILAMENT_CHANGE) {
         ams_loading_state = true;

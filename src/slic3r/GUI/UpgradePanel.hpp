@@ -140,6 +140,18 @@ protected:
     wxStaticLine*          m_filatrack_line_above = nullptr;
     uiDeviceUpdateVersion* m_filatrack_version = nullptr;
 
+    /* rotary attachment info (Orca: accessory firmware version display) */
+    wxBoxSizer*            m_rotary_sizer = nullptr;
+    wxStaticBitmap*        m_rotary_img = nullptr;
+    wxStaticLine*          m_rotary_line_above = nullptr;
+    uiDeviceUpdateVersion* m_rotary_version = nullptr;
+
+    /* exhaust fan info (Orca: accessory firmware version display) */
+    wxBoxSizer*            m_exhaustfan_sizer = nullptr;
+    wxStaticBitmap*        m_exhaustfan_img = nullptr;
+    wxStaticLine*          m_exhaustfan_line_above = nullptr;
+    uiDeviceUpdateVersion* m_exhaustfan_version = nullptr;
+
     /* nozzle rack (H2C induction hotend rack) — opens wgtDeviceNozzleRackUpgradeDlg */
     wxBoxSizer*     m_nozzle_rack_sizer = nullptr;
     wxStaticBitmap* m_nozzle_rack_img = nullptr;
@@ -228,6 +240,8 @@ private:
     void createLaserWidgets(wxBoxSizer* main_left_sizer);
     void createExtinguishWidgets(wxBoxSizer* main_left_sizer);
     void createFilaTrackSwitchWidgets(wxBoxSizer* main_left_sizer);
+    void createRotaryWidgets(wxBoxSizer* main_left_sizer);      // Orca: accessory firmware version display
+    void createExhaustFan(wxBoxSizer* main_left_sizer);         // Orca: accessory firmware version display
     void createNozzleRackWidgets(wxBoxSizer* main_left_sizer);
 
     void update_air_pump(MachineObject* obj);
@@ -235,6 +249,8 @@ private:
     void update_laszer(MachineObject* obj);
     void update_extinguish(MachineObject* obj);
     void update_filatrack(MachineObject* obj);
+    void update_rotary(MachineObject* obj);                     // Orca: accessory firmware version display
+    void update_exhaustfan(MachineObject* obj);                 // Orca: accessory firmware version display
     void update_nozzle_rack(MachineObject* obj);
 
     void show_air_pump(bool show = true);
@@ -242,6 +258,8 @@ private:
     void show_laszer(bool show = true);
     void show_extinguish(bool show = true);
     void show_filatrack(bool show = true);
+    void show_rotary(bool show = true);                         // Orca: accessory firmware version display
+    void show_exhaustfan(bool show = true);                     // Orca: accessory firmware version display
     void show_nozzle_rack(bool show = true);
 
     void on_nozzle_rack_update(wxCommandEvent& event);
