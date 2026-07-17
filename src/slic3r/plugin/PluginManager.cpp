@@ -1,5 +1,6 @@
 #include "PluginManager.hpp"
 
+#include <libslic3r/Utils.hpp>
 #include <memory>
 #include <pybind11/embed.h>
 
@@ -19,6 +20,7 @@
 #include <algorithm>
 #include <chrono>
 #include <mutex>
+#include <slic3r/plugin/PluginConfig.hpp>
 #include <slic3r/plugin/PluginLoader.hpp>
 #include <slic3r/plugin/PythonPluginInterface.hpp>
 #include <slic3r/plugin/pluginTypes/script/ScriptPluginCapability.hpp>
@@ -83,6 +85,12 @@ bool PluginManager::initialize()
         m_initialized = true;
     }
 
+    // Bring every capability's stored config into memory. Deliberately unconditional and
+    // independent of which plugins are installed: an entry outlives uninstall/unsubscribe, so a
+    // plugin that comes back later finds its settings intact. A missing or malformed file just
+    // leaves the store empty (see PluginConfig::load), never blocking startup.
+    m_config.load();
+
     // Install the libslic3r hooks (capability resolver, slicing-pipeline dispatcher).
     // Uninstalled in shutdown() before the interpreter finalizes.
     plugin_hooks::install();
@@ -141,6 +149,12 @@ void PluginManager::shutdown()
 
     unload_all_plugins();
     PythonPluginBridge::instance().clear_pending_captures();
+
+    // Every config write already goes to disk as it happens (store_capability_config), so this
+    // only catches an in-memory-only mutation. Note we flush rather than clear: unloading the
+    // plugins above must never discard their stored config.
+    if (m_config.dirty())
+        m_config.save();
 
     // Drop the lifecycle subscriptions taken out during initialize(). Without this a second
     // initialize() in the same process re-subscribes the same callbacks on top of the old ones,
@@ -496,21 +510,18 @@ std::vector<std::shared_ptr<PluginCapabilityInterface>> PluginManager::get_plugi
     return result;
 }
 
-std::shared_ptr<PluginCapabilityInterface> PluginManager::get_plugin_capability(const std::string& plugin_key,
-                                                                                const std::string& capability_name,
-                                                                                PluginCapabilityType type,
-                                                                                bool only_enabled) const
+std::shared_ptr<PluginCapabilityInterface> PluginManager::get_plugin_capability(const PluginCapabilityId& id, bool only_enabled) const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    const Plugin* plugin = find_plugin_locked(plugin_key);
+    const Plugin* plugin = find_plugin_locked(id.plugin_key);
     if (plugin == nullptr)
         return nullptr;
 
     for (const auto& capability : plugin->capabilities) {
-        if (!capability || capability->name() != capability_name)
+        if (!capability || capability->name() != id.name)
             continue;
-        if (type != PluginCapabilityType::Unknown && capability->type() != type)
+        if (id.type != PluginCapabilityType::Unknown && capability->type() != id.type)
             continue;
         if (only_enabled && !capability->is_enabled())
             continue;
@@ -539,17 +550,6 @@ std::shared_ptr<PluginCapabilityInterface> PluginManager::get_plugin_capability(
     }
 
     return nullptr;
-}
-
-std::map<std::string, std::string> PluginManager::get_plugin_settings(const std::string& plugin_key) const
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    const Plugin* plugin = find_plugin_locked(plugin_key);
-    if (plugin == nullptr || !plugin->is_loaded())
-        return {};
-
-    return plugin->descriptor.settings;
 }
 
 // ── Lifecycle ───────────────────────────────────────────────────────────────────────────────
@@ -736,7 +736,7 @@ void PluginManager::load_plugin(const std::string& plugin_key, bool skip_deps, s
         for (const std::string& capability_name : capabilities_to_enable) {
             if (std::find(loaded_capability_names.begin(), loaded_capability_names.end(), capability_name) !=
                 loaded_capability_names.end())
-                set_capability_enabled(plugin_id, capability_name, true);
+                set_capability_enabled({PluginCapabilityType::Unknown, capability_name, plugin_id}, true);
         }
 
         run_on_load_callbacks(plugin_id);
@@ -842,6 +842,17 @@ void PluginManager::load_plugin_impl(const std::string& plugin_key, bool skip_de
             return; // cancelled: nothing materialized survives, and no error is recorded
         fail(std::move(error));
         return;
+    }
+
+    for (const auto& cap : plugin.capabilities) {
+        auto config = cap->get_default_config();
+        if (config.empty())
+            continue;
+        const PluginCapabilityId id = cap->identity();
+        if (m_config.has_config(id))
+            continue;
+
+        m_config.save_config({id, plugin.descriptor.installed_version, config});
     }
 
     bool committed = false;
@@ -993,8 +1004,7 @@ void PluginManager::unload_cloud_plugins()
 }
 
 // ── Enable state ────────────────────────────────────────────────────────────────────────────
-
-void PluginManager::set_capability_enabled(const std::string& plugin_key, const std::string& capability_name, bool enabled)
+void PluginManager::set_capability_enabled(const PluginCapabilityId& id, bool enabled)
 {
     PluginCapabilityId changed;
     bool did_change = false;
@@ -1002,15 +1012,18 @@ void PluginManager::set_capability_enabled(const std::string& plugin_key, const 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
 
-        Plugin* plugin = find_plugin_locked(plugin_key);
+        Plugin* plugin = find_plugin_locked(id.plugin_key);
         if (plugin == nullptr || !plugin->is_loaded())
             return;
 
         for (const auto& capability : plugin->capabilities) {
-            if (!capability || capability->name() != capability_name || capability->is_enabled() == enabled)
+            if (!capability || capability->name() != id.name ||
+                (id.type != PluginCapabilityType::Unknown && capability->type() != id.type) ||
+                capability->is_enabled() == enabled)
                 continue;
+
             capability->set_enabled(enabled);
-            changed    = PluginCapabilityId{capability->type(), capability->name(), plugin_key};
+            changed    = capability->identity();
             did_change = true;
             break;
         }
@@ -1019,7 +1032,7 @@ void PluginManager::set_capability_enabled(const std::string& plugin_key, const 
     if (!did_change)
         return;
 
-    write_loaded_plugin_install_state(plugin_key);
+    write_loaded_plugin_install_state(id.plugin_key);
 
     if (enabled)
         run_on_capability_load_callbacks(changed);
@@ -1029,6 +1042,8 @@ void PluginManager::set_capability_enabled(const std::string& plugin_key, const 
 
 void PluginManager::write_loaded_plugin_install_state(const std::string& plugin_key)
 {
+    std::lock_guard<std::mutex> state_lock(m_install_state_mutex);
+
     PluginDescriptor descriptor;
     std::vector<std::pair<std::string, bool>> capabilities;
     {
@@ -1931,7 +1946,7 @@ ExecutionResult PluginManager::run_script_capability(const std::string& plugin_k
         return {};
     }
 
-    auto cap = get_plugin_capability(plugin_key, capability_name, PluginCapabilityType::Script);
+    auto cap = get_plugin_capability({PluginCapabilityType::Script, capability_name, plugin_key});
     if (!cap)
         return {};
 

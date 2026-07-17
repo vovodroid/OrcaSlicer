@@ -7,9 +7,6 @@
 # author = "OrcaSlicer"
 # version = "0.01"
 # type = "slicing-pipeline"
-#
-# [tool.orcaslicer.plugin.settings]
-# stamp_text = "processed by the OrcaSlicer G-code Stamp plugin"
 # ///
 """G-code Stamp -- the post-processing half of the slicing-pipeline plugin.
 
@@ -19,7 +16,7 @@ exported G-code file -- NOT from Print::process(). So unlike the geometry steps
 (posSlice, posPerimeters, ...) there is no live slicing graph here: ctx.print and
 ctx.object are None. Instead the context carries ctx.gcode_path (the working G-code
 file on disk, edited IN PLACE), ctx.host ("File", "OctoPrint", ...) and
-ctx.output_name (the final file name). ctx.params and ctx.config_value() still work.
+ctx.output_name (the final file name). self.get_config() still works.
 
 This sample inserts a single comment line near the top of the file. Because the same
 capability class can also implement the geometry steps, one plugin can transform slices
@@ -30,21 +27,27 @@ separate working copy), and its output is not reflected in the G-code preview --
 viewer maps the pre-post-process file.
 """
 import orca
+import json
 
-_DEFAULT_STAMP = "processed by the OrcaSlicer G-code Stamp plugin"
+_DEFAULTS = {
+    "stamp_text": "processed by the OrcaSlicer G-code Stamp plugin",
+}
 
 
-def _stamp_text(ctx):
+def _stamp_text(self):
     try:
-        text = dict(ctx.params).get("stamp_text", _DEFAULT_STAMP)
-    except (AttributeError, TypeError):
-        text = _DEFAULT_STAMP
-    return str(text).replace("\n", " ").strip() or _DEFAULT_STAMP
+        text = json.loads(self.get_config())["stamp_text"]
+    except (AttributeError, TypeError, ValueError, KeyError):
+        text = _DEFAULTS["stamp_text"]
+    return str(text).replace("\n", " ").strip() or _DEFAULTS["stamp_text"]
 
 
 class GCodeStamp(orca.slicing.SlicingPipelineCapabilityBase):
     def get_name(self):
         return "G-code Stamp"
+    
+    def get_default_config(self):
+        return _DEFAULTS
 
     def execute(self, ctx):
         # Only act at the post-process seam; at every geometry step this is a no-op.
@@ -53,7 +56,7 @@ class GCodeStamp(orca.slicing.SlicingPipelineCapabilityBase):
         if not ctx.gcode_path:
             return orca.ExecutionResult.success("G-code Stamp: no gcode_path, nothing to do")
 
-        comment = "; " + _stamp_text(ctx) + " (host=" + (ctx.host or "?") + ")\n"
+        comment = "; " + _stamp_text(self) + " (host=" + (ctx.host or "?") + ")\n"
 
         # Edit the exported G-code in place: keep the original first line first (some flavors
         # expect a specific leading line), then insert the stamp right after it.

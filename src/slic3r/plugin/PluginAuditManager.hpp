@@ -40,6 +40,14 @@ public:
     std::string current_plugin() const;
     void        clear_current_plugin();
 
+    // --- current-capability context (thread_local) ---
+    // The capability whose method is currently executing, within the current plugin. Empty
+    // while a plugin-wide call runs, and during capture (get_name/get_type), where the
+    // capability has no cached name yet.
+    void        set_current_capability(const std::string& capability_name);
+    std::string current_capability() const;
+    void        clear_current_capability();
+
     // --- allowed-roots registry ---
     void add_global_allowed_root(const boost::filesystem::path& root);
     void add_scoped_allowed_root(const boost::filesystem::path& root);
@@ -76,6 +84,7 @@ private:
     static int audit_hook(const char* event, PyObject* args, void* user_data);
 
     static thread_local std::string  m_current_plugin_key;
+    static thread_local std::string  m_current_capability_name;
     static thread_local AuditMode    m_audit_mode;
     static thread_local std::vector<boost::filesystem::path> m_scoped_allowed_roots;
     static thread_local bool         m_has_last_violation;
@@ -85,12 +94,15 @@ private:
     std::vector<boost::filesystem::path> m_global_allowed_roots;
 };
 
-// RAII guard that sets the current plugin key and restores the previous one.
+// RAII guard that sets the current plugin key and capability name, restoring the previous
+// pair on scope exit. `capability_name` may be empty for calls that are not scoped to a
+// single capability.
 class ScopedPluginAuditContext
 {
 public:
     explicit ScopedPluginAuditContext(
         const std::string&                   plugin_key,
+        const std::string&                   capability_name = {},
         PluginAuditManager::AuditMode        mode = PluginAuditManager::AuditMode::Loading);
 
     ~ScopedPluginAuditContext();
@@ -100,6 +112,7 @@ public:
 
 private:
     std::string                   m_previous_id;
+    std::string                   m_previous_capability;
     PluginAuditManager::AuditMode m_previous_mode;
     std::vector<boost::filesystem::path> m_previous_scoped_roots;
 };

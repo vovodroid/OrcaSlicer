@@ -2,10 +2,13 @@ get_filename_component(_TEST_NAME ${CMAKE_CURRENT_LIST_DIR} NAME)
 add_executable(${_TEST_NAME}_tests
     ${_TEST_NAME}_tests_main.cpp
     test_plugin_host_api.cpp
+    test_plugin_capability_config.cpp
+    test_plugin_config.cpp
+    test_plugin_capabilities_in_use.cpp
     test_plugin_install.cpp
     test_plugin_lifecycle.cpp
     test_slicing_pipeline_bindings.cpp
-    test_slicing_pipeline_params.cpp
+    test_slicing_pipeline_config.cpp
     test_plugin_sort.cpp
     test_plugin_cloud_metadata.cpp
     ../fff_print/test_helpers.cpp

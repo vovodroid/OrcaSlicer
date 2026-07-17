@@ -980,9 +980,8 @@ void PrintConfigDef::init_common_params()
     def->tooltip = L("Select the network agent implementation for printer communication.");
     def->mode = comAdvanced;
     def->cli = ConfigOptionDef::nocli;
-    // Plugin-backed like the pickers, but edited via a dedicated Choice widget rather than a
-    // plugin_picker field. plugin_type marks it plugin-backed and names its capability type, so its
-    // "plugins" manifest reference is derived generically (see ConfigOptionDef::is_plugin_backed).
+    // Plugin-backed (see ConfigOptionDef::is_plugin_backed), but edited through the Choice widget above
+    // rather than a plugin_picker field.
     def->plugin_type = "printer-connection";
     def->set_default_value(new ConfigOptionString(""));
 
@@ -1081,6 +1080,17 @@ void PrintConfigDef::init_common_params()
         def = this->add("preset_name", coString);
         def->set_default_value(new ConfigOptionString());
     }
+
+    def = this->add("plugin_config_overrides", coString);
+    def->label = L("Capabilities");
+    def->tooltip = L("Configuration for the plugin capabilities this preset uses, overriding the global "
+                     "Capabilities configuration. Stored as a raw JSON array and edited through the dialog "
+                     "behind the button, never typed in directly.");
+    // Never shown as a text field: GUIType::plugin_config renders a button that opens PluginsConfigDialog.
+    def->gui_type = ConfigOptionDef::GUIType::plugin_config;
+    def->mode = comAdvanced;
+    def->cli = ConfigOptionDef::nocli;
+    def->set_default_value(new ConfigOptionString(""));
 }
 
 void PrintConfigDef::init_fff_params()

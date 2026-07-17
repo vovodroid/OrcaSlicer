@@ -7,12 +7,6 @@
 # author = "OrcaSlicer"
 # version = "0.01"
 # type = "slicing-pipeline"
-#
-# [tool.orcaslicer.plugin.settings]
-# thickness_mm = "0.3"
-# point_distance_mm = "0.8"
-# fuzz_holes = "1"
-# skip_first_layer = "1"
 # ///
 """Fuzzy Slices -- the fuzzy-skin effect applied at slice time.
 
@@ -44,6 +38,7 @@ Polygon.as_array()/set_points numpy path would be the faster route.
 """
 import math
 import random
+import json
 
 import orca
 
@@ -55,9 +50,9 @@ _DEFAULTS = {
 }
 
 
-def _params(ctx):
+def _params(self):
     try:
-        src = dict(ctx.params)
+        src = json.loads(self.get_config())
     except (AttributeError, TypeError):
         src = {}
     out = {}
@@ -111,11 +106,14 @@ class FuzzySlices(orca.slicing.SlicingPipelineCapabilityBase):
     def get_name(self):
         return "Fuzzy Slices"
 
+    def get_default_config(self):
+        return _DEFAULTS
+
     def execute(self, ctx):
         if ctx.step != orca.slicing.Step.posSlice or ctx.object is None:
             return orca.ExecutionResult.success()
 
-        p = _params(ctx)
+        p = _params(self)
         if p["thickness_mm"] <= 0.0 or p["point_distance_mm"] <= 0.0:
             return orca.ExecutionResult.success("Fuzzy Slices: zero thickness/point distance, nothing to do")
 

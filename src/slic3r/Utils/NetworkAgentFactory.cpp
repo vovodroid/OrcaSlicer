@@ -238,8 +238,8 @@ void NetworkAgentFactory::register_python_printer_agent(const std::string& plugi
 {
     PluginManager& plugin_manager = PluginManager::instance();
 
-    auto cap = plugin_manager.get_plugin_capability(plugin_key, capability_name, PluginCapabilityType::PrinterConnection,
-                                                     /*only_enabled=*/false);
+    auto cap = plugin_manager.get_plugin_capability({PluginCapabilityType::PrinterConnection, capability_name, plugin_key},
+                                                    /*only_enabled=*/false);
     if (!cap) {
         BOOST_LOG_TRIVIAL(warning) << "Printer-agent capability '" << capability_name << "' not found for plugin '" << plugin_key << "'";
         return;
@@ -305,7 +305,7 @@ void NetworkAgentFactory::register_python_printer_agent(const std::string& plugi
     // Re-resolve without holding the registry mutex to avoid lock inversion and reentrancy.
     // only_enabled defaults to true here, so a capability that changed identity (reload) or was
     // merely disabled both surface the same way: current_cap no longer equals cap.
-    auto current_cap = plugin_manager.get_plugin_capability(plugin_key, capability_name, PluginCapabilityType::PrinterConnection);
+    auto current_cap = plugin_manager.get_plugin_capability({PluginCapabilityType::PrinterConnection, capability_name, plugin_key});
     if (current_cap != cap) {
         BOOST_LOG_TRIVIAL(debug) << "Printer-agent capability '" << capability_name << "' from plugin '" << plugin_key
                                  << "' changed or was disabled during registration";

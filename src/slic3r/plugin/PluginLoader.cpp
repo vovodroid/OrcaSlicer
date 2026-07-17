@@ -347,6 +347,19 @@ bool load(const PluginDescriptor&                          descriptor,
                     instance->set_resolved_identity(found.name, type);
                     instance->set_enabled(enabled);
 
+                    // Cache has_config_ui() once, under this same GIL, so the GUI can pick the
+                    // capability's custom UI vs. the host JSON editor without touching Python. It is
+                    // optional and plugin-authored: a raising or non-bool override only costs this
+                    // capability its custom UI, so it is caught locally rather than failing the load.
+                    try {
+                        instance->set_config_ui_available(instance->has_config_ui());
+                    } catch (const std::exception& ex) {
+                        BOOST_LOG_TRIVIAL(warning)
+                            << "Plugin capability '" << found.name << "' of plugin '" << descriptor.plugin_key
+                            << "': has_config_ui() failed (" << ex.what() << "); falling back to the default JSON editor";
+                        instance->set_config_ui_available(false);
+                    }
+
                     capabilities.push_back(std::move(instance));
                 }
             } catch (const std::exception& ex) {

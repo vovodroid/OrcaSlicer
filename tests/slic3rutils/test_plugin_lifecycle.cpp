@@ -122,9 +122,7 @@ bool load_and_wait(PluginManager&           manager,
 
 std::shared_ptr<PluginCapabilityInterface> find_capability(PluginManager& manager, const std::string& plugin_key,
                                                            const std::string& name)
-{
-    return manager.get_plugin_capability(plugin_key, name, PluginCapabilityType::Unknown, /*only_enabled=*/false);
-}
+{ return manager.get_plugin_capability({PluginCapabilityType::Unknown, name, plugin_key}, /*only_enabled=*/false); }
 
 std::vector<std::shared_ptr<PluginCapabilityInterface>> capabilities_of(PluginManager& manager, const std::string& plugin_key)
 {
@@ -173,7 +171,7 @@ TEST_CASE("A discovered script plugin loads and materializes its capability", "[
     CHECK(echo->is_enabled());
     CHECK(echo->audit_plugin_key() == "Echo_Plugin");
 
-    CHECK(manager.get_plugin_capability("Echo_Plugin", "Echo", PluginCapabilityType::Script) == echo);
+    CHECK(manager.get_plugin_capability({PluginCapabilityType::Script, "Echo", "Echo_Plugin"}) == echo);
 
     manager.unload_plugin("Echo_Plugin");
 }
@@ -244,7 +242,7 @@ TEST_CASE("Unloading a plugin drops the package and its capabilities", "[PluginL
 
     CHECK_FALSE(manager.is_plugin_loaded("Echo_Plugin"));
     CHECK(manager.get_plugin_capabilities("Echo_Plugin").empty());
-    CHECK(manager.get_plugin_capability("Echo_Plugin", "Echo", PluginCapabilityType::Script) == nullptr);
+    CHECK(manager.get_plugin_capability({PluginCapabilityType::Script, "Echo", "Echo_Plugin"}) == nullptr);
 
     // The package stays discovered, but nothing capability-shaped survives the unload.
     const PluginDescriptor descriptor = descriptor_of(manager, "Echo_Plugin");
@@ -403,7 +401,7 @@ TEST_CASE("Disabling a capability round-trips through the sidecar and survives a
     REQUIRE(find_capability(manager, "Echo_Plugin", "Echo")->is_enabled());
 
     // Disabling writes the choice through to .install_state.json.
-    manager.set_capability_enabled("Echo_Plugin", "Echo", false);
+    manager.set_capability_enabled({PluginCapabilityType::Unknown, "Echo", "Echo_Plugin"}, false);
     CHECK_FALSE(find_capability(manager, "Echo_Plugin", "Echo")->is_enabled());
 
     PluginInstallState persisted;
@@ -440,7 +438,7 @@ TEST_CASE("A capability disabled after load stays disabled when rediscovered and
     std::string error;
     REQUIRE(load_and_wait(manager, "Echo_Plugin", error));
 
-    manager.set_capability_enabled("Echo_Plugin", "Echo", false);
+    manager.set_capability_enabled({PluginCapabilityType::Unknown, "Echo", "Echo_Plugin"}, false);
     REQUIRE(manager.unload_plugin("Echo_Plugin"));
 
     // Rediscover, as the app does when a plugin is toggled off and back on. The enable flags the

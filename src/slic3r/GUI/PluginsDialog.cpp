@@ -4,6 +4,7 @@
 #include "GUI_App.hpp"
 #include "I18N.hpp"
 #include "OrcaCloudServiceAgent.hpp"
+#include "slic3r/plugin/PluginConfig.hpp"
 #include "slic3r/plugin/PluginFsUtils.hpp"
 #include "slic3r/plugin/PluginManager.hpp"
 #include "slic3r/plugin/PythonInterpreter.hpp"
@@ -16,10 +17,7 @@
 #include <slic3r/GUI/format.hpp>
 
 #include <slic3r/plugin/PluginDescriptor.hpp>
-#include <slic3r/plugin/PythonPluginInterface.hpp>
 #include <slic3r/plugin/PluginLoader.hpp>
-
-#include <pybind11/embed.h>
 
 #include <boost/filesystem.hpp>
 #include <boost/log/trivial.hpp>
@@ -41,9 +39,9 @@
 namespace Slic3r { namespace GUI {
 namespace {
 
-const wxString kDeletePluginTitle    = _L("Delete Plugin");
-const wxString kUnsubscribeTitle     = _L("Unsubscribe");
-const wxString kOverwritePluginTitle = _L("Overwrite Plugin");
+const wxString kDeletePluginTitle            = _L("Delete Plugin");
+const wxString kUnsubscribeTitle             = _L("Unsubscribe");
+const wxString kOverwritePluginTitle         = _L("Overwrite Plugin");
 std::string s_selected_plugin_install_action = "explore";
 
 struct PluginContextAction
@@ -63,12 +61,13 @@ struct PluginAvailableActions
 
 struct PluginCapabilityView
 {
-    std::string name;
-    std::string type_label;
-    std::string type_key;
+    PluginCapabilityId id;
     bool enabled    = false;
     bool can_toggle = false;
     bool can_run    = false;
+    // Whether the capability supplies its own config UI; every capability is configurable, this only
+    // picks the editor. False for descriptor-only rows: an unloaded plugin has no capabilities yet.
+    bool has_config_ui = false;
 };
 
 struct PluginChangelogView
@@ -81,7 +80,6 @@ struct PluginChangelogView
 // View-model for one plugin row in the dialog
 struct PluginDialogItem
 {
-    // Identity and display text
     std::string plugin_key;
     std::string plugin_id;
     std::string display_name;
@@ -90,7 +88,7 @@ struct PluginDialogItem
     std::string version;
     std::string installed_version;
     std::string latest_version;
-    std::string sort_version;   // Version shown in the row (installed if installed, else latest); used by the Version sort.
+    std::string sort_version; // Version shown in the row (installed if installed, else latest); used by the Version sort.
     std::string type_label;
     std::string type_key;
     std::string sharing_token;
@@ -98,16 +96,14 @@ struct PluginDialogItem
     std::vector<std::string> type_labels;
     std::vector<PluginChangelogView> changelog;
 
-    // Derived UI state
     PluginSource source              = PluginSource::Local;
     PluginStatus status              = PluginStatus::Inactive;
     PluginUpdateStatus update_status = PluginUpdateStatus::Normal;
     std::string error_text;
     bool has_error = false;
-    bool is_loaded    = false;
+    bool is_loaded = false;
     bool loading   = false;
 
-    // Installation and capability flags
     bool is_cloud_plugin       = false;
     bool has_local_package     = false;
     bool unauthorized          = false;
@@ -117,7 +113,6 @@ struct PluginDialogItem
     // Runtime capabilities in registration order, or descriptor-only type rows when unloaded.
     std::vector<PluginCapabilityView> capabilities;
 
-    // Row-level actions
     PluginAvailableActions available_actions;
 };
 
@@ -177,15 +172,13 @@ void refresh_plugin_metadata_blocking(bool fetch_cloud)
             return;
 
         for (const auto& uuid : not_found)
-            plater->get_notification_manager()->push_notification(
-                NotificationType::CustomNotification,
-                NotificationManager::NotificationLevel::RegularNotificationLevel,
-                format(_L("Plugin %s is no longer available."), uuid));
+            plater->get_notification_manager()->push_notification(NotificationType::CustomNotification,
+                                                                  NotificationManager::NotificationLevel::RegularNotificationLevel,
+                                                                  format(_L("Plugin %s is no longer available."), uuid));
         for (const auto& uuid : unauthorized)
-            plater->get_notification_manager()->push_notification(
-                NotificationType::CustomNotification,
-                NotificationManager::NotificationLevel::RegularNotificationLevel,
-                format(_L("Plugin %s access is unauthorized."), uuid));
+            plater->get_notification_manager()->push_notification(NotificationType::CustomNotification,
+                                                                  NotificationManager::NotificationLevel::RegularNotificationLevel,
+                                                                  format(_L("Plugin %s access is unauthorized."), uuid));
     });
 }
 
@@ -208,15 +201,25 @@ nlohmann::json build_plugin_payload_item(const PluginDialogItem& dialog_item)
     nlohmann::json caps = nlohmann::json::array();
     for (const PluginCapabilityView& capability : dialog_item.capabilities) {
         nlohmann::json c;
-        c["name"]       = capability.name;
-        c["type"]       = capability.type_label;
-        c["type_key"]   = capability.type_key;
-        c["enabled"]    = capability.enabled;
-        c["can_toggle"] = capability.can_toggle;
-        c["can_run"]    = capability.can_run;
+        c["name"]          = capability.id.name;
+        c["type"]          = plugin_capability_type_display_name(capability.id.type);
+        c["type_key"]      = plugin_capability_type_to_string(capability.id.type);
+        c["enabled"]       = capability.enabled;
+        c["can_toggle"]    = capability.can_toggle;
+        c["can_run"]       = capability.can_run;
+        c["has_config_ui"] = capability.has_config_ui;
         caps.push_back(std::move(c));
     }
     payload_item["capabilities"] = std::move(caps);
+
+    // The Config tab's sidebar, built by the shared builder so it stays identical to PluginsConfigDialog's.
+    // Not the `capabilities` array above: that is the list tab's, with enable/run state and descriptor-only
+    // rows the config view has no use for.
+    std::vector<PluginCapabilityId> config_ids;
+    for (const PluginCapabilityView& capability : dialog_item.capabilities)
+        if (!capability.id.name.empty())
+            config_ids.push_back(capability.id);
+    payload_item["config_capabilities"] = PluginConfig::capabilities_payload(config_ids);
 
     nlohmann::json changelog = nlohmann::json::array();
     for (const PluginChangelogView& entry : dialog_item.changelog) {
@@ -309,31 +312,28 @@ PluginDialogItem build_plugin_dialog_item(const PluginDescriptor& descriptor)
     PluginDialogItem item;
     PluginManager& manager = PluginManager::instance();
 
-    item.plugin_key        = descriptor.plugin_key;
-    item.display_name      = descriptor.name;
-    item.description       = !descriptor.is_metadata_valid() && descriptor.has_error() ?
-                                 descriptor.normalized_error() :
-                                 (descriptor.description.empty() ? "No description." : descriptor.description);
-    item.author            = descriptor.author;
-    item.version           = descriptor.version;
-    // Installed version: the cloud merge overwrites `version` with the latest cloud version, so prefer
-    // the preserved local version, falling back to `version` for local-only / pre-merge descriptors.
+    item.plugin_key   = descriptor.plugin_key;
+    item.display_name = descriptor.name;
+    item.description  = !descriptor.is_metadata_valid() && descriptor.has_error() ?
+                            descriptor.normalized_error() :
+                            (descriptor.description.empty() ? "No description." : descriptor.description);
+    item.author       = descriptor.author;
+    item.version      = descriptor.version;
+    // The cloud merge overwrites `version` with the latest cloud version, so prefer the preserved local
+    // one, falling back to `version` for local-only / pre-merge descriptors.
     item.installed_version = descriptor.has_local_package() ?
                                  (descriptor.installed_version.empty() ? descriptor.version : descriptor.installed_version) :
                                  std::string{};
     item.latest_version    = descriptor.latest_available_version();
-    // why: sort by the same version the row displays (GetDisplayVersion in index.js) - installed when
-    //   installed, otherwise latest - so the Version sort matches what the user sees.
     item.sort_version      = item.installed_version.empty() ? item.latest_version : item.installed_version;
     // A package that is not loaded has no capabilities, so its row contributes none and does not
     // expand.
     const std::vector<std::shared_ptr<PluginCapabilityInterface>> capabilities =
         manager.get_plugin_capabilities(descriptor.plugin_key, PluginCapabilityType::Unknown, /*only_enabled=*/false);
 
-    const PluginCapabilityType primary_type = capabilities.empty() ? PluginCapabilityType::Unknown :
-                                                                     capabilities.front()->type();
-    item.type_label        = plugin_capability_type_to_string(primary_type);
-    item.type_key          = plugin_capability_type_to_string(primary_type);
+    const PluginCapabilityType primary_type = capabilities.empty() ? PluginCapabilityType::Unknown : capabilities.front()->type();
+    item.type_label                         = plugin_capability_type_to_string(primary_type);
+    item.type_key                           = plugin_capability_type_to_string(primary_type);
     // "types" is the display-only compatibility list. Cloud plugins show the raw labels the
     // service returned (which may not map to real capability types); local plugins derive them
     // from the capabilities actually loaded.
@@ -361,8 +361,7 @@ PluginDialogItem build_plugin_dialog_item(const PluginDescriptor& descriptor)
     item.loading               = manager.is_plugin_load_in_progress(descriptor.plugin_key);
     item.has_script_capability = false;
     for (const auto& capability : capabilities) {
-        item.capabilities.push_back({capability->name(), plugin_capability_type_display_name(capability->type()),
-                                     plugin_capability_type_to_string(capability->type()), capability->is_enabled(), true, false});
+        item.capabilities.push_back({capability->identity(), capability->is_enabled(), true, false, capability->config_ui_available()});
         if (capability->type() == PluginCapabilityType::Script)
             item.has_script_capability = true;
     }
@@ -381,12 +380,12 @@ PluginDialogItem build_plugin_dialog_item(const PluginDescriptor& descriptor)
     item.available_actions        = evaluate_action_policy(item);
     const bool has_enabled_script = std::any_of(item.capabilities.begin(), item.capabilities.end(),
                                                 [](const PluginCapabilityView& capability) {
-                                                    return capability.type_key == "script" && capability.enabled;
+                                                    return capability.id.type == PluginCapabilityType::Script && capability.enabled;
                                                 });
     item.can_run_script = descriptor.is_metadata_valid() && !descriptor.has_error() && item.has_script_capability && item.is_loaded &&
                           !item.loading && has_enabled_script;
     for (PluginCapabilityView& capability : item.capabilities) {
-        capability.can_run = item.can_run_script && capability.type_key == "script" && capability.enabled;
+        capability.can_run = item.can_run_script && capability.id.type == PluginCapabilityType::Script && capability.enabled;
     }
     return item;
 }
@@ -484,8 +483,9 @@ void PluginsDialog::on_script_message(const nlohmann::json& payload)
     // Defer command handling out of the webview script-message callback: GTK and macOS
     // deliver it synchronously inside the native webview callback (see ui_create_window
     // in PluginHostUi.cpp), and window work on that stack is the crash class fixed in
-    // b779a7bfed/f2ccbfc8b5. Deferring at this single entry point keeps every command
-    // handler, current and future, off that stack by construction.
+    // b779a7bfed/f2ccbfc8b5. Deferring here keeps every command handler in THIS dialog off
+    // that stack; it is not a guarantee for other WebViewHostDialog subclasses, which each
+    // have to defer for themselves (PluginsConfigDialog does; others still do not).
     wxGetApp().CallAfter([this, alive = m_alive, payload]() {
         if (alive->load(std::memory_order_acquire))
             handle_web_command(payload);
@@ -520,6 +520,21 @@ void PluginsDialog::handle_web_command(const nlohmann::json& payload)
         open_plugin_hub();
     } else if (command == "set_plugin_sort") {
         set_plugin_sort(payload.value("sort_key", ""), payload.value("sort_order", ""));
+    } else if (command == "get_capability_config" || command == "save_capability_config" || command == "restore_capability_config") {
+        const PluginCapabilityId id{plugin_capability_type_from_string(payload.value("capability_type", "")),
+                                    payload.value("capability_name", ""), payload.value("plugin_key", "")};
+        if (command == "get_capability_config") {
+            send_capability_config(id);
+            return;
+        }
+        if (command == "restore_capability_config") {
+            restore_capability_config(id);
+            return;
+        }
+
+        // `config` is a JSON string from the default editor's textarea, or an already-structured
+        // value from a capability's custom UI. Both land here; save_capability_config sorts it out.
+        save_capability_config(id, payload.contains("config") ? payload.at("config") : nlohmann::json::object());
     } else if (command == "set_plugin_install_action") {
         const std::string action = payload.value("action", "");
         if (action == "explore" || action == "install-local")
@@ -554,7 +569,6 @@ nlohmann::json PluginsDialog::build_plugins_payload() const
     for (const PluginDescriptor& row : rows)
         items.push_back(build_plugin_dialog_item(row));
 
-    // In-place sort
     sort_plugin_items_for_dialog(items, m_plugin_sort_key, m_plugin_sort_order);
 
     for (const PluginDialogItem& item : items)
@@ -569,15 +583,6 @@ bool PluginsDialog::get_descriptor(const std::string& plugin_key, PluginDescript
     if (manager.try_get_valid_plugin_descriptor(plugin_key, descriptor))
         return true;
     return manager.try_get_plugin_descriptor(plugin_key, descriptor) && descriptor.is_invalid_package();
-}
-
-std::shared_ptr<PluginCapabilityInterface> PluginsDialog::get_capability(const std::string& plugin_key,
-                                                                          PluginCapabilityType type,
-                                                                          const std::string& capability_name) const
-{
-    // only_enabled=false: this is an existence check used to gate both enabling and disabling a
-    // capability from the dialog, so a currently-disabled capability must still resolve.
-    return PluginManager::instance().get_plugin_capability(plugin_key, capability_name, type, /*only_enabled=*/false);
 }
 
 void PluginsDialog::refresh_plugin_metadata_async(const wxString& title, const wxString& message, bool fetch_cloud)
@@ -644,8 +649,7 @@ void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
         }
 
         BOOST_LOG_TRIVIAL(info) << "Cloud plugin installed locally from Plugins dialog: " << plugin_key;
-        // download_and_install_cloud_plugin updates the descriptor with the installed
-        // local package state, so no rescan or cloud fetch is needed before loading.
+        // download_and_install_cloud_plugin already updated the descriptor, so no rescan is needed here.
         if (!get_descriptor(plugin_key, row_data)) {
             send_plugins();
             return;
@@ -683,8 +687,10 @@ void PluginsDialog::toggle_plugin(const std::string& plugin_key, bool enabled)
     show_status(wxString::Format(_L("Activating \"%s\"..."), plugin_display_name(plugin_key)), "info");
 }
 
-void PluginsDialog::toggle_plugin_capability(const std::string& plugin_key, PluginCapabilityType type,
-                                             const std::string& capability_name, bool enabled)
+void PluginsDialog::toggle_plugin_capability(const std::string& plugin_key,
+                                             PluginCapabilityType type,
+                                             const std::string& capability_name,
+                                             bool enabled)
 {
     if (plugin_key.empty() || capability_name.empty() || type == PluginCapabilityType::Unknown)
         return;
@@ -695,7 +701,7 @@ void PluginsDialog::toggle_plugin_capability(const std::string& plugin_key, Plug
         return;
     }
 
-    if (!get_capability(plugin_key, type, capability_name)) {
+    if (!PluginManager::instance().get_plugin_capability({type, capability_name, plugin_key}, /*only_enabled=*/false)) {
         BOOST_LOG_TRIVIAL(warning) << "Cannot toggle missing plugin capability: " << plugin_key << " | " << capability_name;
         send_plugins();
         return;
@@ -704,11 +710,11 @@ void PluginsDialog::toggle_plugin_capability(const std::string& plugin_key, Plug
     PluginManager& manager = PluginManager::instance();
     if (enabled) {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Enabling plugin capability: " << plugin_key << " | " << capability_name;
-        manager.set_capability_enabled(plugin_key, capability_name, true);
+        manager.set_capability_enabled({type, capability_name, plugin_key}, true);
     } else {
         // check if the capability is currently in use here.
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Disabling plugin capability: " << plugin_key << " | " << capability_name;
-        manager.set_capability_enabled(plugin_key, capability_name, false);
+        manager.set_capability_enabled({type, capability_name, plugin_key}, false);
     }
 
     send_plugins();
@@ -897,6 +903,35 @@ wxString PluginsDialog::plugin_display_name(const std::string& plugin_key) const
     return from_u8(plugin_key);
 }
 
+void PluginsDialog::send_capability_config(const PluginCapabilityId& id) { call_web_handler(PluginConfig::get_config_response(id)); }
+
+void PluginsDialog::save_capability_config(const PluginCapabilityId& id, const nlohmann::json& config)
+{
+    const nlohmann::json response = PluginConfig::save_config_response(id, config);
+    call_web_handler(response);
+
+    if (response.value("ok", false))
+        show_status(_L("Configuration saved."), "success");
+}
+
+void PluginsDialog::restore_capability_config(const PluginCapabilityId& id)
+{
+    // Destructive, so confirm first. The confirmation stays here rather than in PluginConfig: it needs
+    // a parent window.
+    const int rc = wxMessageBox(wxString::Format(_L("Restore the default configuration for \"%s\"?\n\n"
+                                                    "This discards the settings currently saved for this capability."),
+                                                 from_u8(id.name)),
+                                _L("Restore defaults"), wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this);
+    if (rc != wxYES)
+        return;
+
+    const nlohmann::json response = PluginConfig::restore_config_response(id);
+    call_web_handler(response);
+
+    if (response.value("ok", false))
+        show_status(_L("Default configuration restored."), "success");
+}
+
 void PluginsDialog::run_script_plugin_capability(const std::string& plugin_key, const std::string& capability_name)
 {
     PluginManager& manager = PluginManager::instance();
@@ -914,8 +949,8 @@ void PluginsDialog::run_script_plugin_capability(const std::string& plugin_key, 
 
         send_plugins();
 
-        // The row now shows an "Error" status and the Diagnostics tab holds the full text, so surface
-        // the outcome in the footer status bar instead of a modal box (prefer the friendlier override).
+        // The row already shows "Error" and the Diagnostics tab holds the full text, so report in the
+        // footer status bar instead of a modal box.
         const wxString message = status_message.empty() ? from_u8(normalized_error) : status_message;
         show_status(message, "error");
     };
@@ -942,7 +977,7 @@ void PluginsDialog::run_script_plugin_capability(const std::string& plugin_key, 
     manager.clear_plugin_error(plugin_key);
     send_plugins();
 
-    const bool     skipped  = result.status == PluginResult::Skipped;
+    const bool skipped      = result.status == PluginResult::Skipped;
     const wxString fallback = skipped ? _L("Script plugin skipped.") : _L("Script plugin finished.");
     const wxString message  = result.message.empty() ? fallback : from_u8(result.message);
     show_status(message, skipped ? "info" : "success");
@@ -958,15 +993,13 @@ void PluginsDialog::update_plugin(const std::string& plugin_key)
     PluginDescriptor descriptor;
     const wxString name = get_descriptor(plugin_key, descriptor) ? from_u8(descriptor.name) : from_u8(plugin_key);
 
-    // update_cloud_plugin unloads the old plugin, deletes its local package, then downloads and
-    // reinstalls the latest version. Each of those steps already runs off the main thread in the
-    // delete/install paths, so run the whole operation on the worker and pump a progress dialog.
+    // update_cloud_plugin unloads the old plugin, deletes its local package and reinstalls the latest
+    // version; all of that is off-main-thread work, so run it on the worker behind a progress dialog.
     std::string error;
     bool updated = false;
     try {
-        updated = run_with_dialog_wait(
-            [plugin_key, &error]() { return PluginManager::instance().update_cloud_plugin(plugin_key, error); },
-            _L("Updating plugin"), _L("Updating") + ": " + name);
+        updated = run_with_dialog_wait([plugin_key, &error]() { return PluginManager::instance().update_cloud_plugin(plugin_key, error); },
+                                       _L("Updating plugin"), _L("Updating") + ": " + name);
     } catch (const std::exception& ex) {
         error = ex.what();
     } catch (...) {
@@ -980,8 +1013,7 @@ void PluginsDialog::update_plugin(const std::string& plugin_key)
         return;
     }
 
-    // update_cloud_plugin installs the package and updates the in-memory descriptor
-    // (installed=true, update_available=false) on success.
+    // update_cloud_plugin already updated the in-memory descriptor, so a UI refresh is enough here.
     send_plugins();
     show_status(wxString::Format(_L("Updated \"%s\"."), name), "success");
 }
@@ -1109,8 +1141,7 @@ void PluginsDialog::reinstall_local_plugin(const std::string& plugin_key)
 
                 manager.load_plugin(plugin_key, false);
                 std::string error;
-                if (!manager.wait_for_plugin_load(plugin_key, std::chrono::minutes(5), error) ||
-                    !manager.is_plugin_loaded(plugin_key))
+                if (!manager.wait_for_plugin_load(plugin_key, std::chrono::minutes(5), error) || !manager.is_plugin_loaded(plugin_key))
                     return {false, error.empty() ? "Plugin failed to load." : error};
 
                 if (!was_loaded && !manager.unload_plugin(plugin_key))
@@ -1142,7 +1173,7 @@ void PluginsDialog::reinstall_cloud_plugin(const PluginDescriptor& plugin)
         return;
 
     PluginManager& manager = PluginManager::instance();
-    const bool was_loaded = PluginManager::instance().is_plugin_loaded(plugin_key);
+    const bool was_loaded  = PluginManager::instance().is_plugin_loaded(plugin_key);
 
     std::string error;
     if (plugin.has_local_package()) {
@@ -1168,8 +1199,7 @@ void PluginsDialog::reinstall_cloud_plugin(const PluginDescriptor& plugin)
                     PluginManager& manager = PluginManager::instance();
                     manager.load_plugin(plugin_key);
                     std::string error;
-                    if (!manager.wait_for_plugin_load(plugin_key, std::chrono::minutes(5), error) ||
-                        !manager.is_plugin_loaded(plugin_key))
+                    if (!manager.wait_for_plugin_load(plugin_key, std::chrono::minutes(5), error) || !manager.is_plugin_loaded(plugin_key))
                         return {false, error.empty() ? "Plugin failed to load." : error};
                     return {true, {}};
                 },

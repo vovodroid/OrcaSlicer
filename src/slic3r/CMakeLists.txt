@@ -118,6 +118,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/PluginPickerDialog.hpp
     GUI/PluginsDialog.cpp
     GUI/PluginsDialog.hpp
+    GUI/PluginsConfigDialog.cpp
+    GUI/PluginsConfigDialog.hpp
     GUI/ProcessRunner.cpp
     GUI/ProcessRunner.hpp
     GUI/TerminalDialog.cpp
@@ -617,6 +619,8 @@ set(SLIC3R_GUI_SOURCES
     plugin/CloudPluginService.hpp
     plugin/PluginFsUtils.cpp
     plugin/PluginFsUtils.hpp
+    plugin/PluginConfig.cpp
+    plugin/PluginConfig.hpp
     plugin/PluginLoader.cpp
     plugin/PluginLoader.hpp
     plugin/PluginDescriptor.hpp

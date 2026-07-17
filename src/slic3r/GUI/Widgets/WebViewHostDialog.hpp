@@ -21,7 +21,9 @@ public:
                       const wxString& title = wxT(""),
                       const wxPoint& pos    = wxDefaultPosition,
                       const wxSize& size    = wxDefaultSize,
-                      long style            = wxSYSTEM_MENU | wxCAPTION | wxCLOSE_BOX | wxMAXIMIZE_BOX);
+                      // wxRESIZE_BORDER is required for a resizable frame on MSW/GTK; macOS derives
+                      // one from wxMAXIMIZE_BOX alone, which is why these dialogs used to resize only there.
+                      long style            = wxSYSTEM_MENU | wxCAPTION | wxCLOSE_BOX | wxMAXIMIZE_BOX | wxRESIZE_BORDER);
     ~WebViewHostDialog() override = default;
 
     bool create_webview(const std::string& resource_path,
