@@ -222,9 +222,14 @@ jobs:
           security list-keychain -d user -s $KEYCHAIN_PATH
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k $P12_PASSWORD $KEYCHAIN_PATH
           codesign --deep --force --verbose --options runtime --timestamp --entitlements ${{ github.workspace }}/scripts/disable_validation.entitlements --sign "$CERTIFICATE_ID" ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer.app
+          # --deep is deprecated and signing/sealing can fail or skip files in
+          # non-standard layouts (python/bin, python/lib/**, tools/uv). Verify
+          # here so coverage gaps fail at CI time rather than at notarization.
+          codesign --verify --deep --strict --verbose=2 ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer.app
           # Sign OrcaSlicer_profile_validator.app if it exists
           if [ -f "${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app/Contents/MacOS/OrcaSlicer_profile_validator" ]; then
             codesign --deep --force --verbose --options runtime --timestamp --entitlements ${{ github.workspace }}/scripts/disable_validation.entitlements --sign "$CERTIFICATE_ID" ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app
+            codesign --verify --deep --strict --verbose=2 ${{ github.workspace }}/build/universal/OrcaSlicer/OrcaSlicer_profile_validator.app
           fi
           
           # Create main OrcaSlicer DMG without the profile validator helper
