@@ -163,6 +163,12 @@ public:
     void set_agent(NetworkAgent* agent) { m_agent = agent; }
     NetworkAgent* get_agent() const { return m_agent; } // Orca: needed by DeviceCore modules (DevAxisCtrl)
 
+    // Orca: these five DeviceCore module accessors are UNWIRED on the read side. The modules are
+    // constructed in the ctor and axis/chamber/status are fed every MQTT push (ParseAxis/ParseChamber/
+    // ParseStatus), but NO GUI consumer reads them yet. For calib/upgrade the module parse is NOT
+    // routed — the legacy inline parse in DeviceManager.cpp remains authoritative. Migration is parked
+    // (follow-up issue); do NOT wire DevUpgrade naively: its ParseUpgradeDisplayState would duplicate
+    // the inline block's dis_state==3 -> command_get_version CallAfter side effect.
     // Orca: adopt DeviceCore split — reference-shape accessors for the new modules
     std::shared_ptr<DevAxis>    GetAxis() const { return m_axis; }
     std::shared_ptr<DevChamber> GetChamber() const { return m_chamber; }

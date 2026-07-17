@@ -957,7 +957,7 @@ AmsMapingPopup::AmsMapingPopup(wxWindow *parent, bool use_in_sync_dialog) :
      m_sizer_ams_v->Add(m_reset_btn, 0, wxALIGN_RIGHT);
      m_sizer_ams_v->Add(m_sizer_ams, 0, wxEXPAND | wxBOTTOM, FromDIP(30));
      m_sizer_ams_v->AddStretchSpacer();
-     m_sizer_ams_v->Add(m_ams_tips_msg_panel, 0, wxEXPAND | wxBottom, FromDIP(10));
+     m_sizer_ams_v->Add(m_ams_tips_msg_panel, 0, wxEXPAND | wxBOTTOM, FromDIP(10)); // Orca: wxBOTTOM (REF uses the wxEdge enum by mistake)
 
      m_sizer_main_h->Add(m_sizer_ams_v, 0, wxEXPAND | wxRIGHT, FromDIP(10));
      m_sizer_main_h->Add(m_rack_nozzle_select, 0, wxEXPAND | wxTOP | wxLEFT, FromDIP(15));

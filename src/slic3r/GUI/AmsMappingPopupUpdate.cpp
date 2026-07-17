@@ -67,9 +67,9 @@ void AmsMapingPopup::update(MachineObject* obj,
                             bool use_dynamic_switch,
                             std::optional<PrintFromType> print_type)
 {
-    BOOST_LOG_TRIVIAL(info) << "ams_mapping total count " << obj->GetFilaSystem()->GetAmsCount();
+    if (!obj) { return; } // Orca: guard before use (REF logs before its null check)
 
-    if (!obj) { return; }
+    BOOST_LOG_TRIVIAL(info) << "ams_mapping total count " << obj->GetFilaSystem()->GetAmsCount();
 
     for (auto& ams_container : m_amsmapping_container_list) {
         ams_container->Destroy();

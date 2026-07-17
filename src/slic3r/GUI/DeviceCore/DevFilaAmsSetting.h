@@ -1,6 +1,6 @@
 #pragma once
 #include <optional>
-#include <unordered_map> // Orca: for m_firmwares (kept unordered for not-yet-resynced AMSSetting.cpp)
+#include <unordered_map> // Orca: for m_firmwares / GetSuppotedFirmwares() — the unordered_map AMSSetting.cpp mirrors and iterates
 #include <nlohmann/json.hpp>
 #include "DevCtrl.h"
 
