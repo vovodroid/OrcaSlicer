@@ -2339,11 +2339,6 @@ void GLCanvas3D::remove_curr_plate_all()
     m_dirty = true;
 }
 
-void GLCanvas3D::update_plate_thumbnails()
-{
-    _update_imgui_select_plate_toolbar();
-}
-
 void GLCanvas3D::select_all()
 {
     if (!m_gizmos.is_allow_select_all()) {
@@ -3229,7 +3224,6 @@ void GLCanvas3D::on_idle(wxIdleEvent& evt)
     // BBS
     //m_dirty |= wxGetApp().plater()->get_view_toolbar().update_items_state();
     m_dirty |= wxGetApp().plater()->get_collapse_toolbar().update_items_state();
-    _update_imgui_select_plate_toolbar();
     bool mouse3d_controller_applied = wxGetApp().plater()->get_mouse3d_controller().apply(wxGetApp().plater()->get_camera());
     m_dirty |= mouse3d_controller_applied;
     m_dirty |= wxGetApp().plater()->get_notification_manager()->update_notifications(*this);
@@ -4844,11 +4838,6 @@ void GLCanvas3D::force_set_focus() {
 void GLCanvas3D::on_set_focus(wxFocusEvent& evt)
 {
     m_tooltip_enabled = false;
-    if (m_canvas_type == ECanvasType::CanvasPreview) {
-        // update thumbnails and update plate toolbar
-        wxGetApp().plater()->update_all_plate_thumbnails();
-        _update_imgui_select_plate_toolbar();
-    }
     _refresh_if_shown_on_screen();
     m_tooltip_enabled = true;
     m_is_touchpad_navigation = wxGetApp().app_config->get_bool("camera_navigation_style");
@@ -6931,13 +6920,28 @@ void GLCanvas3D::_update_select_plate_toolbar_stats_item(bool force_selected) {
 bool GLCanvas3D::_update_imgui_select_plate_toolbar()
 {
     bool result = true;
-    if (!m_sel_plate_toolbar.is_enabled() || m_sel_plate_toolbar.is_render_finish) return false;
+    if (!m_sel_plate_toolbar.is_enabled()) {
+        return false;
+    }
+
+    const auto& p_plater = wxGetApp().plater();
+    if (!p_plater) {
+        return false;
+    }
+
+    if (!p_plater->is_plate_toolbar_image_dirty()) {
+        return false;
+    }
+
+    if (!p_plater->is_gcode_3mf()) { 
+        p_plater->update_all_plate_thumbnails(true);
+    }
 
     _update_select_plate_toolbar_stats_item();
 
     m_sel_plate_toolbar.del_all_item();
 
-    PartPlateList& plate_list = wxGetApp().plater()->get_partplate_list();
+    PartPlateList& plate_list = p_plater->get_partplate_list();
     for (int i = 0; i < plate_list.get_plate_count(); i++) {
         IMToolbarItem* item = new IMToolbarItem();
         PartPlate* plate = plate_list.get_plate(i);
@@ -6950,7 +6954,7 @@ bool GLCanvas3D::_update_imgui_select_plate_toolbar()
         }
         m_sel_plate_toolbar.m_items.push_back(item);
     }
-
+    p_plater->clear_plate_toolbar_image_dirty();
     m_sel_plate_toolbar.is_display_scrollbar = false;
     return result;
 }
@@ -8808,6 +8812,8 @@ void GLCanvas3D::_render_imgui_select_plate_toolbar()
         return;
     }
 
+    _update_imgui_select_plate_toolbar();
+
     IMToolbarItem* all_plates_stats_item = m_sel_plate_toolbar.m_all_plates_stats_item;
 
     PartPlateList& plate_list = wxGetApp().plater()->get_partplate_list();
@@ -9224,7 +9230,6 @@ void GLCanvas3D::_render_imgui_select_plate_toolbar()
     m_sel_plate_toolbar.is_display_scrollbar = is_win_hovered;
 
     imgui.end();
-    m_sel_plate_toolbar.is_render_finish = true;
 }
 
 //BBS: GUI refactor: GLToolbar adjust

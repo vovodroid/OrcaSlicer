@@ -4779,7 +4779,7 @@ void GUI_App::request_user_logout(const std::string& provider/* = ORCA_CLOUD_PRO
             remove_user_presets();
             enable_user_preset_folder(false);
             Slic3r::PluginManager::instance().unload_cloud_plugins();
-            Slic3r::PluginManager::instance().clear_cloud_plugin_catalog();
+            Slic3r::PluginManager::instance().clear_cloud_plugin_metadata();
             Slic3r::PluginManager::instance().set_cloud_user("");
             preset_bundle->load_user_presets(DEFAULT_USER_FOLDER_NAME, ForwardCompatibilitySubstitutionRule::Enable);
             mainframe->update_side_preset_ui();
@@ -8259,22 +8259,32 @@ void GUI_App::open_plugins_dialog(size_t open_on_tab, const std::string& highlig
 
 void GUI_App::open_terminal_dialog()
 {
-    if (m_terminal_dlg) {
+    // Reached from the plugins dialog's webview ("open_terminal" command), i.e. from
+    // inside the webview script-message callback, which GTK/macOS deliver synchronously
+    // (see ui_create_window in PluginHostUi.cpp). TerminalDialog hosts a webview of its
+    // own, so creating or presenting it on that stack is the same class as the Linux
+    // gtk_window_present crash — defer all window work to a clean main-loop iteration.
+    CallAfter([this]() {
+        if (m_terminal_dlg) {
+            // Re-front the existing window; guard Show() per #13657 (GTK re-enters
+            // layout when showing an already-visible window).
+            if (!m_terminal_dlg->IsShown())
+                m_terminal_dlg->Show();
+            m_terminal_dlg->Raise();
+            return;
+        }
+
+        m_terminal_dlg = new TerminalDialog(mainframe, wxID_ANY, _L("Plugin Terminal"),
+                                            wxDefaultPosition, wxSize(820, 600));
+        m_terminal_dlg->Bind(wxEVT_DESTROY, [this](wxWindowDestroyEvent& event) {
+            if (event.GetEventObject() == m_terminal_dlg)
+                m_terminal_dlg = nullptr;
+            event.Skip();
+        });
+
+        // Show() alone activates and fronts a freshly created window on every platform.
         m_terminal_dlg->Show();
-        m_terminal_dlg->Raise();
-        return;
-    }
-
-    m_terminal_dlg = new TerminalDialog(mainframe, wxID_ANY, _L("Plugin Terminal"),
-                                        wxDefaultPosition, wxSize(820, 600));
-    m_terminal_dlg->Bind(wxEVT_DESTROY, [this](wxWindowDestroyEvent& event) {
-        if (event.GetEventObject() == m_terminal_dlg)
-            m_terminal_dlg = nullptr;
-        event.Skip();
     });
-
-    m_terminal_dlg->Show();
-    m_terminal_dlg->Raise();
 }
 
 void GUI_App::open_speed_dial()

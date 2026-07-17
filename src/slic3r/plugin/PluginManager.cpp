@@ -5,7 +5,6 @@
 
 #include "PluginFsUtils.hpp"
 #include "PluginHooks.hpp"
-#include "PythonFileUtils.hpp"
 #include "PythonInterpreter.hpp"
 #include "PythonPluginBridge.hpp"
 
@@ -1294,7 +1293,7 @@ const char* const CLOUD_PLUGIN_NOT_FOUND_ERROR = "Plugin was not found in the cl
 
 } // namespace
 
-void PluginManager::update_cloud_catalog(const std::vector<PluginDescriptor>& cloud_list)
+void PluginManager::update_cloud_metadata(const std::vector<PluginDescriptor>& cloud_list)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -1380,7 +1379,7 @@ void PluginManager::update_cloud_catalog(const std::vector<PluginDescriptor>& cl
     }
 }
 
-void PluginManager::clear_cloud_plugin_catalog()
+void PluginManager::clear_cloud_plugin_metadata()
 {
     // Cloud entries may own live Python modules. Unload them before erasing their vector entries,
     // and do so outside m_mutex because both Python teardown and lifecycle callbacks can re-enter
@@ -1396,7 +1395,7 @@ void PluginManager::clear_cloud_plugin_catalog()
             }
         });
 
-    BOOST_LOG_TRIVIAL(info) << "Cleared cloud plugin catalog entries";
+    BOOST_LOG_TRIVIAL(info) << "Cleared cloud plugin metadata";
 }
 
 void PluginManager::fetch_plugins_from_cloud(std::vector<std::string>* out_not_found, std::vector<std::string>* out_unauthorized)
@@ -1421,7 +1420,7 @@ void PluginManager::fetch_plugins_from_cloud(std::vector<std::string>* out_not_f
         }
     }
 
-    update_cloud_catalog(cloud_list);
+    update_cloud_metadata(cloud_list);
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -1485,7 +1484,6 @@ bool PluginManager::subscribe_and_install_cloud_plugin(const std::string& plugin
     PluginDescriptor descriptor;
     bool found = try_get_plugin_descriptor(plugin_key, descriptor) && descriptor.is_cloud_plugin();
     if (!found) {
-        // The plugin may already be subscribed or owned while the local catalog is stale.
         fetch_plugins_from_cloud();
         found = try_get_plugin_descriptor(plugin_key, descriptor) && descriptor.is_cloud_plugin();
     }
@@ -1571,9 +1569,9 @@ bool PluginManager::download_and_install_cloud_plugin(const std::string& plugin_
         std::lock_guard<std::mutex> lock(m_mutex);
         Plugin* entry = find_plugin_locked(plugin_key);
         if (entry == nullptr) {
-            error = "Plugin Manifest not found.";
+            error = "Plugin not found.";
             BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": Cloud plugin " << plugin_key
-                                       << " downloaded successfully but failed to update plugin manifest. Manifest not found in catalog.";
+                                       << " downloaded successfully but failed to update plugin metadata. Plugin object not found.";
         } else {
             entry->descriptor = std::move(updated_descriptor);
         }
@@ -1774,9 +1772,6 @@ bool PluginManager::keep_installed_plugin_as_local(const PluginDescriptor& plugi
 
 bool PluginManager::finalize_cloud_plugin_removal(const PluginDescriptor& plugin, bool keep_local, std::string& error)
 {
-    // Shared by all four cloud-removal entrypoints after the cloud-side request succeeds. Handles
-    // the common local follow-up of keeping a detached local copy, deleting local files, or
-    // dropping a cloud-only row from the catalog.
     if (keep_local && plugin.has_local_package()) {
         if (!keep_installed_plugin_as_local(plugin, error))
             return false;
@@ -1787,8 +1782,7 @@ bool PluginManager::finalize_cloud_plugin_removal(const PluginDescriptor& plugin
     if (plugin.has_local_package()) {
         if (!delete_installed_plugin_package(plugin, error))
             return false;
-        // Re-sync the cloud catalog so observers/UI see the updated cloud list after the local
-        // package has been removed.
+
         fetch_plugins_from_cloud();
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Deleted local package after cloud removal: " << plugin.plugin_key;
         return true;
@@ -1800,7 +1794,7 @@ bool PluginManager::finalize_cloud_plugin_removal(const PluginDescriptor& plugin
                                        [&plugin](const Plugin& entry) { return entry.descriptor.plugin_key == plugin.plugin_key; }),
                         m_plugins.end());
     }
-    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Removed cloud-only plugin from catalog: " << plugin.plugin_key;
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Removed cloud-only plugin: " << plugin.plugin_key;
     return true;
 }
 
