@@ -4,6 +4,7 @@
 #include <atomic>
 #include <memory>
 #include <wx/statbmp.h>
+#include <wx/timer.h>
 #include <wx/webrequest.h>
 
 #include "GUI_Utils.hpp"
