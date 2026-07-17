@@ -155,7 +155,10 @@ void DeviceErrorDialog::on_webrequest_state(wxWebRequestEvent& evt)
 void DeviceErrorDialog::on_request_timeout(wxTimerEvent& event)
 {
     if (m_request_cancelled.load()) { return; }
-    m_error_picture->SetBitmap(make_placeholder_image(_L("Network unavailable")));
+    // Same fallback order as the cloud callback: local/HTTP illustration first, placeholder last.
+    if (!get_fail_snapshot_from_local(m_local_img_url)) {
+        m_error_picture->SetBitmap(make_placeholder_image(_L("Network unavailable")));
+    }
     Layout();
     Fit();
 }
@@ -207,13 +210,16 @@ bool DeviceErrorDialog::get_fail_snapshot_from_cloud()
     // destruction with a liveness token (m_alive, cleared in the dtor) and marshal onto the UI
     // thread via the always-valid app handler instead of this->CallAfter. The raw bytes are
     // decoded on the UI thread so no wxImage (non-atomic refcount) is shared across threads.
-    // Assumes a single in-flight request per dialog, which all current callers satisfy.
+    // m_request_seq guards against a callback from a previous error painting over the
+    // current one when the dialog is reused by a later show_error_code().
     auto alive = m_alive;
+    const int seq = m_request_seq;
     int ret = agent->get_hms_snapshot(m_obj->get_dev_id(), m_obj->m_print_error_img_id,
-        [this, alive](std::string body, int status) {
+        [this, alive, seq](std::string body, int status) {
             if (!alive->load()) { return; }
-            wxGetApp().CallAfter([this, alive, body = std::move(body), status]() {
+            wxGetApp().CallAfter([this, alive, seq, body = std::move(body), status]() {
                 if (!alive->load()) { return; }
+                if (seq != m_request_seq) { return; }
                 m_request_cancelled.store(true);
                 clear_request_timer();
 
@@ -304,7 +310,7 @@ void DeviceErrorDialog::init_button_list()
     init_button(FILAMENT_LOAD_RESUME, _L("Filament Loaded, Resume"));
     init_button(JUMP_TO_LIVEVIEW, _L("View Liveview"));
     init_button(NO_REMINDER_NEXT_TIME, _L("No Reminder Next Time"));
-    init_button(REFRESH_NOZZLE, _L("Recheck")); // Orca: ported REF error action
+    init_button(REFRESH_NOZZLE, _L("Recheck"));
     init_button(IGNORE_NO_REMINDER_NEXT_TIME, _L("Ignore. Don't Remind Next Time"));
     init_button(IGNORE_RESUME, _L("Ignore this and Resume"));
     init_button(PROBLEM_SOLVED_RESUME, _L("Problem Solved and Resume"));
@@ -313,8 +319,8 @@ void DeviceErrorDialog::init_button_list()
     init_button(CANCEL, _L("Cancel"));
     init_button(STOP_DRYING, _L("Stop Drying"));
     init_button(PROCEED, _L("Proceed"));
-    init_button(OK_JUMP_RACK, _L("OK"));  // Orca: ported REF error action
-    init_button(ABORT, _L("Abort"));      // Orca: ported REF error action
+    init_button(OK_JUMP_RACK, _L("OK"));
+    init_button(ABORT, _L("Abort"));
     init_button(DISABLE_PURIFICATION, _L("Disable Purification for This Print"));
     init_button(DONT_REMIND_NEXT_TIME, _L("Don't Remind Me"));
     init_button(DBL_CHECK_CANCEL, _L("Cancel"));
@@ -452,6 +458,7 @@ void DeviceErrorDialog::update_contents(const wxString& title, const wxString& t
     // path keeps its existing behavior.
     m_local_img_url = image_url;
     m_request_cancelled.store(false);
+    ++m_request_seq; // invalidate any snapshot fetch still in flight for the previous error
     clear_request_timer();
     if (get_fail_snapshot_from_cloud())
     {
@@ -489,9 +496,10 @@ void DeviceErrorDialog::update_contents(const wxString& title, const wxString& t
         auto text_size = m_error_msg_label->GetBestSize();
         if (text_size.y < FromDIP(360))
         {
-            // Orca: also reserve the image area when only a cloud snapshot (m_print_error_img_id)
-            // is available, so the scroll area sizes correctly even with an empty local image_url.
-            if (!image_url.empty() || (m_obj && !m_obj->m_print_error_img_id.empty()))
+            // Orca: reserve the image area exactly when an image is coming (cloud snapshot,
+            // local illustration, or the loading placeholder) - m_error_picture's visibility
+            // was decided above, so no blank slot is reserved when neither source is usable.
+            if (m_error_picture->IsShown())
             {
                 m_scroll_area->SetMinSize(wxSize(FromDIP(320), text_size.y + FromDIP(220)));
             }
@@ -604,16 +612,16 @@ void DeviceErrorDialog::on_button_click(ActionButton btn_id)
         }
         break;
     }
-    case DeviceErrorDialog::REFRESH_NOZZLE: { // Orca: ported REF error action
+    case DeviceErrorDialog::REFRESH_NOZZLE: {
         m_obj->command_refresh_nozzle();
         break;
     }
-    case DeviceErrorDialog::OK_JUMP_RACK: { // Orca: ported REF error action
+    case DeviceErrorDialog::OK_JUMP_RACK: {
         Slic3r::GUI::wxGetApp().mainframe->jump_to_monitor();
         Slic3r::GUI::wxGetApp().mainframe->m_monitor->jump_to_Rack();
         break;
     }
-    case DeviceErrorDialog::ABORT: { // Orca: ported REF error action
+    case DeviceErrorDialog::ABORT: {
         m_obj->command_ams_control("abort");
         break;
     }

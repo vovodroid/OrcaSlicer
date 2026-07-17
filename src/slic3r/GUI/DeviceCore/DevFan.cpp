@@ -46,29 +46,11 @@ void Slic3r::DevFan::converse_to_duct(bool is_suppt_part_fun, bool is_suppt_aux_
      }
 }
 
-static std::string _get_string_from_fantype(int type)
-{
-    switch (type) {
-    case 1: return "cooling_fan";
-    case 2: return "big_cooling_fan";
-    case 3: return "chamber_fan";
-    default: return "";
-    }
-    return "";
-}
-
 // Old protocol
 int Slic3r::DevFan::command_control_fan(int fan_type, int val)
 {
+    // Orca: strip analytics telemetry
     std::string gcode = (boost::format("M106 P%1% S%2% \n") % (int) fan_type % (val)).str();
-    try {
-        json j;
-        j["ctrl_type"] = _get_string_from_fantype(fan_type);
-        j["value"]     = val;
-
-        NetworkAgent *agent = GUI::wxGetApp().getAgent();
-        if (agent) agent->track_event("printer_control", j.dump());
-    } catch (...) {}
     return m_owner->publish_gcode(gcode);
 }
 

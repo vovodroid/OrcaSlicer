@@ -60,7 +60,7 @@ private:
     std::map<std::string, DevFirmwareVersionInfo> m_new_ver_list; // some protcols have version list
     DevFirmwareUpgradeState                       m_upgrade_display_state = DevFirmwareUpgradeState::DC;
 
-    int         m_upgrade_err_code;
+    int         m_upgrade_err_code = 0;
     std::string m_upgrade_status;
     std::string m_upgrade_progress;
     std::string m_upgrade_message;

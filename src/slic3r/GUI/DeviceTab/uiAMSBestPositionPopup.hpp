@@ -131,10 +131,12 @@ private:
     bool IsDark(const wxColour& c)
     {
         int brightness = (c.Red() * 299 + c.Green() * 587 + c.Blue() * 114) / 1000;
-        return brightness < 128;  // 0-255 range，128 mid
+        return brightness < 128;  // 0-255 range, 128 mid
     }
 private:
-    const std::vector<wxColour>& m_bgColours;
+    // Copied, not referenced: the slot repaints long after construction, so it must not
+    // depend on the caller's vector staying alive.
+    std::vector<wxColour> m_bgColours;
     wxString m_text;
     DataStatusType m_status;
     wxSize m_size;

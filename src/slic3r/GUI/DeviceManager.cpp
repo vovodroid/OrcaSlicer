@@ -74,8 +74,6 @@ int get_tray_id_by_ams_id_and_slot_id(int ams_id, int slot_id)
     }
 }
 
-// Orca: REF-additive stringing-prone filament chain, now ported (post-review).
-// Consumers arrive in resync clusters 5 (PrintOptionsDialog) and 7 (SelectMachine).
 namespace {
 
 // Stringing-prone filament IDs per nozzle-diameter bucket.
@@ -759,8 +757,6 @@ std::string MachineObject::get_filament_display_type(const std::string& ams_id, 
     return this->get_tray(ams_id, tray_id).get_display_filament_type();
 }
 
-// Orca: REF-additive, now ported (post-review). Adapted to Orca's kept fila model:
-// filament id resolved via MachineObject::get_filament_id (tray setting_id / tray_info_idx).
 bool MachineObject::any_loaded_filament_is_stringing_prone() const
 {
     if (print_job_filament_mapping.empty()) return false;
@@ -806,7 +802,7 @@ void MachineObject::_parse_ams_status(int ams_status)
         ams_status_main = AmsStatusMain::AMS_STATUS_MAIN_SELF_CHECK;
     } else if (ams_status_main_int == (int) AmsStatusMain::AMS_STATUS_MAIN_DEBUG) {
         ams_status_main = AmsStatusMain::AMS_STATUS_MAIN_DEBUG;
-    } else if (ams_status_main_int == (int) AmsStatusMain::AMS_STATUS_MAIN_COLD_PULL) { // Orca: REF-additive, now ported (post-review)
+    } else if (ams_status_main_int == (int) AmsStatusMain::AMS_STATUS_MAIN_COLD_PULL) {
         ams_status_main = AmsStatusMain::AMS_STATUS_MAIN_COLD_PULL;
     } else {
         ams_status_main = AmsStatusMain::AMS_STATUS_MAIN_UNKNOWN;
@@ -959,7 +955,6 @@ void MachineObject::clear_version_info()
     laser_version_info = DevFirmwareVersionInfo();
     cutting_module_version_info = DevFirmwareVersionInfo();
     extinguish_version_info = DevFirmwareVersionInfo();
-    // Orca: REF-additive accessory firmware versions, now ported (post-review)
     rotary_version_info = DevFirmwareVersionInfo();
     exhaustfan_version_info = DevFirmwareVersionInfo();
     amshub_version_info = DevFirmwareVersionInfo();
@@ -980,16 +975,16 @@ void MachineObject::store_version_info(const DevFirmwareVersionInfo& info)
         cutting_module_version_info = info;
     } else if (info.isExtinguishSystem()) {
         extinguish_version_info = info;
-    } else if (info.isRotary()) { // Orca: REF-additive, now ported (post-review)
+    } else if (info.isRotary()) {
         rotary_version_info = info;
     } else if (info.isWTM()) {
         // Route rack-hotend / extruder-nozzle firmware into the nozzle system so
         // the rack upgrade UI can read per-nozzle versions. isWTM() is false for every non-rack
         // printer's modules, so this branch never fires outside H2C.
         m_nozzle_system->AddFirmwareInfoWTM(info);
-    } else if (info.isExhaustFan()) { // Orca: REF-additive, now ported (post-review)
+    } else if (info.isExhaustFan()) {
         exhaustfan_version_info = info;
-    } else if (info.isHmshub()) { // Orca: REF-additive, now ported (post-review)
+    } else if (info.isHmshub()) {
         amshub_version_info = info;
     } else if (info.isFilaTrackSwitch()) {
         filatrack_version_info = info;
@@ -3364,9 +3359,9 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
                             int flag3 = jj["flag3"].get<int>();
                             is_support_filament_setting_inprinting =  get_flag_bits(flag3, 3);
                             is_enable_ams_np =  get_flag_bits(flag3, 9);
-                            is_support_fila_change_abort = get_flag_bits(flag3, 13); // Orca: REF-additive, now ported (filament-change Stop button)
-                            is_support_ext_change_assist_old = get_flag_bits(flag3, 16); // Orca: REF-additive, now ported (A/P-series multi-color external change assist)
-                            is_support_filament_32_colors = get_flag_bits(flag3, 17); // Orca: REF-additive, now ported (post-review)
+                            is_support_fila_change_abort = get_flag_bits(flag3, 13); // filament-change Stop button
+                            is_support_ext_change_assist_old = get_flag_bits(flag3, 16); // A/P-series multi-color external change assist
+                            is_support_filament_32_colors = get_flag_bits(flag3, 17);
                         }
                     }
                     if (!key_field_only) {
@@ -3533,9 +3528,14 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
                         /* temperature */
 
                         // Orca: adopt DeviceCore split — populate DevAxis/DevChamber modules
-                        // alongside the inline handling (side-effect-free; inline stays authoritative)
-                        m_axis->ParseAxis(jj);
-                        m_chamber->ParseChamber(jj);
+                        // alongside the inline handling (side-effect-free; inline stays authoritative).
+                        // Contained locally so a malformed field cannot abort the whole status parse.
+                        try {
+                            m_axis->ParseAxis(jj);
+                            m_chamber->ParseChamber(jj);
+                        } catch (...) {
+                            BOOST_LOG_TRIVIAL(warning) << "parse_json: DevAxis/DevChamber parse failed";
+                        }
 
                         DevBed::ParseV1_0(jj,m_bed);
 
@@ -4548,7 +4548,7 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
                         } else if (j["camera"]["command"].get<std::string>() == "ipcam_get_media_info") {
                             if (j["camera"].contains("sub_command") &&
                                 j["camera"]["sub_command"].get<std::string>() == "is_timelapse_storage_enough") {
-                                timelapse_storage_check_result = j["camera"]["result"].get<int>();
+                                timelapse_storage_check_result = j["camera"].value("result", -1);
                                 timelapse_storage_is_enough = j["camera"].value("is_enough", true);
                                 timelapse_storage_file_count = j["camera"].value("file_count", 0);
                                 timelapse_storage_check_done = true;
@@ -5160,8 +5160,7 @@ bool MachineObject::check_enable_np(const json& print) const
     return false;
 }
 
-// Orca: REF-additive, now ported (post-review). Consumer is the SelectMachine
-// color-quantity send gate (arrives in cluster 7). 0 = no explicit upper bound.
+// Max filament color count for the send gate; 0 = no explicit upper bound.
 int MachineObject::get_max_filament_color_count() const
 {
     if (is_support_filament_32_colors) return 32;
@@ -5332,8 +5331,7 @@ void MachineObject::parse_new_info(json print)
         }
     }
 
-    /* Orca: REF-additive, now ported (post-review). Per-filament-index AMS slot mapping
-       (task-level state). Consumers arrive in clusters 5/7. */
+    /* Per-filament-index AMS slot mapping reported by the printer (task-level state) */
     if (print.contains("mapping") && print["mapping"].is_array()) {
         std::vector<uint16_t> new_mapping;
         new_mapping.reserve(print["mapping"].size());

@@ -37,7 +37,7 @@ public:
         JUMP_TO_LIVEVIEW,
 
         NO_REMINDER_NEXT_TIME = 23,
-        REFRESH_NOZZLE = 24, // Orca: ported REF error action (recheck nozzle)
+        REFRESH_NOZZLE = 24,
         IGNORE_NO_REMINDER_NEXT_TIME = 25,
         //LOAD_FILAMENT = 26*/
         IGNORE_RESUME = 27,
@@ -49,8 +49,8 @@ public:
         CANCEL = 37,
         REMOVE_CLOSE_BTN = 39, // special case, do not show close button
         PROCEED = 41,
-        OK_JUMP_RACK = 49, // Orca: ported REF error action (jump to the nozzle rack)
-        ABORT = 51,        // Orca: ported REF error action (abort)
+        OK_JUMP_RACK = 49,
+        ABORT = 51,
         DISABLE_PURIFICATION = 54,
         DONT_REMIND_NEXT_TIME = 57,
 
@@ -107,6 +107,9 @@ private:
     wxWebRequest web_request;
     wxTimer* m_request_timer{ nullptr };
     std::atomic<bool> m_request_cancelled{ false };
+    // UI-thread-only generation counter: bumped on every update_contents() so a cloud
+    // snapshot callback from a previous error cannot paint over the current one.
+    int m_request_seq{ 0 };
     wxString m_local_img_url;
     // Orca: liveness token for the async cloud snapshot callback (the request has no cancel handle)
     std::shared_ptr<std::atomic_bool> m_alive{ std::make_shared<std::atomic_bool>(true) };

@@ -61,6 +61,8 @@ std::map<std::string, std::string> DevPrinterConfigUtil::get_all_model_id_with_n
 
         for (wxString file : m_files)
         {
+            if (!file.Lower().ends_with(".json")) continue;
+
             std::string config_file = m_resource_file_path + "/printers/" + file.ToStdString();
             boost::nowide::ifstream json_file(config_file.c_str());
 

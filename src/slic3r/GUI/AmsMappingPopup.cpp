@@ -1059,8 +1059,7 @@ void AmsMapingPopup::show_reset_button() {
     m_reset_btn->Show();
 }
 
-// Orca: kept surface for the reverse-direction SelectMachine — this helper (dropped by the reference)
-// is still consumed by SelectMachine, so it stays as a permanent compatibility surface.
+// Orca: dropped by the reference but still consumed by SelectMachine.
 std::vector<TrayData> AmsMapingPopup::parse_ams_mapping(const std::map<std::string, DevAms*, NumericStrCompare>& amsList)
 {
     std::vector<TrayData> m_tray_data;
@@ -1185,7 +1184,7 @@ void AmsMapingPopup::on_left_down(wxMouseEvent &evt)
                 }
             }
 
-            if (item->m_tray_data.type == TrayType::EMPTY) return;
+            if (item->m_tray_data.type == TrayType::EMPTY && !m_mapping_from_multi_machines) return;
             if (m_show_type == ShowType::LEFT_AND_RIGHT_DYNAMIC && devPrinterUtil::IsVirtualSlot(item->m_ams_id)) return;
 
             if ((m_show_type == ShowType::LEFT && item->GetParent()->GetName() == "left") ||

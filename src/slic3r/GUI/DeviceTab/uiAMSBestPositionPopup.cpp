@@ -79,7 +79,7 @@ void UiStyledAMSPanel::OnPaint(wxPaintEvent& event)
 
 
     int labelX = offset;
-    int labelY = m_isTop ? offset : (height - offset - FromDIP(27));  // true=顶部, false=底部
+    int labelY = m_isTop ? offset : (height - offset - FromDIP(27));  // true=top, false=bottom
 
 
     wxRect labelRect(labelX, labelY, width - 2 * offset, FromDIP(10));
@@ -340,8 +340,7 @@ void UiAMSSlot::DrawRectangle(wxPaintDC& dc, const wxSize& cli)
 
         for (int i = 0; i < m_bgColours.size(); i++)
         {
-            baseX += step * i;
-            wxRect rr(baseX, (cli.y - rectangleH) / 2, step, rectangleH);
+            wxRect rr(baseX + step * i, (cli.y - rectangleH) / 2, step, rectangleH);
 
             dc.SetBrush(wxBrush(LightenColour(m_bgColours[i])));
             dc.SetPen(wxPen(LightenColour(m_bgColours[i])));
@@ -1010,8 +1009,9 @@ wxString ReselectMachineDialog::getTrayID(MachineObject* obj, const std::string&
             if (filaSys)
             {
                 DevAms* ams = filaSys->GetAmsById(amsID);
-                int     ams_id_int = std::stoi(amsID);
-                int     slot_id_int = std::stoi(slotID);
+                if (!ams) { return ""; }
+                int     ams_id_int  = atoi(amsID.c_str());
+                int     slot_id_int = atoi(slotID.c_str());
                 int     tray_id     = 0;
                 if (ams->GetAmsType() == DevAmsType::AMS || ams->GetAmsType() == DevAmsType::AMS_LITE || ams->GetAmsType() == DevAmsType::N3F) {
                     tray_id = ams_id_int * 4 + slot_id_int;
