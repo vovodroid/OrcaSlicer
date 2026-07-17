@@ -22,13 +22,16 @@ using json   = nlohmann::json;
 
 namespace {
 
-// Shut both singletons down while boost::log is still alive; left to their static
-// destructors, shutdown()'s logging runs after boost::log tears down its thread-local
-// storage and crashes the process on exit (same reason ScopedPluginManager exists in
-// test_plugin_lifecycle.cpp). No initialize() needed: discovery and the cloud-metadata
-// merge never touch Python, but manager shutdown instantiates the interpreter singleton.
+// Brings the plugin manager up and shuts both singletons down while boost::log is still alive;
+// left to their static destructors, shutdown()'s logging runs after boost::log tears down its
+// thread-local storage and crashes the process on exit (same reason ScopedPluginManager exists in
+// test_plugin_lifecycle.cpp). initialize() IS needed here: the plugin under test is a
+// slicing-pipeline script, so discover_plugins() brings up the Python interpreter to parse it,
+// same as any other plugin.
 struct ScopedManagerShutdown
 {
+    bool initialized = PluginManager::instance().initialize();
+
     ~ScopedManagerShutdown()
     {
         PluginManager::instance().shutdown();
@@ -63,7 +66,9 @@ print('ok')
 TEST_CASE("cloud metadata refresh preserves a plugin's stored config", "[PluginCloudMetadata]")
 {
     ScopedManagerShutdown manager_shutdown_guard; // declared first: destroyed last
-    ScopedDataDir         data_dir_guard("cloud-meta-config");
+    if (!manager_shutdown_guard.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    ScopedDataDir data_dir_guard("cloud-meta-config");
 
     // A locally-installed cloud plugin: package .py plus an install-state sidecar carrying the
     // cloud identity. Discovery derives plugin_key from the cloud UUID.

@@ -3,6 +3,7 @@
 #include <libslic3r/Utils.hpp>
 #include <slic3r/plugin/PluginConfig.hpp>
 #include <slic3r/plugin/PluginManager.hpp>
+#include <slic3r/plugin/PythonInterpreter.hpp>
 #include <slic3r/plugin/PythonPluginBridge.hpp>
 #include <slic3r/plugin/PythonPluginInterface.hpp>
 
@@ -21,19 +22,33 @@ using json = nlohmann::json;
 
 namespace {
 
-void ensure_python_initialized()
+// Brings the plugin system up for the duration of one test and tears it down at the end — same
+// idiom as ScopedPluginManager in test_plugin_lifecycle.cpp, and for the same reason: shutdown()
+// logs via boost::log, so it must run before boost::log tears down its thread-local storage, not be
+// left to a static destructor at process exit.
+//
+// Needed here (unlike a bare pybind11::scoped_interpreter): has_config_ui()/get_config_ui()/
+// get_name()/etc. all cross PyPluginCommonTrampoline's ORCA_PY_OVERRIDE_AUDITED, which refuses to
+// call into Python unless PythonInterpreter::instance() itself reports initialized (see
+// PythonGILState). A bare interpreter never sets that flag, so every trampoline call would report
+// "Python interpreter is shutting down" even though Python was perfectly alive.
+//
+// initialize() leaves the GIL released (production code re-acquires it per call via PythonGILState);
+// every TEST_CASE below pairs this with a py::gil_scoped_acquire, declared second so it releases
+// before this destructor's shutdown() runs.
+struct ScopedPluginManager
 {
-    // As in test_plugin_host_api.cpp: `orca` is compiled into this binary, so a bare interpreter is
-    // enough and does not need the bundled Python home.
-    if (!Py_IsInitialized()) {
-        static py::scoped_interpreter interpreter;
-        (void) interpreter;
+    bool initialized = PluginManager::instance().initialize();
+
+    ~ScopedPluginManager()
+    {
+        PluginManager::instance().shutdown();
+        PythonInterpreter::instance().shutdown();
     }
-}
+};
 
 py::module_ import_orca_module()
 {
-    ensure_python_initialized();
     (void) PythonPluginBridge::instance(); // force the embedded module registration into the binary
     return py::module_::import("orca");
 }
@@ -86,6 +101,11 @@ PluginCapabilityId capability_id(PluginCapabilityType type, const char* name, co
 
 TEST_CASE("Capability config API is exposed on every Python capability", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     py::module_ orca = import_orca_module();
     REQUIRE(py::hasattr(orca, "PythonPluginBase"));
 
@@ -107,6 +127,11 @@ TEST_CASE("Capability config API is exposed on every Python capability", "[Plugi
 
 TEST_CASE("get_config returns only cap_config and save_config persists it", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     ScopedDataDir data_dir_guard("plugin-config-py-roundtrip");
     host_config().load(); // reset the singleton's in-memory store against the empty temp dir
 
@@ -138,6 +163,11 @@ TEST_CASE("get_config returns only cap_config and save_config persists it", "[Pl
 
 TEST_CASE("save_config rejects a string that is not valid JSON", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     ScopedDataDir data_dir_guard("plugin-config-py-badjson");
     host_config().load();
 
@@ -152,6 +182,11 @@ TEST_CASE("save_config rejects a string that is not valid JSON", "[PluginConfig]
 
 TEST_CASE("Saving one capability's config does not touch another's", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     ScopedDataDir data_dir_guard("plugin-config-py-isolation");
     host_config().load();
 
@@ -188,6 +223,11 @@ TEST_CASE("Saving one capability's config does not touch another's", "[PluginCon
 
 TEST_CASE("Config API refuses a capability the host never materialized", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     ScopedDataDir data_dir_guard("plugin-config-py-unowned");
     host_config().load();
 
@@ -202,6 +242,11 @@ TEST_CASE("Config API refuses a capability the host never materialized", "[Plugi
 
 TEST_CASE("Custom config UI hooks dispatch to the Python override", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     py::object cap = make_capability("CustomUiCap",
                                      "    def get_name(self): return 'cap_a'\n"
                                      "    def has_config_ui(self): return True\n"
@@ -216,6 +261,11 @@ TEST_CASE("Custom config UI hooks dispatch to the Python override", "[PluginConf
 
 TEST_CASE("A capability that omits the config UI hooks gets the default editor", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     ScopedDataDir data_dir_guard("plugin-config-py-bare");
     host_config().load();
 
@@ -234,6 +284,11 @@ TEST_CASE("A capability that omits the config UI hooks gets the default editor",
 
 TEST_CASE("get_default_config supplies the value Restore defaults writes back", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     SECTION("not overridden -> an empty config")
     {
         // Already "restore defaults" for a capability that keeps its stored config sparse and applies
@@ -291,6 +346,11 @@ TEST_CASE("get_default_config supplies the value Restore defaults writes back", 
 
 TEST_CASE("Restoring defaults overwrites only the target capability", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     ScopedDataDir data_dir_guard("plugin-config-py-restore");
     host_config().load();
 
@@ -313,6 +373,11 @@ TEST_CASE("Restoring defaults overwrites only the target capability", "[PluginCo
 
 TEST_CASE("A raising get_default_config leaves the stored config untouched", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     ScopedDataDir data_dir_guard("plugin-config-py-restore-raise");
     host_config().load();
 
@@ -333,6 +398,11 @@ TEST_CASE("A raising get_default_config leaves the stored config untouched", "[P
 
 TEST_CASE("A raising config UI hook surfaces as an exception the host can catch", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     py::object cap = make_capability("RaisingCap",
                                      "    def get_name(self): return 'cap_a'\n"
                                      "    def has_config_ui(self): return True\n"
@@ -351,6 +421,11 @@ TEST_CASE("A raising config UI hook surfaces as an exception the host can catch"
 
 TEST_CASE("A config UI hook returning the wrong type does not crash the host", "[PluginConfig][Python]")
 {
+    ScopedPluginManager plugin_system; // declared first: destroyed last
+    if (!plugin_system.initialized)
+        SKIP("Bundled Python interpreter unavailable: " + PythonInterpreter::instance().last_error());
+    py::gil_scoped_acquire gil; // released before plugin_system's destructor shuts Python down
+
     // has_config_ui() is plugin-authored, so it can return anything; the host must survive the call.
     py::object cap = make_capability("BadTypeCap",
                                      "    def get_name(self): return 'cap_a'\n"
