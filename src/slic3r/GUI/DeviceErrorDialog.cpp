@@ -610,9 +610,7 @@ void DeviceErrorDialog::on_button_click(ActionButton btn_id)
     }
     case DeviceErrorDialog::OK_JUMP_RACK: { // Orca: ported REF error action
         Slic3r::GUI::wxGetApp().mainframe->jump_to_monitor();
-        // Orca: transitional shim (removed in resync cluster 8)
-        if (auto* mon = Slic3r::GUI::wxGetApp().mainframe->m_monitor)
-            mon->get_status_panel()->jump_to_Rack();
+        Slic3r::GUI::wxGetApp().mainframe->m_monitor->jump_to_Rack();
         break;
     }
     case DeviceErrorDialog::ABORT: { // Orca: ported REF error action

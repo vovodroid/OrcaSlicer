@@ -130,9 +130,9 @@ private:
     DevBed *          m_bed;
     DevStorage*       m_storage;
 
-    /* Orca: adopt DeviceCore split — axis/calib/chamber/status/upgrade modules.
-       Provide the reference-shape surface for later resync clusters; MachineObject's inline
-       handling of these concerns stays authoritative during the transition (removed in cluster 8). */
+    /* Orca: adopt DeviceCore split — axis/calib/chamber/status/upgrade modules alongside
+       MachineObject's inline handling of these concerns, which stays authoritative here (Orca keeps
+       the inline model permanently; the split modules coexist with it via accessors). */
     std::shared_ptr<DevAxis>    m_axis;
     std::shared_ptr<DevChamber> m_chamber;
     DevCalib*                   m_calib{ nullptr };
@@ -929,6 +929,7 @@ public:
     bool                        is_enable_ams_np{ false };
     bool                        is_support_filament_32_colors{ false }; // Orca: REF-additive, now ported (post-review)
     bool                        is_support_fila_change_abort{ false }; // Orca: REF-additive, now ported (filament-change Stop button)
+    bool                        is_support_ext_change_assist_old{ false }; // Orca: REF-additive, now ported (A/P-series multi-color external change assist)
 
     // Orca: REF-additive, now ported (post-review). Max filament color count for the send
     // gate; returns 0 when there is no explicit upper bound.

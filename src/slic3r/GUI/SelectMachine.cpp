@@ -4680,10 +4680,12 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
     }
 
     /* multi color external change assist*/
-    if(obj_->is_support_ext_change_assist && !m_check_ext_change_assist->IsShown()){
+    // Orca: REF-additive, now ported — A/P-series expose this via flag3 bit-16 (is_support_ext_change_assist_old)
+    bool is_support_mutile_color = obj_->is_support_ext_change_assist_old || obj_->is_support_ext_change_assist;
+    if (is_support_mutile_color && !m_check_ext_change_assist->IsShown()) {
         m_check_ext_change_assist->Show(true);
         m_label_ext_change_assist->Show(true);
-    }else if(!obj_->is_support_ext_change_assist &&m_check_ext_change_assist->IsShown()){
+    } else if (!is_support_mutile_color && m_check_ext_change_assist->IsShown()) {
         m_check_ext_change_assist->Hide();
         m_label_ext_change_assist->Hide();
     }

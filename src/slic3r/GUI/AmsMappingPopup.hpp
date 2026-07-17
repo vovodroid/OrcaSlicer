@@ -352,12 +352,11 @@ public:
     void         paintEvent(wxPaintEvent &evt);
     void         set_parent_item(MaterialItem* item) {m_parent_item = item;};
     void         set_show_type(ShowType type) { m_show_type = type; };
-    // Orca: transitional shim (removed in resync cluster 8) — keeps SelectMachine (cluster 7, not yet
-    // resynced) compiling. Its only caller passes false, which equals the copied update path's default
-    // (all slots shown), so a no-op preserves behavior.
+    // Orca: kept surface for the reverse-direction SelectMachine — its only caller passes false, which
+    // equals the update path's default (all slots shown), so this no-op preserves behavior.
     void         set_only_show_ext_spool(bool /*flag*/) {}
-    // Orca: transitional shim (removed in resync cluster 8) — SelectMachine (cluster 7) still calls this
-    // dropped-from-REF helper; restored verbatim from the pre-resync Orca implementation.
+    // Orca: kept surface for the reverse-direction SelectMachine — this helper (dropped by the reference)
+    // is still consumed by SelectMachine, so it stays as a permanent compatibility surface.
     std::vector<TrayData> parse_ams_mapping(const std::map<std::string, DevAms*, NumericStrCompare>& amsList);
 
 #ifdef __APPLE__

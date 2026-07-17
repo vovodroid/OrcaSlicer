@@ -148,8 +148,8 @@ enum class DevFirmwareUpgradeState : int
     UpgradingFinished = 3
 };
 
-// Orca: transitional shim (removed in resync cluster 8) — DeviceManager/UpgradePanel still use the
-// pre-resync name; alias keeps them compiling until they are resynced to the reference name.
+// Orca: permanent compatibility alias — the reverse-direction DeviceManager/UpgradePanel keep the
+// Orca spelling of this enum, so the alias to the reference name is a kept surface, not transitional.
 using DevFirmwareUpgradingState = DevFirmwareUpgradeState;
 
 class devPrinterUtil

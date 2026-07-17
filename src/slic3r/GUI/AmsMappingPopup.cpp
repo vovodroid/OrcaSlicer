@@ -1059,8 +1059,8 @@ void AmsMapingPopup::show_reset_button() {
     m_reset_btn->Show();
 }
 
-// Orca: transitional shim (removed in resync cluster 8) — restored verbatim from the pre-resync Orca
-// implementation so SelectMachine (cluster 7, not yet resynced) keeps compiling.
+// Orca: kept surface for the reverse-direction SelectMachine — this helper (dropped by the reference)
+// is still consumed by SelectMachine, so it stays as a permanent compatibility surface.
 std::vector<TrayData> AmsMapingPopup::parse_ams_mapping(const std::map<std::string, DevAms*, NumericStrCompare>& amsList)
 {
     std::vector<TrayData> m_tray_data;

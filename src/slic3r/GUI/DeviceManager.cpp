@@ -3365,6 +3365,7 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
                             is_support_filament_setting_inprinting =  get_flag_bits(flag3, 3);
                             is_enable_ams_np =  get_flag_bits(flag3, 9);
                             is_support_fila_change_abort = get_flag_bits(flag3, 13); // Orca: REF-additive, now ported (filament-change Stop button)
+                            is_support_ext_change_assist_old = get_flag_bits(flag3, 16); // Orca: REF-additive, now ported (A/P-series multi-color external change assist)
                             is_support_filament_32_colors = get_flag_bits(flag3, 17); // Orca: REF-additive, now ported (post-review)
                         }
                     }
@@ -5810,7 +5811,9 @@ wxString MachineObject::get_nozzle_replace_url() const
         return link_map["en"].get<wxString>();
     }/*retry with en*/
 
-    return "https://wiki.bambulab.com/en/h2/maintenance/replace-hotend";
+    // Orca: no neutral wiki equivalent for this fallback — return empty so the caller hides the link
+    // (PrinterPartsDialog::OnWikiClicked reports "No wiki link available" instead of opening a browser)
+    return wxEmptyString;
 }
 
 std::string MachineObject::get_error_code_str(int error_code)
