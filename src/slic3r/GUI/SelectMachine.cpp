@@ -4426,7 +4426,13 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
         show_status(PrintDialogStatus::PrintStatusNoSdcard);
         return;
     }
-    if (wxGetApp().preset_bundle->filament_presets.size() > 16 && m_print_type != PrintFromType::FROM_SDCARD_VIEW) { 
+    // Orca: gate against the printer's real max filament-color count instead of a hardcoded 16, so
+    // high-color firmware (is_support_filament_32_colors -> 32) isn't wrongly blocked. Floor at 16 so
+    // printers that report 0 (e.g. series X/O) keep their prior limit; every other class is unchanged.
+    // The max shown in the message is owned by PrePrintChecker (out of this cluster's scope).
+    int max_color = obj_->get_max_filament_color_count();
+    if (max_color < 16) max_color = 16;
+    if (wxGetApp().preset_bundle->filament_presets.size() > (size_t)max_color && m_print_type != PrintFromType::FROM_SDCARD_VIEW) {
         if (!obj_->is_enable_ams_np && !obj_->is_enable_np)
         {
             show_status(PrintDialogStatus::PrintStatusColorQuantityExceed);
@@ -4449,7 +4455,12 @@ void SelectMachineDialog::update_show_status(MachineObject* obj_)
         }
     }
 
-    if (!can_support_pa_auto_cali() && m_checkbox_list["flow_cali"]->IsShown() && m_checkbox_list["flow_cali"]->getValue() == "on") {
+    // Orca: also gate the "auto" flow-cali case (REF parity — closes a pre-existing gap where TPU/Aero
+    // with Flow Dynamics Calibration set to Auto was not blocked on printers that don't support PA
+    // auto-cali). Both auto and on map to the one available status enum; REF's distinct "CaliOn"
+    // message lives in PrePrintChecker (out of this cluster's scope).
+    if (!can_support_pa_auto_cali() && m_checkbox_list["flow_cali"]->IsShown()
+        && (m_checkbox_list["flow_cali"]->getValue() == "on" || m_checkbox_list["flow_cali"]->getValue() == "auto")) {
         show_status(PrintDialogStatus::PrintStatusTPUUnsupportAutoCali);
         return;
     }
@@ -5907,7 +5918,7 @@ void SelectMachineDialog::UpdateStatusCheckWarning_ExtensionTool(MachineObject* 
                 {
                     show_status(PrintDialogStatus::PrintStatusToolHeadCoolingFanWarning,
                                 { _L("Install toolhead enhanced cooling fan to prevent filament softening.")},
-                                "https://e.bambulab.com/t?c=l3T7caKGeNt3omA9");
+                                "https://www.orcaslicer.com/wiki/"); // Orca: neutral wiki link (vendor URL removed)
                     return;
                 }
             }
@@ -6653,7 +6664,7 @@ void PrinterInfoBox::Create()
 
 void PrinterInfoBox::OnBtnQuestionClicked(wxCommandEvent& event)
 {
-    wxLaunchDefaultBrowser(wxT("https://wiki.bambulab.com/en/software/bambu-studio/failed-to-connect-printer"));
+    wxLaunchDefaultBrowser(wxT("https://www.orcaslicer.com/wiki/")); // Orca: neutral wiki link (vendor URL removed)
 }
 
 
