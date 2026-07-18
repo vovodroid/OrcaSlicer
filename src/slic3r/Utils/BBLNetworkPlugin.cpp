@@ -777,6 +777,14 @@ void BBLNetworkPlugin::clear_all_function_pointers()
 
 std::vector<NetworkLibraryVersionInfo> get_all_available_versions()
 {
+    // get_version() reports the "00.00.00.00" sentinel when nothing is loaded; resolve
+    // that here so the list builder only ever sees a real version or an empty string.
+    const BBLNetworkPlugin& plugin = BBLNetworkPlugin::instance();
+    return get_all_available_versions(plugin.is_loaded() ? plugin.get_version() : std::string());
+}
+
+std::vector<NetworkLibraryVersionInfo> get_all_available_versions(const std::string& loaded_version)
+{
     std::vector<NetworkLibraryVersionInfo> result;
     std::set<std::string> known_base_versions;
     std::set<std::string> all_known_versions;
@@ -789,118 +797,58 @@ std::vector<NetworkLibraryVersionInfo> get_all_available_versions()
 
     std::vector<std::string> discovered = BBLNetworkPlugin::scan_plugin_versions();
 
-    std::vector<std::pair<std::string, std::string>> suffixed_versions;
-
+    // Surface discovered builds that are not whitelisted outright:
+    //  - suffixed dev builds (02.08.01.52-custom) attach to the exact whitelisted base
+    //    version they were built from, so they render nested under it;
+    //  - unsuffixed builds (typically installed by the OTA plug-in update) are accepted
+    //    when is_supported_network_version() recognises their release series - the plugin
+    //    ABI is stable within an AA.BB.CC series and the OTA sync only ever accepts
+    //    same-series updates, so they load with the whitelisted struct layout. That gate
+    //    never matches the legacy entry, which would otherwise be loaded with the modern
+    //    layout and break.
+    // Only the static whitelist anchors a dev build, never another discovered one, so
+    // known_base_versions must stay separate from all_known_versions here.
     for (const auto& version : discovered) {
         if (all_known_versions.count(version) > 0)
             continue;
 
-        std::string base = extract_base_version(version);
-        std::string suffix = extract_suffix(version);
-
-        if (suffix.empty())
-            continue;
-
-        if (known_base_versions.count(base) == 0)
-            continue;
-
-        suffixed_versions.emplace_back(base, version);
+        const std::string suffix = extract_suffix(version);
+        if (suffix.empty()) {
+            if (!is_supported_network_version(version))
+                continue;
+            result.push_back(NetworkLibraryVersionInfo::from_discovered(version, version, ""));
+        } else {
+            const std::string base = extract_base_version(version);
+            if (known_base_versions.count(base) == 0)
+                continue;
+            result.push_back(NetworkLibraryVersionInfo::from_discovered(version, base, suffix));
+        }
         all_known_versions.insert(version);
     }
 
-    std::sort(suffixed_versions.begin(), suffixed_versions.end(),
-              [](const auto& a, const auto& b) {
-                  if (a.first != b.first) return a.first > b.first;
-                  return a.second < b.second;
+    // Newest first. Version components are fixed-width and zero-padded, so a plain
+    // string compare orders them numerically, and the legacy series sorts last on its
+    // own. Suffixed dev builds sort directly under the base version they build on.
+    std::sort(result.begin(), result.end(),
+              [](const NetworkLibraryVersionInfo& a, const NetworkLibraryVersionInfo& b) {
+                  if (a.base_version != b.base_version) return a.base_version > b.base_version;
+                  return a.suffix < b.suffix;
               });
 
-    for (const auto& [base, full] : suffixed_versions) {
-        size_t insert_pos = 0;
-        for (size_t i = 0; i < result.size(); ++i) {
-            if (result[i].base_version == base) {
-                insert_pos = i + 1;
-                while (insert_pos < result.size() &&
-                       result[insert_pos].base_version == base) {
-                    ++insert_pos;
-                }
-                break;
-            }
-        }
-
-        std::string sfx = extract_suffix(full);
-        result.insert(result.begin() + insert_pos,
-                      NetworkLibraryVersionInfo::from_discovered(full, base, sfx));
-    }
-
-    // Also surface discovered versions WITHOUT a suffix (typically installed by the
-    // OTA plug-in update) when they belong to a whitelisted release series: the plugin
-    // ABI is stable within an AA.BB.CC series (the OTA sync only ever accepts same-series
-    // updates), so these load with the same struct layout as the static entry they follow.
-    // The legacy entry is excluded as an anchor - is_legacy_version() matches exactly, so
-    // a different 01.x build would be loaded with the modern layout and break.
-    std::vector<std::pair<std::string, std::string>> series_versions; // {anchor whitelist version, discovered version}
-    for (const auto& version : discovered) {
-        if (all_known_versions.count(version) > 0)
-            continue;
-        if (!extract_suffix(version).empty())
-            continue;
-        if (version.size() < 8)
-            continue;
-
-        for (const auto& base : known_base_versions) {
-            if (BBLNetworkPlugin::is_legacy_version(base))
-                continue;
-            if (base.size() >= 8 && base.compare(0, 8, version, 0, 8) == 0) {
-                series_versions.emplace_back(base, version);
-                all_known_versions.insert(version);
-                break;
-            }
-        }
-    }
-
-    // Ascending sort + insertion right behind the anchor leaves the newest build
-    // closest to its whitelist entry.
-    std::sort(series_versions.begin(), series_versions.end(),
-              [](const auto& a, const auto& b) {
-                  if (a.first != b.first) return a.first > b.first;
-                  return a.second < b.second;
-              });
-
-    for (const auto& [anchor, full] : series_versions) {
-        size_t insert_pos = result.size();
-        for (size_t i = 0; i < result.size(); ++i) {
-            if (result[i].version == anchor) {
-                // Skip past the whole base-version block (the entry itself plus any
-                // suffixed dev builds shown under it) so the tree glyphs stay adjacent.
-                insert_pos = i + 1;
-                while (insert_pos < result.size() &&
-                       result[insert_pos].base_version == anchor) {
-                    ++insert_pos;
-                }
-                break;
-            }
-        }
-        result.insert(result.begin() + insert_pos,
-                      NetworkLibraryVersionInfo::from_discovered(full, full, ""));
-    }
-
-    // Final pass: record what is actually present on disk, and put the "(Latest)"
-    // label on the truly highest full version in the list - an OTA-installed build
-    // can be newer than the newest whitelisted entry. get_latest_network_version()
-    // intentionally keeps returning the static whitelist default, which drives the
-    // download and update-check decisions.
-    size_t highest = result.size();
-    for (size_t i = 0; i < result.size(); ++i) {
-        auto& info = result[i];
-        info.is_installed = info.is_discovered ||
-            BBLNetworkPlugin::versioned_library_exists(info.version);
+    for (auto& info : result) {
+        info.is_loaded = !loaded_version.empty() && info.version == loaded_version;
         info.is_latest = false;
-        if (info.suffix.empty() &&
-            (highest == result.size() || info.version > result[highest].version))
-            highest = i;
     }
-    if (highest < result.size())
-        result[highest].is_latest = true;
+
+    // "(Latest)" goes on the highest full version in the list, which after the sort is
+    // simply the first entry without a dev suffix - an OTA-installed build can be newer
+    // than the newest whitelisted entry. get_latest_network_version() intentionally
+    // keeps returning the static whitelist default, which drives the download and
+    // update-check decisions.
+    auto latest = std::find_if(result.begin(), result.end(),
+                               [](const NetworkLibraryVersionInfo& info) { return info.suffix.empty(); });
+    if (latest != result.end())
+        latest->is_latest = true;
 
     return result;
 }

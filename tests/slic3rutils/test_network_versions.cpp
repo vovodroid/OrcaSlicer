@@ -75,31 +75,51 @@ TEST_CASE_METHOD(PluginFolderFixture, "Same-series OTA plugin versions are surfa
     REQUIRE(count_version(versions, "02.08.01.52-custom") == 1);
     REQUIRE(count_version(versions, "02.03.00.62") == 0);
 
-    size_t latest_pos = versions.size(), ota_pos = versions.size();
-    for (size_t i = 0; i < versions.size(); ++i) {
-        if (versions[i].version == "02.08.01.52") latest_pos = i;
-        if (versions[i].version == "02.08.01.55") ota_pos = i;
-    }
-    REQUIRE(latest_pos < versions.size());
-    // The discovered build lands right after the whole 02.08.01.52 block
-    // (the whitelist entry plus its suffixed dev build).
-    REQUIRE(ota_pos == latest_pos + 2);
-    REQUIRE(versions[ota_pos - 1].base_version == "02.08.01.52");
-    REQUIRE(versions[ota_pos - 1].version == "02.08.01.52-custom");
+    // Newest first, regardless of whether a version came from the whitelist or from
+    // disk: the OTA build outranks the older whitelist entry it was discovered under.
+    REQUIRE(versions[0].version == "02.08.01.55");
+    REQUIRE(versions[1].version == "02.08.01.52");
+    // Suffixed dev builds stay nested directly under the base version they build on.
+    REQUIRE(versions[2].version == "02.08.01.52-custom");
+    REQUIRE(versions[2].base_version == "02.08.01.52");
+    // The legacy series is the oldest, so it sorts last.
+    REQUIRE(versions.back().version == BAMBU_NETWORK_AGENT_VERSION_LEGACY);
 
-    const auto& ota = versions[ota_pos];
+    const auto& ota = versions[0];
     REQUIRE(ota.is_discovered);
     REQUIRE(ota.suffix.empty());
 
     // "(Latest)" is dynamic: the OTA build is the highest listed version, so it takes
-    // the label from the static whitelist entry - and it is also marked installed.
+    // the label from the static whitelist entry.
     REQUIRE(ota.is_latest);
-    REQUIRE(ota.is_installed);
-    REQUIRE_FALSE(versions[latest_pos].is_latest);
-    REQUIRE_FALSE(versions[latest_pos].is_installed);
+    REQUIRE_FALSE(versions[1].is_latest);
 
     // The static default used for download and update-check decisions is unchanged.
     REQUIRE(std::string(get_latest_network_version()) == "02.08.01.52");
+}
+
+TEST_CASE_METHOD(PluginFolderFixture, "Only the loaded build is marked installed", "[NetworkVersions]")
+{
+    // Switching versions leaves the previous library on disk, so presence on disk is
+    // not what "(installed)" reports - the build actually loaded in this session is.
+    add_plugin("02.08.01.55");
+    add_plugin("02.08.01.52");
+
+    auto versions = get_all_available_versions("02.08.01.52");
+
+    int marked = 0;
+    for (const auto& info : versions) {
+        if (info.is_loaded) {
+            ++marked;
+            REQUIRE(info.version == "02.08.01.52");
+        }
+    }
+    REQUIRE(marked == 1);
+
+    // Nothing loaded (plug-in disabled or failed to load) marks nothing, even though
+    // both libraries are on disk.
+    for (const auto& info : get_all_available_versions(""))
+        REQUIRE_FALSE(info.is_loaded);
 }
 
 TEST_CASE("Only whitelisted series pass the load gate", "[NetworkVersions]")
@@ -144,7 +164,7 @@ TEST_CASE_METHOD(PluginFolderFixture, "Legacy series never adopts discovered bui
     for (const auto& info : versions) {
         if (info.version == "02.08.01.52") {
             REQUIRE(info.is_latest);
-            REQUIRE_FALSE(info.is_installed);
+            REQUIRE_FALSE(info.is_loaded);
         }
     }
 }

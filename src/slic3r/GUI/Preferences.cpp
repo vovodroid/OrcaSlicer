@@ -17,6 +17,7 @@
 #include "Widgets/RadioGroup.hpp"
 #include "slic3r/Utils/bambu_networking.hpp"
 #include "slic3r/Utils/NetworkAgent.hpp"
+#include "NetworkPluginDialog.hpp"
 #include "DownloadProgressDialog.hpp"
 
 #ifdef __WINDOWS__
@@ -1262,23 +1263,7 @@ wxBoxSizer *PreferencesDialog::create_item_network_plugin_version(wxString title
 
     for (size_t i = 0; i < m_available_versions.size(); i++) {
         const auto& ver = m_available_versions[i];
-        wxString label;
-
-        if (!ver.suffix.empty()) {
-            label = wxString::FromUTF8("\xE2\x94\x94 ") + wxString::FromUTF8(ver.display_name);
-        } else {
-            label = wxString::FromUTF8(ver.display_name);
-        }
-
-        // "(Latest)" marks the highest listed version; "(installed)" marks versions
-        // whose library is already on disk. One entry can carry both.
-        if (ver.is_latest) {
-            label += " " + _L("(Latest)");
-        }
-        if (ver.is_installed) {
-            label += " " + _L("(installed)");
-        }
-        m_network_version_combo->Append(label);
+        m_network_version_combo->Append(network_version_label(ver));
         if (current_version == ver.version) {
             current_selection = i;
         }

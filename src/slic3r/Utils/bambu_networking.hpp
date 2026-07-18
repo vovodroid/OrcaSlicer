@@ -406,8 +406,10 @@ struct NetworkLibraryVersionInfo {
     bool is_latest;
     std::string warning;
     bool is_discovered;
-    // Whether the versioned library file for this entry is present on disk.
-    bool is_installed = false;
+    // Whether this is the build currently loaded in this session. Deliberately not
+    // "present on disk": switching versions leaves the previous library in place, so
+    // an on-disk test marks every version ever selected.
+    bool is_loaded = false;
 
     static NetworkLibraryVersionInfo from_static(const NetworkLibraryVersion& v) {
         return {
@@ -416,7 +418,7 @@ struct NetworkLibraryVersionInfo {
             "",
             v.display_name,
             v.url_override ? v.url_override : "",
-            v.is_latest,
+            false, // assigned by get_all_available_versions() once the list is sorted
             v.warning ? v.warning : "",
             false
         };
@@ -439,7 +441,12 @@ inline std::string extract_suffix(const std::string& full_version) {
     return (pos == std::string::npos) ? "" : full_version.substr(pos + 1);
 }
 
+// Selectable versions, newest first. Marks the entry matching the plug-in currently
+// loaded in this session.
 std::vector<NetworkLibraryVersionInfo> get_all_available_versions();
+// Same list, resolving is_loaded against an explicitly supplied version rather than the
+// live plug-in. Pass an empty string for "nothing loaded".
+std::vector<NetworkLibraryVersionInfo> get_all_available_versions(const std::string& loaded_version);
 
 struct NetworkLibraryLoadError {
     bool has_error = false;
