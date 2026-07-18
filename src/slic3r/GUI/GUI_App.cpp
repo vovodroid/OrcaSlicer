@@ -1677,7 +1677,13 @@ void GUI_App::restart_networking()
         m_agent->set_on_http_error_fn([this](CloudEvent event, unsigned int status, std::string body) {
             this->handle_http_error(status, body, event.provider);
         });
-        m_agent->start_discovery(true, false);
+        // on_init_network() rebuilt m_agent with a null printer agent, so calling
+        // m_agent->start_discovery() directly would no-op (NetworkAgent::start_discovery
+        // returns false when m_printer_agent is null). Re-establish the printer agent for the
+        // active preset first - switch_printer_agent() installs it and then starts discovery,
+        // mirroring startup - otherwise LAN discovery stays dead after a plugin hot reload
+        // until the user next changes a preset/tab.
+        switch_printer_agent();
         if (mainframe)
             mainframe->refresh_plugin_tips();
         if (plater_)
