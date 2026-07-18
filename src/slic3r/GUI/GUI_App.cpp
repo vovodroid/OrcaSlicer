@@ -1198,7 +1198,11 @@ std::string GUI_App::get_plugin_url(std::string name, std::string country_code)
         curr_version = get_latest_network_version();
     }
 
-    std::string using_version = curr_version.substr(0, 9) + "00";
+    // The cloud endpoint is series-keyed and serves the series' newest build: AA.BB.CC.00.
+    // Build it from the series so an 8-char series string (02.08.01) works too.
+    std::string using_version = use_legacy_network_plugin()
+        ? curr_version.substr(0, 9) + "00"
+        : network_plugin_series(curr_version) + ".00";
     if (name == "cameratools")
         using_version = curr_version.substr(0, 6) + "00.00";
     url += (boost::format("?slicer/%1%/cloud=%2%") % name % using_version).str();
@@ -1256,14 +1260,13 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
     // get_url
     std::string  url = get_plugin_url(name, app_config->get_country_code());
     std::string download_url;
-    std::string online_version;
     Slic3r::Http http_url = Slic3r::Http::get(url);
     BOOST_LOG_TRIVIAL(info) << "[download_plugin]: check the plugin from " << url;
     http_url.timeout_connect(TIMEOUT_CONNECT)
         .timeout_max(TIMEOUT_RESPONSE)
         .header("X-BBL-OS-Type", os_type)
         .on_complete(
-        [&download_url, &online_version](std::string body, unsigned status) {
+        [&download_url](std::string body, unsigned status) {
             try {
                 json j = json::parse(body);
                 std::string message = j["message"].get<std::string>();
@@ -1296,7 +1299,6 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
                             }
                             BOOST_LOG_TRIVIAL(info) << "[download_plugin 1]: get type " << type << ", version " << version.to_string() << ", url " << url;
                             download_url = url;
-                            online_version = version_str;
                         }
                     }
                 }
@@ -1387,25 +1389,10 @@ int GUI_App::download_plugin(std::string name, std::string package_name, Install
         });
     http.perform_sync();
 
-    // The cloud endpoint serves the newest build of the requested series, which may be
-    // newer than the configured version. Adopt the actual downloaded version so that
-    // install_plugin() names the library after what it really contains - otherwise the
-    // post-load config sync (on_init_network) points at a file name that does not exist
-    // and the plugin is "lost" on the following launch. Legacy mode is left untouched:
-    // is_legacy_version() matches exactly and drives the legacy struct layout.
-    if (result >= 0 && name == "plugins" && !online_version.empty() && !use_legacy_network_plugin()) {
-        std::string configured = app_config->get_network_plugin_version();
-        if (configured.empty())
-            configured = get_latest_network_version();
-        if (configured != online_version
-            && configured.size() >= 8 && online_version.size() >= 8
-            && configured.compare(0, 8, online_version, 0, 8) == 0) {
-            BOOST_LOG_TRIVIAL(info) << "[download_plugin] server returned " << online_version
-                                    << " for configured " << configured << ", adopting it";
-            app_config->set_network_plugin_version(online_version);
-        }
-    }
-
+    // No version adoption: the stored identity is the AA.BB.CC series, so install_plugin() names
+    // the library after the configured series regardless of which build the series-keyed endpoint
+    // served (02.08.01.53). The series config never diverges from the file name, so there is
+    // nothing to adopt.
     j["result"] = result < 0 ? "failed" : "success";
     j["error_msg"] = err_msg;
     return result;
@@ -1768,6 +1755,53 @@ bool GUI_App::wait_for_network_idle(int timeout_ms)
     BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": timeout after " << timeout_ms
                                 << "ms, server_connected=" << (m_agent ? m_agent->is_server_connected() : false);
     return false;
+}
+
+void GUI_App::migrate_network_plugin_config()
+{
+    if (!app_config)
+        return;
+
+    const std::string cfg = app_config->get_network_plugin_version();
+    if (!is_series_managed_version(cfg) || !is_supported_network_version(cfg))
+        return; // empty / legacy / custom-named / unsupported old series -> nothing to migrate here
+                // (an unsupported old config is handled by the fallback in on_init_network)
+
+    const std::string series = network_plugin_series(cfg);
+    if (cfg != series) {
+        app_config->set_network_plugin_version(series);
+        app_config->save();
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": network_plugin_version " << cfg << " -> " << series;
+    }
+
+    // Consolidate the on-disk files onto the series name. Runs at startup before the plug-in is
+    // loaded, so the rename is safe even on Windows (nothing holds the file open yet). If it is
+    // skipped or fails, resolve_library_path() still loads the specific build for this series.
+    std::string newest;
+    for (const auto& v : BBLNetworkPlugin::scan_plugin_versions())
+        if (is_series_managed_version(v) && network_plugin_series(v) == series && (newest.empty() || v > newest))
+            newest = v;
+    if (newest.empty())
+        return;
+
+    boost::system::error_code ec;
+    const boost::filesystem::path series_path(BBLNetworkPlugin::get_versioned_library_path(series));
+    if (newest != series) {
+        // Make the newest same-series build the series file. Safe here (pre-load); if the rename
+        // fails, resolve_library_path() still loads the specific build for this series.
+        boost::filesystem::remove(series_path, ec);
+        boost::filesystem::rename(BBLNetworkPlugin::get_versioned_library_path(newest), series_path, ec);
+        if (ec)
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": rename " << newest << " -> " << series
+                                       << " failed (" << ec.message() << "), loader will resolve it";
+    }
+
+    // Tidy strictly-older same-series managed builds (best-effort; never touch custom/legacy).
+    for (const auto& v : BBLNetworkPlugin::scan_plugin_versions()) {
+        if (v == series || !is_series_managed_version(v) || network_plugin_series(v) != series)
+            continue;
+        boost::filesystem::remove(BBLNetworkPlugin::get_versioned_library_path(v), ec);
+    }
 }
 
 bool GUI_App::hot_reload_network_plugin()
@@ -3590,6 +3624,9 @@ bool GUI_App::on_init_network(bool try_backup)
 
     auto should_load_networking_plugin = app_config->get_bool("installed_networking");
 
+    // Normalize an older full-version identity to the AA.BB.CC series before it drives loading.
+    migrate_network_plugin_config();
+
     std::string config_version = app_config->get_network_plugin_version();
 
     if (should_load_networking_plugin) {
@@ -3627,12 +3664,18 @@ bool GUI_App::on_init_network(bool try_backup)
 
             std::string loaded_version = Slic3r::NetworkAgent::get_version();
             if (app_config && !loaded_version.empty() && loaded_version != "00.00.00.00") {
+                // Self-heal only when a genuinely different series loaded than configured (e.g. the
+                // configured build was unavailable and a fallback loaded). Within a series the
+                // loaded build (02.08.01.53) differs from the series config (02.08.01) by design, so
+                // compare series, not the raw string, and store the managed series form - a custom
+                // config (02.08.01_custom) keeps its own name.
                 std::string config_version = app_config->get_network_plugin_version();
-                std::string config_base    = extract_base_version(config_version);
-                if (config_base != loaded_version) {
-                    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": syncing config version from " << config_version << " to loaded "
-                                            << loaded_version;
-                    app_config->set_network_plugin_version(loaded_version);
+                std::string loaded_series  = network_plugin_series(loaded_version);
+                if (network_plugin_series(config_version) != loaded_series) {
+                    std::string synced = is_series_managed_version(loaded_version) ? loaded_series : loaded_version;
+                    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": syncing config version from " << config_version
+                                            << " to loaded " << loaded_version << " (stored as " << synced << ")";
+                    app_config->set_network_plugin_version(synced);
                     app_config->save();
                 }
             }

@@ -364,7 +364,7 @@ struct NetworkLibraryVersion {
 // a dedicated shim for the legacy build. Older 02.0x series expect different layouts
 // and must not be loaded - see is_supported_network_version().
 static const NetworkLibraryVersion AVAILABLE_NETWORK_VERSIONS[] = {
-    {"02.08.01.52", "02.08.01.52", nullptr, true, nullptr},
+    {"02.08.01", "02.08.01", nullptr, true, nullptr},
     {BAMBU_NETWORK_AGENT_VERSION_LEGACY, BAMBU_NETWORK_AGENT_VERSION_LEGACY " (legacy)", nullptr, false, nullptr},
 };
 
@@ -439,6 +439,25 @@ inline std::string extract_base_version(const std::string& full_version) {
 inline std::string extract_suffix(const std::string& full_version) {
     auto pos = full_version.find('-');
     return (pos == std::string::npos) ? "" : full_version.substr(pos + 1);
+}
+
+// The AA.BB.CC series of a modern version string - the plug-in's stored identity. The 4th
+// component is only which build of the series happens to be installed and is read live from
+// the loaded plug-in for display. Legacy keeps its exact string (the shim matches exactly).
+inline std::string network_plugin_series(const std::string& version) {
+    if (version.empty() || version == BAMBU_NETWORK_AGENT_VERSION_LEGACY)
+        return version;
+    return version.size() >= 8 ? version.substr(0, 8) : version;
+}
+
+// True when the version is a pure dotted-numeric build (AA.BB.CC or AA.BB.CC.DD) whose identity
+// collapses to its series - the managed/OTA build. Legacy and any custom-named build
+// (02.08.01_custom, 02.08.01.52-dev) are NOT managed: they are genuinely distinct files kept
+// under their own name and never folded into the series entry.
+inline bool is_series_managed_version(const std::string& version) {
+    if (version.empty() || version == BAMBU_NETWORK_AGENT_VERSION_LEGACY)
+        return false;
+    return version.find_first_not_of("0123456789.") == std::string::npos;
 }
 
 // Selectable versions, newest first. Marks the entry matching the plug-in currently

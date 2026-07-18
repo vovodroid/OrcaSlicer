@@ -100,17 +100,18 @@ int BBLNetworkPlugin::initialize(bool using_backup, const std::string& version)
         }
     }
 
-    // Load versioned library
+    // Load versioned library. In the normal plugins folder a bare series (02.08.01) resolves to
+    // whatever same-series build is actually on disk (see resolve_library_path); the backup
+    // folder keeps the exact versioned name.
 #if defined(_MSC_VER) || defined(_WIN32)
-    library = plugin_folder.string() + "\\" + std::string(BAMBU_NETWORK_LIBRARY) + "_" + version + ".dll";
+    std::string versioned_name = std::string(BAMBU_NETWORK_LIBRARY) + "_" + version + ".dll";
+#elif defined(__WXMAC__)
+    std::string versioned_name = std::string("lib") + std::string(BAMBU_NETWORK_LIBRARY) + "_" + version + ".dylib";
 #else
-    #if defined(__WXMAC__)
-    std::string lib_ext = ".dylib";
-    #else
-    std::string lib_ext = ".so";
-    #endif
-    library = plugin_folder.string() + "/" + std::string("lib") + std::string(BAMBU_NETWORK_LIBRARY) + "_" + version + lib_ext;
+    std::string versioned_name = std::string("lib") + std::string(BAMBU_NETWORK_LIBRARY) + "_" + version + ".so";
 #endif
+    library = using_backup ? (plugin_folder / versioned_name).string()
+                           : resolve_library_path(version);
 
 #if defined(_MSC_VER) || defined(_WIN32)
     wchar_t lib_wstr[256];
@@ -382,12 +383,33 @@ std::string BBLNetworkPlugin::get_versioned_library_path(const std::string& vers
 #endif
 }
 
+std::string BBLNetworkPlugin::resolve_library_path(const std::string& version)
+{
+    std::string exact = get_versioned_library_path(version);
+    if (boost::filesystem::exists(exact))
+        return exact;
+
+    // A bare series (02.08.01) is physically present only as a specific build (02.08.01.53) when
+    // the startup file-rename was skipped or failed. Resolve to the newest same-series build
+    // actually on disk. Custom and legacy names are exact and never resolved.
+    if (is_series_managed_version(version)) {
+        const std::string series = network_plugin_series(version);
+        std::string best;
+        for (const auto& v : scan_plugin_versions())
+            if (is_series_managed_version(v) && network_plugin_series(v) == series && (best.empty() || v > best))
+                best = v;
+        if (!best.empty())
+            return get_versioned_library_path(best);
+    }
+
+    return exact; // nonexistent -> caller downloads
+}
+
 bool BBLNetworkPlugin::versioned_library_exists(const std::string& version)
 {
     if (version.empty()) return false;
-    std::string path = get_versioned_library_path(version);
 
-    if (boost::filesystem::exists(path)) return true;
+    if (boost::filesystem::exists(resolve_library_path(version))) return true;
 
     if (is_legacy_version(version)) {
         return legacy_library_exists();
@@ -786,43 +808,30 @@ std::vector<NetworkLibraryVersionInfo> get_all_available_versions()
 std::vector<NetworkLibraryVersionInfo> get_all_available_versions(const std::string& loaded_version)
 {
     std::vector<NetworkLibraryVersionInfo> result;
-    std::set<std::string> known_base_versions;
     std::set<std::string> all_known_versions;
 
     for (size_t i = 0; i < AVAILABLE_NETWORK_VERSIONS_COUNT; ++i) {
         result.push_back(NetworkLibraryVersionInfo::from_static(AVAILABLE_NETWORK_VERSIONS[i]));
-        known_base_versions.insert(AVAILABLE_NETWORK_VERSIONS[i].version);
         all_known_versions.insert(AVAILABLE_NETWORK_VERSIONS[i].version);
     }
 
     std::vector<std::string> discovered = BBLNetworkPlugin::scan_plugin_versions();
 
-    // Surface discovered builds that are not whitelisted outright:
-    //  - suffixed dev builds (02.08.01.52-custom) attach to the exact whitelisted base
-    //    version they were built from, so they render nested under it;
-    //  - unsuffixed builds (typically installed by the OTA plug-in update) are accepted
-    //    when is_supported_network_version() recognises their release series - the plugin
-    //    ABI is stable within an AA.BB.CC series and the OTA sync only ever accepts
-    //    same-series updates, so they load with the whitelisted struct layout. That gate
-    //    never matches the legacy entry, which would otherwise be loaded with the modern
-    //    layout and break.
-    // Only the static whitelist anchors a dev build, never another discovered one, so
-    // known_base_versions must stay separate from all_known_versions here.
+    // A managed build (pure dotted-numeric AA.BB.CC[.DD]) is represented by its series entry
+    // above - the OTA-installed 02.08.01.53 and a bare 02.08.01 both collapse into the single
+    // 02.08.01 row. Only a custom-named build a user dropped in (02.08.01_custom, ..-dev) earns
+    // its own row, and only when its series is one this build can actually load. The part past
+    // the series is stored as the "suffix" so the entry sorts and renders nested under it.
     for (const auto& version : discovered) {
         if (all_known_versions.count(version) > 0)
             continue;
-
-        const std::string suffix = extract_suffix(version);
-        if (suffix.empty()) {
-            if (!is_supported_network_version(version))
-                continue;
-            result.push_back(NetworkLibraryVersionInfo::from_discovered(version, version, ""));
-        } else {
-            const std::string base = extract_base_version(version);
-            if (known_base_versions.count(base) == 0)
-                continue;
-            result.push_back(NetworkLibraryVersionInfo::from_discovered(version, base, suffix));
-        }
+        if (is_series_managed_version(version))
+            continue;
+        if (!is_supported_network_version(version))
+            continue;
+        const std::string series = network_plugin_series(version);
+        const std::string sfx    = version.size() > series.size() ? version.substr(series.size()) : version;
+        result.push_back(NetworkLibraryVersionInfo::from_discovered(version, series, sfx));
         all_known_versions.insert(version);
     }
 
@@ -835,8 +844,15 @@ std::vector<NetworkLibraryVersionInfo> get_all_available_versions(const std::str
                   return a.suffix < b.suffix;
               });
 
+    const std::string loaded_series = network_plugin_series(loaded_version);
     for (auto& info : result) {
-        info.is_loaded = !loaded_version.empty() && info.version == loaded_version;
+        // A managed (series) entry matches when a managed build of the same series is loaded -
+        // the loaded plug-in reports its full build (02.08.01.53) but the row is the series.
+        // Custom and legacy entries match their exact reported version.
+        info.is_loaded = !loaded_version.empty() &&
+            (info.version == loaded_version ||
+             (is_series_managed_version(info.version) && is_series_managed_version(loaded_version) &&
+              network_plugin_series(info.version) == loaded_series));
         info.is_latest = false;
     }
 

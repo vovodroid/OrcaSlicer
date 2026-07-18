@@ -260,6 +260,9 @@ public:
 
     static std::string get_libpath_in_current_directory(const std::string& library_name);
     static std::string get_versioned_library_path(const std::string& version);
+    // Path to load for a stored version: the exact file if present, else - for a bare series
+    // whose file the startup rename did not produce - the newest same-series build on disk.
+    static std::string resolve_library_path(const std::string& version);
     static bool versioned_library_exists(const std::string& version);
     static bool legacy_library_exists();
     static void remove_legacy_library();
