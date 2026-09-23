@@ -1,0 +1,88 @@
+name: Daily OFL OTA Update
+
+# This workflow is intended for creating and publishing the OrcaFilamentLibrary (OFL) OPC package to
+# https://github.com/OrcaSlicer/orcaslicer-profiles, which generates an OTA update.
+# This cronjob runs daily at 00:00 UTC every day and scans main plus every release/vX.Y.Z branch for
+# changes to resources/profiles/OrcaFilamentLibrary since that branch's own last successful run. Any
+# branch with no changes is skipped; each changed branch gets its own post_merge_profiles.yml dispatch.
+#
+# OFL has no dedicated FOLDER_MERGERS grant (it isn't merged through the PR merge-bot delegation
+# scheme), so post_merge_profiles.yml is dispatched with an explicit `vendor` input, which that
+# workflow trusts and uses to bypass the FOLDER_MERGERS check for this trigger. That same explicit-
+# vendor-dispatch path is also what makes post_merge_profiles.yml call the OTA auto-publish API after
+# uploading - see post_merge_profiles.yml for both sides of that contract.
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  actions: write # list this workflow's past runs and dispatch post_merge_profiles.yml
+  contents: read
+
+env:
+  VENDOR: OrcaFilamentLibrary
+
+jobs:
+  daily-job:
+    if: ${{ github.repository == 'OrcaSlicer/OrcaSlicer' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # Full history: the per-branch "since last successful run" check below
+          # needs to look arbitrarily far back if a prior run failed or was skipped.
+          fetch-depth: 0
+
+      - name: Fetch all branches
+        shell: bash
+        run: git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: Scan branches and publish changed OFL profiles
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t branches < <(
+            gh api "repos/${{ github.repository }}/branches" --paginate --jq '.[].name' \
+              | grep -E '^(main|release/v[0-9]+\.[0-9]+\.[0-9]+)$' | sort -u
+          )
+
+          for branch in "${branches[@]}"; do
+            echo "::group::$branch"
+
+            since="$(gh api "repos/${{ github.repository }}/actions/workflows/ofl-ota-cronjob.yml/runs" \
+              -f status=success -f branch="$branch" -f per_page=1 \
+              --jq '.workflow_runs[0].run_started_at // empty')"
+
+            if [ -z "$since" ]; then
+              echo "No prior successful run for $branch; treating OFL as changed."
+              changed=true
+            else
+              changed_files="$(git log --since="$since" --name-only --pretty=format: "origin/$branch" -- \
+                resources/profiles/OrcaFilamentLibrary resources/profiles/OrcaFilamentLibrary.json \
+                | sed '/^$/d')"
+              if [ -n "$changed_files" ]; then
+                echo "OFL changed on $branch since $since:"
+                echo "$changed_files"
+                changed=true
+              else
+                echo "No OFL changes on $branch since $since."
+                changed=false
+              fi
+            fi
+
+            if [ "$changed" = true ]; then
+              gh workflow run post_merge_profiles.yml \
+                --repo "${{ github.repository }}" \
+                --ref "$branch" \
+                -f vendor="$VENDOR"
+            fi
+
+            echo "::endgroup::"
+          done

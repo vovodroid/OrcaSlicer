@@ -8,6 +8,12 @@ name: Post-merge profiles
 # only then does it become a live OTA update - this workflow does none of that
 # last part (no changelog, no R2, no webhook).
 #
+# A workflow_dispatch carrying a `vendor` input (e.g. the daily OFL cron - OFL has
+# no FOLDER_MERGERS grant, since it isn't merged through the PR merge-bot delegation
+# scheme) publishes that vendor directly and skips the FOLDER_MERGERS check below.
+# workflow_dispatch is already a trusted, explicit trigger, unlike the automatic
+# push-diff path the FOLDER_MERGERS check exists to gate.
+#
 # Asset contract expected by OrcaCloud's release scanner:
 #   ^(\d+\.\d+\.\d+)_([^_]+)_(\d+(?:\.\d+){3})_(\d{12})\.zip$
 #     <orca_ver>_<vendor>_<profile_version>_<UTC yyyymmddHHMM>.zip   (zip root: <vendor>.opc)
@@ -17,13 +23,25 @@ name: Post-merge profiles
 on:
   push:
     branches:
+    # once v2.5.0 stable is released, this will be removed, so nightly won't receive OTA updates.
     - main
-    - release/*
+    # release/vX.Y.Z point-release branches only, not the release/vX.Y working
+    # branch profile PRs land on first - "v*.*.*" requires two literal dots,
+    # which release/vX.Y (one dot) doesn't have.
+    - release/v*.*.*
     paths:
     - 'resources/profiles/**'
     - '.github/workflows/post_merge_profiles.yml'
 
   workflow_dispatch:
+    inputs:
+      vendor:
+        description: >-
+          Publish only this vendor, bypassing the FOLDER_MERGERS grant check.
+          For trusted explicit dispatches only (e.g. the OFL nightly cron).
+          Leave empty to fall back to diffing the triggering commit.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -66,8 +84,23 @@ jobs:
         shell: bash
         env:
           FOLDER_MERGERS: ${{ vars.FOLDER_MERGERS }}
+          DISPATCH_VENDOR: ${{ github.event_name == 'workflow_dispatch' && inputs.vendor || '' }}
         run: |
           set -euo pipefail
+
+          # Explicit vendor dispatch (e.g. the OFL cron): trust the caller and
+          # skip both the git-diff detection and the FOLDER_MERGERS check below.
+          if [ -n "$DISPATCH_VENDOR" ]; then
+            v="$DISPATCH_VENDOR"
+            json="resources/profiles/$v.json"
+            if [ ! -f "$json" ] || { [ ! -d "resources/profiles/$v" ] && ! jq -e '.version' "$json" >/dev/null 2>&1; }; then
+              echo "::error::vendor '$v' has no resources/profiles/$v.json with a profile directory or version field"
+              exit 1
+            fi
+            echo "vendors=$v" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           base='${{ github.event.before }}'
           head='${{ github.sha }}'
           # Zero SHA (branch created / force push) or manual dispatch: fall back
@@ -101,6 +134,9 @@ jobs:
           # sibling bundle JSON are covered by at least one FOLDER_MERGERS
           # grant. The account part is intentionally ignored here: this is a
           # post-merge safety check, not an authorization check for a command.
+          # An ineligible vendor (e.g. OrcaFilamentLibrary, which has no grant)
+          # is dropped on its own - it never blocks other vendors in the same
+          # push from publishing.
           grants=()
           while IFS= read -r raw_line; do
             line="${raw_line#"${raw_line%%[![:space:]]*}"}"
@@ -127,19 +163,21 @@ jobs:
             return 1
           }
 
+          authorized=()
           unauthorized=()
           for v in "${vendors[@]}"; do
-            if ! is_granted "resources/profiles/$v" || ! is_granted "resources/profiles/$v.json"; then
+            if is_granted "resources/profiles/$v" && is_granted "resources/profiles/$v.json"; then
+              authorized+=("$v")
+            else
               unauthorized+=("$v")
             fi
           done
 
           if [ "${#unauthorized[@]}" -ne 0 ]; then
-            echo "vendors=" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::warning::skipping vendor(s) with no FOLDER_MERGERS grant (no asset built or published for them this run): ${unauthorized[*]}"
           fi
 
-          echo "vendors=${vendors[*]}" >> "$GITHUB_OUTPUT"
+          echo "vendors=${authorized[*]}" >> "$GITHUB_OUTPUT"
 
       - name: Resolve Orca version
         id: orca
@@ -242,3 +280,46 @@ jobs:
             echo "### Published to \`$repo\` release \`$RELEASE_TAG\`"
             for f in "$ASSET_DIR"/*.zip; do echo "- \`$(basename "$f")\`"; done
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify OTA auto-publish
+        # Only the explicit-vendor-dispatch path (e.g. the OFL cron) goes live
+        # automatically. The ordinary push path stays human-gated: assets land on
+        # the profiles release above, and a maintainer still has to attach a
+        # changelog and hit Publish in OrcaCloud's OTA Manager for those.
+        if: steps.vendors.outputs.vendors != '' && github.event_name == 'workflow_dispatch' && inputs.vendor != ''
+        shell: bash
+        env:
+          OTA_API_BASE_URL: ${{ vars.OTA_API_BASE_URL }}
+          OTA_API_KEY: ${{ secrets.OFL_OTA_PUBLISH_KEY }}
+          ASSET_DIR: ${{ steps.pkg.outputs.dir }}
+        run: |
+          set -euo pipefail
+          [ -n "$OTA_API_BASE_URL" ] || { echo "::error::vars.OTA_API_BASE_URL is not set"; exit 1; }
+          [ -n "$OTA_API_KEY" ] || { echo "::error::secrets.OFL_OTA_PUBLISH_KEY is not set"; exit 1; }
+
+          mapfile -t zip_files < <(cd "$ASSET_DIR" && ls -1 *.zip)
+          filenames_json="$(printf '%s\n' "${zip_files[@]}" | jq -R . | jq -s .)"
+          payload="$(jq -n --argjson filenames "$filenames_json" '{filenames: $filenames}')"
+
+          resp_file="$RUNNER_TEMP/ota-auto-publish-response.json"
+          status="$(curl -sS -o "$resp_file" -w '%{http_code}' -X POST \
+            "${OTA_API_BASE_URL%/}/api/v1/ota/auto-publish" \
+            -H "Authorization: Bearer $OTA_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -d "$payload")"
+          body="$(cat "$resp_file")"
+          echo "$body"
+
+          if [ "$status" != "200" ]; then
+            echo "::error::OTA auto-publish call failed with HTTP $status"
+            exit 1
+          fi
+
+          # A 200 can still carry per-file "error" results (e.g. NOT_FOUND); the
+          # asset is already safely published to the profiles release above, but
+          # it never went live, so treat that as a failure worth surfacing loudly.
+          error_count="$(jq '[.results[] | select(.status == "error")] | length' <<< "$body")"
+          if [ "$error_count" != "0" ]; then
+            jq -r '.results[] | select(.status == "error") | "::error::\(.filename): \(.code) - \(.message)"' <<< "$body"
+            exit 1
+          fi
