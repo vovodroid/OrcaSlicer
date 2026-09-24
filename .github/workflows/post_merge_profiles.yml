@@ -14,6 +14,13 @@ name: Post-merge profiles
 # workflow_dispatch is already a trusted, explicit trigger, unlike the automatic
 # push-diff path the FOLDER_MERGERS check exists to gate.
 #
+# Separately, an ordinary push whose diff touches an OrcaFilamentLibrary company
+# folder (resources/profiles/OrcaFilamentLibrary/filament/<Company>/**) records
+# that PR as pending via POST /api/v1/ota/ofl/pending, regardless of whether
+# OrcaFilamentLibrary as a whole is authorized to publish in this same run - a
+# partner's OTA Manager dashboard should see a merged PR immediately, well
+# before the daily cron actually builds and publishes it.
+#
 # Asset contract expected by OrcaCloud's release scanner:
 #   ^(\d+\.\d+\.\d+)_([^_]+)_(\d+(?:\.\d+){3})_(\d{12})\.zip$
 #     <orca_ver>_<vendor>_<profile_version>_<UTC yyyymmddHHMM>.zip   (zip root: <vendor>.opc)
@@ -133,6 +140,10 @@ jobs:
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
             base="$head^"
           fi
+          # Exposed so the OFL-pending step below can reuse this exact diff
+          # range instead of re-deriving it (and drifting from this logic).
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
           mapfile -t candidates < <(
             git diff --name-only "$base" "$head" -- resources/profiles \
               | sed -nE 's#^resources/profiles/([^/]+)/.*#\1#p; s#^resources/profiles/([^/]+)\.json$#\1#p' \
@@ -203,7 +214,11 @@ jobs:
 
       - name: Resolve Orca version
         id: orca
-        if: steps.vendors.outputs.vendors != ''
+        # Unconditional: needed both by the vendor-publish pipeline below (only
+        # when vendors is non-empty) and by the OFL-pending step at the end
+        # (which runs whenever OFL itself changed, even if vendors ends up
+        # empty because OFL has no FOLDER_MERGERS grant). Cheap and harmless
+        # to always resolve - version.inc is present on every commit.
         shell: bash
         run: |
           set -euo pipefail
@@ -348,3 +363,77 @@ jobs:
             jq -r '.results[] | select(.status == "error") | "::error::\(.filename): \(.code) - \(.message)"' <<< "$body"
             exit 1
           fi
+
+      - name: Record OFL pending changes
+        # Only on a real push (a PR merge), never on the cron's explicit-vendor
+        # dispatch - that's automation publishing, not a new merge to report.
+        # Placed last in the job on purpose: a failure here must never block
+        # the vendor-publish pipeline above, which a step failing earlier in
+        # the job would do (subsequent steps without always() get skipped).
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OTA_API_BASE_URL: ${{ vars.OTA_API_BASE_URL }}
+          OTA_API_KEY: ${{ secrets.OFL_OTA_PUBLISH_KEY }}
+        run: |
+          set -euo pipefail
+          base='${{ steps.vendors.outputs.base }}'
+          head='${{ steps.vendors.outputs.head }}'
+          orca_ver='${{ steps.orca.outputs.orca_ver }}'
+
+          # Only real vendor subdirectories under filament/, e.g.
+          # .../filament/Qidi/x.json -> "Qidi". This naturally excludes loose
+          # top-level files (.../filament/Generic PLA @System.json - no further
+          # slash to match) and is further filtered below to drop "base", the
+          # shared @base/@System inheritance folder, not a partner company.
+          mapfile -t ofl_companies < <(
+            git diff --name-only "$base" "$head" -- resources/profiles/OrcaFilamentLibrary/filament \
+              | sed -nE 's#^resources/profiles/OrcaFilamentLibrary/filament/([^/]+)/.*#\1#p' \
+              | grep -vx 'base' \
+              | sort -u
+          )
+
+          if [ "${#ofl_companies[@]}" -eq 0 ]; then
+            echo "No OFL company folders changed in this push."
+            exit 0
+          fi
+
+          [ -n "$OTA_API_BASE_URL" ] || { echo "::error::vars.OTA_API_BASE_URL is not set"; exit 1; }
+          [ -n "$OTA_API_KEY" ] || { echo "::error::secrets.OFL_OTA_PUBLISH_KEY is not set"; exit 1; }
+
+          # The head commit's own merged PR, not a per-commit walk: this
+          # assumes the ordinary one-PR-per-push shape every other merge path
+          # in this repo already assumes (pr-merge-bot.yml's re-dispatch logic
+          # does the same). A merge commit's parents don't matter here - this
+          # API call works the same regardless of merge strategy.
+          pr_json="$(gh api "repos/${{ github.repository }}/commits/$head/pulls" \
+            --jq '[.[] | select(.merged_at != null)] | sort_by(.merged_at) | last // empty')"
+
+          if [ -z "$pr_json" ]; then
+            echo "::warning::push $head touches OFL compan(y/ies) (${ofl_companies[*]}) but has no associated merged PR; skipping pending record(s)"
+            exit 0
+          fi
+          pr_number="$(jq -r '.number' <<< "$pr_json")"
+          pr_url="$(jq -r '.html_url' <<< "$pr_json")"
+          pr_title="$(jq -r '.title' <<< "$pr_json")"
+
+          for company in "${ofl_companies[@]}"; do
+            payload="$(jq -n --arg vendor "$company" --arg ver "$orca_ver" --argjson pr "$pr_number" \
+              --arg url "$pr_url" --arg title "$pr_title" \
+              '{vendor: $vendor, orcaSlicerVersion: $ver, prNumber: $pr, prUrl: $url, prTitle: $title}')"
+
+            resp_file="$RUNNER_TEMP/ofl-pending-$company.json"
+            status="$(curl -sS -o "$resp_file" -w '%{http_code}' -X POST \
+              "${OTA_API_BASE_URL%/}/api/v1/ota/ofl/pending" \
+              -H "Authorization: Bearer $OTA_API_KEY" \
+              -H 'Content-Type: application/json' \
+              -d "$payload")"
+            body="$(cat "$resp_file")"
+            echo "$body"
+
+            if [ "$status" != "200" ]; then
+              echo "::error::OFL pending record failed for vendor=$company (PR #$pr_number): HTTP $status"
+              exit 1
+            fi
+          done
