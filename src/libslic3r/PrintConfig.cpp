@@ -9127,6 +9127,8 @@ void PrintConfigDef::handle_legacy(t_config_option_key &opt_key, std::string &va
         value = "tree(auto)";
     } else if (opt_key == "support_base_pattern" && value == "none") {
         value = "hollow";
+    } else if (opt_key == "tree_support_wall_count" && value == "-1") {
+        value = "0";
     } else if (opt_key == "different_settings_to_system") {
         std::string copy_value = value;
         copy_value.erase(std::remove(copy_value.begin(), copy_value.end(), '\"'), copy_value.end()); // remove '"' in string
