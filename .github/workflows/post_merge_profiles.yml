@@ -62,6 +62,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read  # commits/{sha}/pulls lookup in the OFL-pending step
 
 # One run per branch; let a run finish rather than cancel it, since it publishes.
 concurrency:
@@ -365,12 +366,21 @@ jobs:
           fi
 
       - name: Record OFL pending changes
-        # Only on a real push (a PR merge), never on the cron's explicit-vendor
-        # dispatch - that's automation publishing, not a new merge to report.
+        # A real merge, never the cron's explicit-vendor dispatch (that's
+        # automation publishing, not a new merge to report). This covers two
+        # trigger shapes: an ordinary push, and a vendor-less workflow_dispatch
+        # - the latter is exactly what pr-merge-bot.yml's re-dispatch after a
+        # successful /bot merge looks like (a GITHUB_TOKEN-authored merge fires
+        # no push event at all, which is why that re-dispatch exists). Both
+        # land in the same diff-fallback path in "Resolve changed vendors", so
+        # base/head/orca_ver are already correctly populated either way - only
+        # this condition needs widening.
         # Placed last in the job on purpose: a failure here must never block
         # the vendor-publish pipeline above, which a step failing earlier in
         # the job would do (subsequent steps without always() get skipped).
-        if: github.event_name == 'push'
+        if: >-
+          github.event_name == 'push' ||
+          (github.event_name == 'workflow_dispatch' && !inputs.vendor)
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
