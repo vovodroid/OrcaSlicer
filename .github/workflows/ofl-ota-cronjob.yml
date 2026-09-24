@@ -56,7 +56,15 @@ jobs:
           for branch in "${branches[@]}"; do
             echo "::group::$branch"
 
-            since="$(gh api "repos/${{ github.repository }}/actions/workflows/ofl-ota-cronjob.yml/runs" \
+            # post_merge_profiles.yml's own run history, not this workflow's: this
+            # workflow only ever runs against main (schedule, or workflow_dispatch
+            # --ref main), so its head branch never varies - filtering ITS history
+            # by $branch would never match anything except main. post_merge_profiles.yml
+            # genuinely runs per-branch (this dispatch below sets --ref "$branch"),
+            # so its history is the real per-branch checkpoint. It also means a
+            # failed publish naturally gets retried tomorrow: the checkpoint only
+            # advances on a run that actually succeeded.
+            since="$(gh api "repos/${{ github.repository }}/actions/workflows/post_merge_profiles.yml/runs" \
               -f status=success -f branch="$branch" -f per_page=1 \
               --jq '.workflow_runs[0].run_started_at // empty')"
 
@@ -78,10 +86,15 @@ jobs:
             fi
 
             if [ "$changed" = true ]; then
-              gh workflow run post_merge_profiles.yml \
+              # Tolerate a per-branch failure (e.g. a pre-existing release branch
+              # whose post_merge_profiles.yml predates the vendor/auto_publish
+              # inputs) rather than aborting the whole scan under set -e.
+              if ! gh workflow run post_merge_profiles.yml \
                 --repo "${{ github.repository }}" \
                 --ref "$branch" \
-                -f vendor="$VENDOR"
+                -f vendor="$VENDOR" -f auto_publish=true; then
+                echo "::warning::failed to dispatch post_merge_profiles.yml for $branch - its post_merge_profiles.yml at this ref may predate the vendor/auto_publish inputs"
+              fi
             fi
 
             echo "::endgroup::"

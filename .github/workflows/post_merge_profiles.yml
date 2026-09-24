@@ -42,6 +42,16 @@ on:
           Leave empty to fall back to diffing the triggering commit.
         required: false
         type: string
+      auto_publish:
+        description: >-
+          After publishing, also call the OTA auto-publish API to go live
+          immediately, skipping the human changelog/Publish step. Separate
+          from `vendor` on purpose: a maintainer can dispatch with just
+          `vendor` set to rebuild/republish an asset without it going live.
+          Only the OFL nightly cron should set this to true.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -88,12 +98,27 @@ jobs:
         run: |
           set -euo pipefail
 
+          # A vendor has a manifest plus either a preset directory or a version
+          # field; this drops non-vendor files such as blacklist.json. Shared by
+          # both the explicit-dispatch path below and the push-diff path further
+          # down, so the definition of "valid vendor" can't drift between them.
+          is_valid_vendor() {
+            local v="$1"
+            local json="resources/profiles/$v.json"
+            [ -f "$json" ] && { [ -d "resources/profiles/$v" ] || jq -e '.version' "$json" >/dev/null 2>&1; }
+          }
+
           # Explicit vendor dispatch (e.g. the OFL cron): trust the caller and
           # skip both the git-diff detection and the FOLDER_MERGERS check below.
           if [ -n "$DISPATCH_VENDOR" ]; then
             v="$DISPATCH_VENDOR"
-            json="resources/profiles/$v.json"
-            if [ ! -f "$json" ] || { [ ! -d "resources/profiles/$v" ] && ! jq -e '.version' "$json" >/dev/null 2>&1; }; then
+            # Becomes part of the release asset filename and the OTA API's
+            # payload; keep it to the same charset every real vendor name uses.
+            if ! [[ "$v" =~ ^[A-Za-z0-9]+$ ]]; then
+              echo "::error::vendor '$v' must be alphanumeric"
+              exit 1
+            fi
+            if ! is_valid_vendor "$v"; then
               echo "::error::vendor '$v' has no resources/profiles/$v.json with a profile directory or version field"
               exit 1
             fi
@@ -117,10 +142,7 @@ jobs:
           vendors=()
           for v in "${candidates[@]:-}"; do
             [ -n "$v" ] || continue
-            json="resources/profiles/$v.json"
-            # A vendor has a manifest plus either a preset directory or a version
-            # field; this drops non-vendor files such as blacklist.json.
-            if [ -f "$json" ] && { [ -d "resources/profiles/$v" ] || jq -e '.version' "$json" >/dev/null 2>&1; }; then
+            if is_valid_vendor "$v"; then
               vendors+=("$v")
             fi
           done
@@ -282,11 +304,14 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Notify OTA auto-publish
-        # Only the explicit-vendor-dispatch path (e.g. the OFL cron) goes live
-        # automatically. The ordinary push path stays human-gated: assets land on
-        # the profiles release above, and a maintainer still has to attach a
-        # changelog and hit Publish in OrcaCloud's OTA Manager for those.
-        if: steps.vendors.outputs.vendors != '' && github.event_name == 'workflow_dispatch' && inputs.vendor != ''
+        # Gated on auto_publish specifically, not just "vendor was dispatched":
+        # a maintainer manually dispatching with vendor=OrcaFilamentLibrary (e.g.
+        # to rebuild/republish an asset while debugging) must not silently go
+        # live. Only a caller that explicitly opts in with auto_publish=true
+        # (the OFL nightly cron) skips the human changelog/Publish step.
+        if: >-
+          steps.vendors.outputs.vendors != '' && github.event_name == 'workflow_dispatch'
+          && (inputs.auto_publish == true || inputs.auto_publish == 'true')
         shell: bash
         env:
           OTA_API_BASE_URL: ${{ vars.OTA_API_BASE_URL }}
