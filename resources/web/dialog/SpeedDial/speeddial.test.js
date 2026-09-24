@@ -436,4 +436,9 @@ assert.equal(ctx.stateFromPayload({}).tooltipExpanded, true, "expansion defaults
 assert.equal(ctx.stateFromPayload({ tooltip_expanded: false }).tooltipExpanded, false, "a collapsed payload is honored");
 assert.equal(ctx.stateFromPayload({ tooltip_expanded: true }).tooltipExpanded, true, "an expanded payload is honored");
 
+// resultCountText: a search counts the shown matches only ("Showing N actions"); the total is used
+// solely for the empty-query count.
+assert.equal(ctx.resultCountText(100, 3, "lay"), "Showing 3 actions", "a search reports the shown match count only");
+assert.equal(ctx.resultCountText(100, 100, ""), "100 actions", "an empty query reports the total");
+
 console.log("ok");

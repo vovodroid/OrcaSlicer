@@ -390,7 +390,7 @@ function favDigitFromEvent(e) {
 
 function resultCountText(total, shown, query) {
     return (query || "").trim() ?
-        T("sd_result_count", "Showing %s of %s actions", shown, total) :
+        T("sd_result_count", "Showing %s actions", shown) :
         T("sd_result_count_all", "%s actions", total);
 }
 
@@ -711,7 +711,7 @@ window.HandleStudio = function (payload) {
         builtKey = "";
         if (qEl) {
             qEl.value = "";
-            qEl.placeholder = T("sd_search_n", "Search %s actions", ACTIONS.length);
+            qEl.placeholder = T("sd_search", "Search actions");
             syncClearButton();
         }
         render({ resize: true, resetScroll: true });
@@ -1376,7 +1376,7 @@ function exitPhase() {
     // It survives a second-phase exit (which never goes through exitPhase from the commands view),
     // so without a reset the cached empty-query key would skip the rebuild and leave stale content.
     builtKey = "";
-    qEl.placeholder = T("sd_search_n", "Search %s actions", ACTIONS.length);
+    qEl.placeholder = T("sd_search", "Search actions");
     render({ resize: true, resetScroll: true });
     qEl.focus();
 }
