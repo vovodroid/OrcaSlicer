@@ -6483,7 +6483,7 @@ std::string GCode::generate_timelapse_gcode(const Print &print, coordf_t print_z
                                             const std::vector<const PrintObject*> *printed_objects,
                                             bool skip_pos_pick)
 {
-    if (!m_writer.filament())
+    //if (!m_writer.filament())
         return {};
 
     std::string timelapse_gcode;
