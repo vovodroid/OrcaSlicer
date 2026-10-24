@@ -4875,10 +4875,16 @@ void TabFilament::build()
         };
 
         optgroup = page->new_optgroup(L("Print temperature"), L"param_extruder_temp");
-        line = { L("Nozzle"), L("Nozzle temperature when printing") };
+        line            = {L("Nozzle"), L("Nozzle temperature when printing")};
         line.label_path = "material_temperatures#nozzle";
         line.append_option(optgroup->get_option("nozzle_temperature_initial_layer", 0));
         line.append_option(optgroup->get_option("nozzle_temperature", 0));
+        optgroup->append_line(line);
+
+        line = {L("Slow printing"), L("Nozzle temperature when slow printing")};
+        line.label_path = "material_temperatures#nozzle";
+        line.append_option(optgroup->get_option("nozzle_temperature_flow", 0));
+        line.append_option(optgroup->get_option("nozzle_temperature_slow", 0));
         optgroup->append_line(line);
 
         optgroup = page->new_optgroup(L("Bed temperature"), L"param_bed_temp");
