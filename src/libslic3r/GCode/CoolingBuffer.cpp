@@ -354,6 +354,28 @@ std::string CoolingBuffer::process_layer(std::string &&gcode, size_t layer_id, b
         float layer_time_stretched = this->calculate_layer_slowdown(per_extruder_adjustments);
         out = this->apply_layer_cooldown(m_gcode, layer_id, layer_time_stretched, per_extruder_adjustments);
         m_gcode.clear();
+
+        int slow_temp = m_config.nozzle_temperature_slow.get_at(m_current_nozzle);
+        if (layer_id > 0 && slow_temp) {
+            double sum  = 0.0;
+            size_t lpos = 0;
+            while ((lpos = out.find(" E", lpos)) != std::string::npos) {
+                sum += strtod(out.substr(lpos + 2).c_str(), nullptr);
+                lpos += 12; // G1 X0.0 Y0.0
+            }
+
+            double flow = sum * 2.4 / layer_time_stretched;
+
+            int nozzle_temp = m_config.nozzle_temperature.get_at(m_current_nozzle);
+            int slow_flow   = m_config.nozzle_temperature_flow.get_at(m_current_nozzle);
+            int max_flow    = m_config.filament_max_volumetric_speed.get_at(m_current_nozzle);
+
+            float t = std::clamp((flow - slow_flow) / (max_flow - slow_flow), 0.0, 1.0);
+            t = std::round(t/0.2)*0.2;
+            const int temperature = slow_temp + t * (nozzle_temp - slow_temp);
+
+            out.insert(0, "M104 S" + std::to_string(temperature) + "\r\n");
+        }
     }
     return out;
 }
