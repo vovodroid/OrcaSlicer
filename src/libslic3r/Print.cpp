@@ -536,6 +536,8 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
             || opt_key == "gcode_flavor"
             || opt_key == "single_extruder_multi_material"
             || opt_key == "nozzle_temperature"
+            || opt_key == "nozzle_temperature_flow"
+            || opt_key == "nozzle_temperature_slow"
             // BBS
             || opt_key == "supertack_plate_temp"
             || opt_key == "cool_plate_temp"
