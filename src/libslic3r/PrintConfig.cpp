@@ -8133,6 +8133,24 @@ void PrintConfigDef::init_fff_params()
     def->max = max_temp;
     def->set_default_value(new ConfigOptionInts { 200 });
 
+    def             = this->add("nozzle_temperature_flow", coInts);
+    def->label      = L("Flow");
+    def->tooltip    = L("Slow flow layers");
+    def->sidetext   = L(u8"mm³/s");
+    def->full_label = L("Nozzle slow flow");
+    def->min        = 0;
+    def->max        = 20;
+    def->set_default_value(new ConfigOptionInts{0});
+
+    def             = this->add("nozzle_temperature_slow", coInts);
+    def->label      = L("Slow layer");
+    def->tooltip    = L("Nozzle temperature for slow printing after the first layer");
+    def->sidetext   = L(u8"\u2103" /* °C */); // degrees Celsius, CIS languages need translation
+    def->full_label = L("Nozzle slow temperature");
+    def->min        = 0;
+    def->max        = max_temp;
+    def->set_default_value(new ConfigOptionInts{0});
+
     def = this->add("nozzle_temperature_range_low", coInts);
     def->label = L("Min");
     //def->tooltip = L("");
@@ -10281,6 +10299,8 @@ std::set<std::string> filament_options_with_variant = {
     "retraction_distances_when_ec",
     "nozzle_temperature_initial_layer",
     "nozzle_temperature",
+    "nozzle_temperature_flow",
+    "nozzle_temperature_slow",
     "filament_flush_volumetric_speed",
     "filament_flush_temp",
     "filament_cooling_before_tower",

@@ -17704,6 +17704,8 @@ void Plater::_calib_temp_belt_sectioned(const Calib_Params& params, double belt_
     printer_config->set_key_value("resonance_avoidance", new ConfigOptionBool{false});
     filament_config->set_key_value("nozzle_temperature_initial_layer", new ConfigOptionInts(1, (int)start_temp));
     filament_config->set_key_value("nozzle_temperature", new ConfigOptionInts(1, (int)start_temp));
+    filament_config->set_key_value("nozzle_temperature", new ConfigOptionInts(1, (int) start_temp));
+    filament_config->set_key_value("nozzle_temperature", new ConfigOptionInts(1, (int) start_temp));
     print_config->set_key_value("enable_wrapping_detection", new ConfigOptionBool(false));
     print_config->set_key_value("initial_layer_print_height", new ConfigOptionFloat(nozzle_diameter / 2));
     print_config->set_key_value("skirt_loops", new ConfigOptionInt(0));
