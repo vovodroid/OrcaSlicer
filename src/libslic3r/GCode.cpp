@@ -94,6 +94,7 @@
 #include <regex>
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/find.hpp>
+#include <boost/algorithm/string/join.hpp>
 #include <boost/foreach.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/log/trivial.hpp>
@@ -3713,6 +3714,20 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     this->placeholder_parser().set("first_filaments", new ConfigOptionInts(first_filaments));
     this->placeholder_parser().set("initial_tool", initial_extruder_id);
     this->placeholder_parser().set("initial_extruder", initial_extruder_id);
+    // Orca: filament types really extruded on this plate, deduplicated, in filament id order.
+    // Joined with '_': safe in URLs and on print hosts, and unlike '-' it does not clash with
+    // types that already contain a hyphen (PLA-CF, TPU-95A).
+    std::string printing_filament_types;
+    {
+        std::vector<std::string> types;
+        for (const Extruder &extruder : m_writer.extruders()) {
+            std::string type = m_config.filament_type.get_at(extruder.id());
+            if (std::find(types.begin(), types.end(), type) == types.end())
+                types.emplace_back(std::move(type));
+        }
+        printing_filament_types = boost::algorithm::join(types, "_");
+    }
+    this->placeholder_parser().set("printing_filament_types", printing_filament_types);
     //BBS
     match_physical_extruder_for_each_filament(first_non_support_filaments, m_config);
 
@@ -4914,6 +4929,8 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
         print.tool_ordering()));
     print.m_print_statistics.initial_tool = initial_extruder_id;
     print.m_print_statistics.initial_no_support_tool = initial_non_support_extruder_id;
+    // Set again here: update_print_stats_and_format_filament_stats() above cleared the statistics.
+    print.m_print_statistics.printing_filament_types = printing_filament_types;
     if (!is_bbl_printers) {
         file.write_format("; total filament used [g] = %.2lf\n",
             print.m_print_statistics.total_weight);
