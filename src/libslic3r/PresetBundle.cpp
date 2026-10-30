@@ -4775,23 +4775,14 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
         }
     }
 
-    // A user filament preset derived from the preset the AMS reports for a slot describes the same
-    // filament with user overrides. Keep its name (and thus its settings) so the sync updates the
-    // tray metadata only, instead of replacing it with the preset it inherits from.
+    // A slot whose current preset is a compatible user preset for the filament the sync picked keeps
+    // that preset and its overrides, so the sync updates the tray metadata only. User presets carry
+    // their system parent's filament_id.
     auto synced_preset_name = [this](const std::string &current_name, const std::string &ams_name) -> std::string {
-        if (current_name.empty() || current_name == ams_name)
-            return ams_name;
         const Preset *current = filaments.find_preset(current_name, false);
-        if (current == nullptr)
-            return ams_name;
-        std::set<std::string> visited;
-        for (const Preset *parent = filaments.get_preset_parent(*current);
-             parent != nullptr && visited.insert(parent->name).second;
-             parent = filaments.get_preset_parent(*parent)) {
-            if (parent->name == ams_name)
-                return current_name;
-        }
-        return ams_name;
+        const Preset *synced  = filaments.find_preset(ams_name, false);
+        return current && synced && !current->is_system && current->is_compatible &&
+               !synced->filament_id.empty() && current->filament_id == synced->filament_id ? current_name : ams_name;
     };
 
     if (color_only) {
@@ -4948,9 +4939,10 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
                                       ams_multi_color_filment.end());
         if (need_append_colors.size() > 0 && enable_append) {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "need_append_colors.size() > 0 && enable_append";
-            auto get_idx_in_array = [](std::vector<std::string> &presets, std::vector<std::string> &colors, const std::string &preset, const std::string &color) -> int {
+            // A slot that kept a user preset for the tray's filament counts as that filament too.
+            auto get_idx_in_array = [&synced_preset_name](std::vector<std::string> &presets, std::vector<std::string> &colors, const std::string &preset, const std::string &color) -> int {
                 for (size_t i = 0; i < presets.size(); i++) {
-                    if (presets[i] == preset && colors[i] == color) {
+                    if (synced_preset_name(presets[i], preset) == presets[i] && colors[i] == color) {
                         return i;
                     }
                 }
@@ -5001,8 +4993,8 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
                     // Loaded tray: use tray's filament data
                     result_colors.push_back(ams_filament_colors[i]);
                     result_color_types.push_back(ams_filament_color_types[i]);
-                    // exist_presets[i] is the current preset for this slot; keep it when it derives
-                    // from the incoming AMS preset.
+                    // exist_presets[i] is the current preset for this slot; keep it when it is a user
+                    // preset for the same filament.
                     result_presets.push_back(i < exist_presets.size()
                                                  ? synced_preset_name(exist_presets[i], ams_filament_presets[i])
                                                  : ams_filament_presets[i]);
@@ -5039,19 +5031,11 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
             // BBL: existing wholesale replace
             filament_color->values = ams_filament_colors;
             filament_color_type->values = ams_filament_color_types;
-            // ams_filament_presets omits empty trays, so compare against the current presets
-            // only when every tray contributed an entry and the slot counts still match;
-            // otherwise the positions do not line up and a preset could be kept for the wrong slot.
-            if (ams_filament_presets.size() == ams_infos.size() &&
-                ams_filament_presets.size() == this->filament_presets.size()) {
-                std::vector<std::string> synced_presets;
-                synced_presets.reserve(ams_filament_presets.size());
-                for (size_t i = 0; i < ams_filament_presets.size(); i++)
-                    synced_presets.push_back(synced_preset_name(this->filament_presets[i], ams_filament_presets[i]));
-                this->filament_presets = std::move(synced_presets);
-            } else {
-                this->filament_presets = ams_filament_presets;
-            }
+            // Empty trays are left out of ams_filament_presets, so slot i may now hold a later tray.
+            // That is harmless here: a slot only keeps its preset when it is for the same filament.
+            for (size_t i = 0; i < std::min(ams_filament_presets.size(), this->filament_presets.size()); i++)
+                ams_filament_presets[i] = synced_preset_name(this->filament_presets[i], ams_filament_presets[i]);
+            this->filament_presets = ams_filament_presets;
             filament_map->values.resize(ams_filament_colors.size(), 1);
             filament_volume_map->values.resize(ams_filament_colors.size(), static_cast<int>(NozzleVolumeType::nvtStandard));
         }
