@@ -8118,7 +8118,7 @@ void PrintConfigDef::init_fff_params()
 
     def             = this->add("nozzle_temperature_flow", coInts);
     def->label      = L("Flow");
-    def->tooltip    = L("Slow flow layers");
+    def->tooltip    = L("Average layer flow rate for which slow layer temperature is used.");
     def->sidetext   = L(u8"mm³/s");
     def->full_label = L("Nozzle slow flow");
     def->min        = 0;
@@ -8127,7 +8127,8 @@ void PrintConfigDef::init_fff_params()
 
     def             = this->add("nozzle_temperature_slow", coInts);
     def->label      = L("Slow layer");
-    def->tooltip    = L("Nozzle temperature for slow printing after the first layer");
+    def->tooltip    = L("Nozzle temperature for slow printing."
+                        "It's interpolated between the regular nozzle temperature and the temperature for the small flow.");
     def->sidetext   = L(u8"\u2103" /* °C */); // degrees Celsius, CIS languages need translation
     def->full_label = L("Nozzle slow temperature");
     def->min        = 0;
