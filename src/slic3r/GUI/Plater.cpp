@@ -11516,20 +11516,20 @@ Plater::SplitResult Plater::priv::split_object(int obj_idx, bool auto_drop /* = 
         };
         // The question is answered, or asked, before anything changes.
         bool split_auto_drop = auto_drop;
-        if (current_model_object->auto_drop && is_atleast_one_floating()) {
-            if (keep_z) {
-                if (*keep_z)
-                    split_auto_drop = false;
-            } else if (!ask) {
-                return SplitResult::Unanswered;
-            } else {
-                MessageDialog dlg(q, _L("Disable Auto-Drop to preserve Z positioning?\n"),
-                                      _L("Object with floating parts was detected"), wxICON_QUESTION | wxYES_NO);
+        //if (current_model_object->auto_drop && is_atleast_one_floating()) {
+        //    if (keep_z) {
+        //        if (*keep_z)
+        //            split_auto_drop = false;
+        //    } else if (!ask) {
+        //        return SplitResult::Unanswered;
+        //    } else {
+        //        MessageDialog dlg(q, _L("Disable Auto-Drop to preserve Z positioning?\n"),
+        //                              _L("Object with floating parts was detected"), wxICON_QUESTION | wxYES_NO);
 
-                if (dlg.ShowModal() == wxID_YES)
-                    split_auto_drop = false;
-            }
-        }
+        //        if (dlg.ShowModal() == wxID_YES)
+        //            split_auto_drop = false;
+        //    }
+        //}
 
         Plater::TakeSnapshot snapshot(q, _u8L("Split to Objects"));
 
